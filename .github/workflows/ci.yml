@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  format:
+    name: Format (StyLua)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ok-nick/setup-aftman@v0.4.2
+      - run: stylua --check src/ tests/
+
+  lint:
+    name: Lint (Selene)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ok-nick/setup-aftman@v0.4.2
+      # Uses the pinned lasertag.yml standard library, so no API dump download.
+      - run: selene src/ tests/
+
+  test:
+    name: Unit tests (Luau CLI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Luau CLI
+        run: |
+          TAG=$(curl -sS https://api.github.com/repos/luau-lang/luau/releases/latest | grep -m1 '"tag_name"' | cut -d'"' -f4)
+          curl -sSL -o luau.zip "https://github.com/luau-lang/luau/releases/download/${TAG}/luau-ubuntu.zip"
+          unzip -o luau.zip
+          chmod +x luau
+      - run: ./luau tests/run.luau
+
+  build:
+    name: Build place (Rojo)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ok-nick/setup-aftman@v0.4.2
+      - run: rojo build default.project.json -o LaserTag.rbxlx
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LaserTag-place
+          path: LaserTag.rbxlx

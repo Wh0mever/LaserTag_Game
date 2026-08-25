@@ -1,0 +1,325 @@
+---
+# Selene standard library for this project.
+#
+# `selene generate-roblox-std` downloads the Roblox API dump at lint time, which
+# makes linting depend on the network and on whatever Roblox shipped that day.
+# This file pins the Roblox surface the project actually uses instead, so the
+# same lint runs locally, in CI and offline.
+#
+# Add an entry here when you start using a Roblox global that is not yet listed;
+# `undefined_variable` will tell you exactly which one is missing.
+
+base: luau
+name: lasertag
+
+globals:
+  # Instance roots. These are `full-write` so selene does not try to validate
+  # arbitrary instance paths (script.Parent.Config.WeaponConfig, game:GetService
+  # (...):WaitForChild(...)) — those are resolved by Rojo and by Roblox at
+  # runtime, not by the linter.
+  game:
+    property: full-write
+  workspace:
+    property: full-write
+  script:
+    property: full-write
+  shared:
+    property: full-write
+  plugin:
+    property: full-write
+
+  # Core functions
+  typeof:
+    args:
+      - type: any
+  tick:
+    args: []
+  time:
+    args: []
+  elapsedTime:
+    args: []
+  warn:
+    args:
+      - type: "..."
+        required: false
+  DebuggerManager:
+    args: []
+  settings:
+    args: []
+  UserSettings:
+    args: []
+  version:
+    args: []
+  gcinfo:
+    args: []
+
+  # Deprecated scheduling — flagged so the code keeps using the task library.
+  wait:
+    args:
+      - type: number
+        required: false
+  spawn:
+    args:
+      - type: function
+  delay:
+    args:
+      - type: number
+      - type: function
+
+  # Instances
+  Instance.new:
+    args:
+      - type: string
+      - type: any
+        required: false
+  # Enum members are not enumerated on purpose: accepting any Enum.Category.Value
+  # keeps this file stable across Roblox releases.
+  Enum:
+    property: full-write
+
+  # Data types
+  Vector3.new:
+    args:
+      - type: number
+        required: false
+      - type: number
+        required: false
+      - type: number
+        required: false
+  Vector3.zero:
+    property: read-only
+  Vector3.one:
+    property: read-only
+  Vector3.xAxis:
+    property: read-only
+  Vector3.yAxis:
+    property: read-only
+  Vector3.zAxis:
+    property: read-only
+  Vector3.FromNormalId:
+    args:
+      - type: any
+  Vector3int16.new:
+    args:
+      - type: number
+        required: false
+      - type: number
+        required: false
+      - type: number
+        required: false
+
+  Vector2.new:
+    args:
+      - type: number
+        required: false
+      - type: number
+        required: false
+
+  CFrame.new:
+    args:
+      - type: "..."
+        required: false
+  CFrame.Angles:
+    args:
+      - type: number
+      - type: number
+      - type: number
+  CFrame.fromEulerAnglesXYZ:
+    args:
+      - type: number
+      - type: number
+      - type: number
+  CFrame.fromEulerAnglesYXZ:
+    args:
+      - type: number
+      - type: number
+      - type: number
+  CFrame.lookAt:
+    args:
+      - type: any
+      - type: any
+      - type: any
+        required: false
+  CFrame.fromMatrix:
+    args:
+      - type: "..."
+        required: false
+  CFrame.fromAxisAngle:
+    args:
+      - type: any
+      - type: number
+  CFrame.identity:
+    property: read-only
+
+  Color3.new:
+    args:
+      - type: number
+        required: false
+      - type: number
+        required: false
+      - type: number
+        required: false
+  Color3.fromRGB:
+    args:
+      - type: number
+        required: false
+      - type: number
+        required: false
+      - type: number
+        required: false
+  Color3.fromHSV:
+    args:
+      - type: number
+      - type: number
+      - type: number
+  Color3.fromHex:
+    args:
+      - type: string
+
+  UDim.new:
+    args:
+      - type: number
+        required: false
+      - type: number
+        required: false
+  UDim2.new:
+    args:
+      - type: "..."
+        required: false
+  UDim2.fromScale:
+    args:
+      - type: number
+      - type: number
+  UDim2.fromOffset:
+    args:
+      - type: number
+      - type: number
+
+  TweenInfo.new:
+    args:
+      - type: number
+        required: false
+      - type: any
+        required: false
+      - type: any
+        required: false
+      - type: number
+        required: false
+      - type: bool
+        required: false
+      - type: number
+        required: false
+
+  NumberRange.new:
+    args:
+      - type: number
+      - type: number
+        required: false
+  NumberSequence.new:
+    args:
+      - type: "..."
+        required: false
+  NumberSequenceKeypoint.new:
+    args:
+      - type: number
+      - type: number
+      - type: number
+        required: false
+  ColorSequence.new:
+    args:
+      - type: "..."
+        required: false
+  ColorSequenceKeypoint.new:
+    args:
+      - type: number
+      - type: any
+
+  BrickColor.new:
+    args:
+      - type: "..."
+        required: false
+  BrickColor.random:
+    args: []
+
+  Rect.new:
+    args:
+      - type: "..."
+        required: false
+  Region3.new:
+    args:
+      - type: any
+      - type: any
+  Ray.new:
+    args:
+      - type: any
+      - type: any
+
+  RaycastParams.new:
+    args: []
+  OverlapParams.new:
+    args: []
+  PhysicalProperties.new:
+    args:
+      - type: "..."
+        required: false
+  Font.new:
+    args:
+      - type: string
+      - type: any
+        required: false
+      - type: any
+        required: false
+  Font.fromEnum:
+    args:
+      - type: any
+  Font.fromName:
+    args:
+      - type: string
+      - type: any
+        required: false
+      - type: any
+        required: false
+
+  Random.new:
+    args:
+      - type: number
+        required: false
+
+  DateTime.now:
+    args: []
+  DateTime.fromUnixTimestamp:
+    args:
+      - type: number
+
+  TextChatMessage:
+    property: read-only
+
+  # Luau task library (already in the luau base for newer selene versions, but
+  # spelled out here so the lint does not depend on that).
+  task.wait:
+    args:
+      - type: number
+        required: false
+  task.spawn:
+    args:
+      - type: any
+      - type: "..."
+        required: false
+  task.defer:
+    args:
+      - type: any
+      - type: "..."
+        required: false
+  task.delay:
+    args:
+      - type: number
+      - type: any
+      - type: "..."
+        required: false
+  task.cancel:
+    args:
+      - type: any
+  task.synchronize:
+    args: []
+  task.desynchronize:
+    args: []

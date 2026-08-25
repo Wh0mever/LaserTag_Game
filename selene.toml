@@ -1,0 +1,32 @@
+# See lasertag.yml — a pinned Roblox surface, so linting never depends on the
+# network or on whichever API dump Roblox shipped today.
+std = "lasertag"
+
+exclude = ["src/server/Vendor/**"]
+
+[rules]
+almost_swapped = "deny"
+bad_string_escape = "deny"
+compare_nan = "deny"
+constant_table_comparison = "deny"
+deprecated = "warn"
+divide_by_zero = "warn"
+duplicate_keys = "deny"
+empty_if = "warn"
+empty_loop = "warn"
+global_usage = "warn"
+high_exit_code = "warn"
+if_same_then_else = "warn"
+ifs_same_cond = "deny"
+incorrect_standard_library_use = "deny"
+mismatched_arg_count = "deny"
+multiple_statements = "allow"
+must_use = "warn"
+parenthese_conditions = "allow"
+shadowing = "allow"
+suspicious_reverse_loop = "deny"
+type_check_inside_call = "deny"
+unbalanced_assignments = "deny"
+undefined_variable = "deny"
+unscoped_variables = "deny"
+unused_variable = "warn"
