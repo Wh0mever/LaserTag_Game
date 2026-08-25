@@ -228,9 +228,13 @@ function QueueService.poll()
 		local membersChanged = not sameMembers(previous, list)
 		queues[mapId] = list
 
-		if membersChanged then
-			MatchService.onQueueChanged(mapId, list)
-		end
+		-- Sent every poll rather than only when membership moves. MatchRuntime
+		-- drops the list while it is holding on Results or while its roster is
+		-- full, and nothing else would ever replay it: players standing still on
+		-- the pad would then wait forever. Both consumers treat an unchanged
+		-- list as a no-op, so re-sending cannot restart a countdown or seat a
+		-- joiner twice.
+		MatchService.onQueueChanged(mapId, list)
 
 		-- Published after the diff so the sign and the HUD show the phase the
 		-- queue change has already produced rather than the one before it.

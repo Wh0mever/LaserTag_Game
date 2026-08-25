@@ -245,12 +245,16 @@ local function onQueueUpdate(mapId: string, count: number, needed: number, count
 	ClientState.QueueChanged:Fire(mapId, count or 0, needed or 0, countdown)
 end
 
-local function onAmmoSync(weaponId: string, mag: number, magSize: number, reloading: boolean)
+local function onAmmoSync(weaponId: string, mag: number, magSize: number, reloading: boolean, ackSeq: number?)
 	ClientState.ammo = {
 		weaponId = weaponId,
 		mag = mag or 0,
 		magSize = magSize or 0,
 		reloading = reloading == true,
+		-- The last shot the server's count already accounts for; WeaponClient
+		-- uses it to tell a correction apart from a sync that predates shots
+		-- still travelling to the server.
+		ackSeq = if type(ackSeq) == "number" then ackSeq else 0,
 	}
 	ClientState.AmmoChanged:Fire(ClientState.ammo)
 end

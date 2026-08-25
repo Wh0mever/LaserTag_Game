@@ -14,9 +14,11 @@
 	The magazine is predicted the same way and corrected by AmmoSync, which is
 	the server's WeaponState speaking. The one subtlety is ordering: a sync that
 	left the server before our most recent shots arrived would visibly hand
-	rounds back, so a server count that is HIGHER than ours is only accepted once
-	the shots in flight have had a round trip to land. A LOWER count is always
-	accepted immediately — that is the server telling us a shot was refused.
+	rounds back. Each sync therefore carries the last shot it accounts for, and a
+	count HIGHER than ours is accepted as soon as that reaches the last shot we
+	sent — at that point nothing is in flight, so the server is correcting a shot
+	it refused rather than lagging behind. Until then the higher count waits out
+	a short grace. A LOWER count is always accepted immediately.
 
 	`seq` is a strictly increasing per-shot counter. Combat/ShootValidation drops
 	any ShootRequest whose seq is not above the last one it accepted, so a packet
@@ -315,14 +317,19 @@ local function reconcile(ammo)
 	-- which the completion sync then corrects.
 	state.reloadUntil = if state.reloading then os.clock() + weapon.reloadTime else 0
 
-	local stale = ammo.mag > state.mag and (os.clock() - lastLocalShotAt) < RECONCILE_GRACE
+	-- A server count higher than ours is either a correction for a shot it
+	-- refused, or a sync that left before our latest shots arrived. `ackSeq`
+	-- separates them: once the server has processed everything we have sent,
+	-- there is nothing in flight and its count is simply the truth.
+	local caughtUp = type(ammo.ackSeq) == "number" and ammo.ackSeq >= seq
+	local stale = ammo.mag > state.mag and not caughtUp and (os.clock() - lastLocalShotAt) < RECONCILE_GRACE
 	if not stale then
 		state.mag = ammo.mag
 	end
 
-	if ammo.weaponId == currentWeaponId then
-		publish()
-	end
+	-- Published unconditionally: a sync for the stowed weapon must still leave
+	-- ClientState.ammo describing the weapon actually in hand.
+	publish()
 end
 
 --------------------------------------------------------------------------------

@@ -97,10 +97,25 @@ end
 	here is safe because the client's counter only ever moves forward.
 ]]
 function WeaponState.reset(player: Player)
+	local previous = states[player]
 	local perPlayer = {}
+
 	for _, weaponId in WeaponConfig.Order do
-		perPlayer[weaponId] = freshEntry(weaponId)
+		local entry = freshEntry(weaponId)
+
+		-- Everything else starts over on a new life, but the accepted sequence
+		-- number carries across: the client's counter never restarts, so zeroing
+		-- this would both re-open a window for replaying a captured shot from the
+		-- previous life and leave the client unable to tell a correction from a
+		-- sync that predates its latest shots.
+		local carried = previous and previous[weaponId]
+		if carried then
+			entry.lastSeq = carried.lastSeq
+		end
+
+		perPlayer[weaponId] = entry
 	end
+
 	states[player] = perPlayer
 end
 

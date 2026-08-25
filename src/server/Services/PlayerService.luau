@@ -160,6 +160,15 @@ function PlayerService.giveWeapons(player: Player)
 		return
 	end
 
+	-- Weapons only exist inside a match. Equipping a skin from the shop also
+	-- routes here to refresh the model, and without this guard that would arm a
+	-- player standing in the hub. spawnInMatch sets InMatch before it calls
+	-- this, so the match path is unaffected.
+	if (player:GetAttribute("InMatch") or "") == "" then
+		PlayerService.clearWeapons(player)
+		return
+	end
+
 	PlayerService.clearWeapons(player)
 
 	local models: { [string]: Model } = {}

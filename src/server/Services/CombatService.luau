@@ -89,7 +89,13 @@ local function pushAmmo(player: Player, weaponId: string)
 
 	local entry = WeaponState.get(player, weaponId)
 	local reloading = WeaponState.isReloading(player, weaponId, workspace:GetServerTimeNow())
-	Remotes.fireClient(RemoteNames.AmmoSync, player, weaponId, entry.mag, weapon.magSize, reloading)
+
+	-- `lastSeq` is the last shot this magazine count already accounts for. The
+	-- client compares it against the last shot it sent: once the server has
+	-- caught up, a count higher than the client's own is a correction (a refused
+	-- shot handing the round back), not a sync that predates shots still in
+	-- flight. Without it the client cannot tell those two apart.
+	Remotes.fireClient(RemoteNames.AmmoSync, player, weaponId, entry.mag, weapon.magSize, reloading, entry.lastSeq)
 end
 
 local function beamColor(player: Player, weaponId: string): Color3
@@ -115,15 +121,27 @@ local function registerKill(killer: Player, victim: Player, weaponId: string, is
 	-- A dead player's reload must not land during their respawn timer.
 	WeaponState.cancelAllReloads(victim)
 
-	Remotes.fireAllClients(
-		RemoteNames.KillFeedEvent,
-		killer.DisplayName,
-		TeamService.getTeamId(killer),
-		victim.DisplayName,
-		TeamService.getTeamId(victim),
-		weaponId,
-		isHeadshot
-	)
+	-- Both maps run their own match at the same time, so the feed is addressed
+	-- to the map the kill happened on. Routing by the victim rather than the
+	-- killer is deliberate: the victim is always still in that match, while the
+	-- killer may already have left it.
+	local mapId = victim:GetAttribute("InMatch")
+	if type(mapId) == "string" and mapId ~= "" then
+		for _, other in Players:GetPlayers() do
+			if other:GetAttribute("InMatch") == mapId then
+				Remotes.fireClient(
+					RemoteNames.KillFeedEvent,
+					other,
+					killer.DisplayName,
+					TeamService.getTeamId(killer),
+					victim.DisplayName,
+					TeamService.getTeamId(victim),
+					weaponId,
+					isHeadshot
+				)
+			end
+		end
+	end
 end
 
 --[[
@@ -302,8 +320,19 @@ function CombatService.syncAmmo(player: Player, weaponId: string?)
 		return
 	end
 
+	-- The weapon in hand is sent LAST. Events to one client arrive in order, so
+	-- whichever sync lands last is the one the HUD ends up showing; sending the
+	-- stowed weapon first is what stops a fresh spawn from displaying the
+	-- pistol's magazine while the player is holding the rifle.
+	local current = player:GetAttribute("CurrentWeapon")
 	for _, id in WeaponConfig.Order do
-		pushAmmo(player, id)
+		if id ~= current then
+			pushAmmo(player, id)
+		end
+	end
+
+	if WeaponConfig.exists(current) then
+		pushAmmo(player, current)
 	end
 end
 
