@@ -94,6 +94,18 @@ function VFXSound.has(key: string): boolean
 	return flat[key] ~= nil
 end
 
+--[[
+	The asset id behind a key, or nil if there is none.
+
+	Exposed so the sound table can be checked rather than trusted: an id that is
+	malformed, or a leftover engine-local placeholder, loads as silence in a
+	published place, and silence is the one failure nobody notices in review.
+]]
+function VFXSound.soundId(key: string): string?
+	local sound = flat[key]
+	return sound and sound.SoundId or nil
+end
+
 function VFXSound.getGroup(): SoundGroup?
 	return group
 end

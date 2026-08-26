@@ -171,6 +171,22 @@ for _, weaponId in WeaponConfig.Order do
 	check(VFXSound.has(weaponId), `{weaponId} has a firing sound`)
 end
 
+-- Every sound must be a real uploaded asset. An engine-local `rbxasset://`
+-- path is a development placeholder and a malformed id loads as silence, and
+-- neither announces itself — the game simply goes quiet in one place.
+local SOUND_KEYS = { "Impact", "Hitmarker", "Kill", "Reload", "Equip", "Empty", "Hurt" }
+for _, weaponId in WeaponConfig.Order do
+	table.insert(SOUND_KEYS, weaponId)
+end
+
+for _, key in SOUND_KEYS do
+	local id = VFXSound.soundId(key)
+	check(id ~= nil, `{key} has a sound id`)
+	if id then
+		check(id:match("^rbxassetid://%d+$") ~= nil, `{key} points at an uploaded asset (got "{id}")`)
+	end
+end
+
 --------------------------------------------------------------------------------
 -- What the run left behind
 --------------------------------------------------------------------------------
