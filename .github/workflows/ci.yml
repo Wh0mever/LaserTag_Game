@@ -92,6 +92,17 @@ jobs:
         run: |
           "${LUAU_BIN}" tests/run.luau
 
+  harness:
+    name: Execute Roblox code (Lune)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ok-nick/setup-aftman@v0.4.2
+      # Most of this repository only runs inside Roblox. The harness executes it
+      # against Lune's real Instance/CFrame/Enum implementations, so a bad
+      # property or a broken map definition fails here rather than in a playtest.
+      - run: lune run tests/harness/run
+
   build:
     name: Build place (Rojo)
     runs-on: ubuntu-latest
