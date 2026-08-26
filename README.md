@@ -29,9 +29,15 @@ visit the shop, change a skin or spin the reward wheel.
 |---|---|---|
 | **Dust** | Песчаная арена в пустынном стиле | симметричная, три линии атаки |
 | **Mirage** | Неоновая арена: фиолетовые стены, белый кант, зелёные комнаты | симметричная, узкие коридоры |
+| **Nexus** | Промышленная арена в стали и голубом неоне | симметричная, бой за высоту |
 
 Каждая карта симметрична, полностью закрыта и имеет две защищённые комнаты спавна с
 односторонними энергетическими дверями: своя команда проходит насквозь, чужая упирается в барьер.
+
+Карты различаются по типу боя: Dust — открытые линии, Mirage — тесные помещения, Nexus добавляет
+третью ось. В центре Nexus поднятая платформа с обзором на всю арену, к ней ведут четыре пандуса,
+под ней — крытый проход, а по краям идут мостики на той же высоте. Отсюда выбор: занять высоту и
+быть открытым с трёх сторон или идти низом.
 
 ### Оружие / Weapons
 
@@ -39,6 +45,7 @@ visit the shop, change a skin or spin the reward wheel.
 |---|---|---|---|---|---|
 | **Pulse Rifle** | автоматический, 600 в/мин | 22 (голова ×2) | 30 | 2.2 с | спрей как в CS2: подъём → снос вправо → снос влево |
 | **Ion Pistol** | полуавтоматический | 34 (голова ×1.75) | 12 | 1.4 с | почти вертикальная отдача, сильный первый выстрел |
+| **Arc Lance** | полуавтоматический, дальний | 55 (голова ×1.9 — сразу насмерть) | 6 | 2.6 с | самый точный первый выстрел и самый жёсткий штраф за спам |
 
 Отдача **детерминированная**: одинаковый номер выстрела всегда даёт одинаковый толчок камеры, поэтому
 паттерн можно выучить и «прожимать» вниз, как в CS2. При этом разброс, который влияет на попадание,
@@ -71,7 +78,7 @@ grows while you hold the trigger and resets when you pause: tapping beats sprayi
 | Поворот камеры | Движение мышью |
 | Стрелять | **Левая кнопка мыши** (удерживать для автомата) |
 | Перезарядка | **R** |
-| Смена оружия | **1** / **2** |
+| Смена оружия | **1** / **2** / **3** |
 | Таблица счёта | **Tab** (удерживать) |
 | Экипировка | **E** |
 | Магазин | **Q** |
@@ -96,7 +103,7 @@ src/shared/     ReplicatedStorage.Shared — общий контракт кли�
   Config/                              WeaponConfig, SprayPatterns, GameConfig,
                                        EconomyConfig, SkinCatalog, SpinConfig
   Util/                                TableUtil, MathUtil, Signal, Trove
-  MapDefs/                             декларативные описания карт (Hub, Dust, Mirage)
+  MapDefs/                             декларативные описания карт (Hub, Dust, Mirage, Nexus)
   GunModelFactory                      программная сборка моделей оружия
   Loader                               двухпроходная загрузка модулей: init() → start()
 
@@ -104,7 +111,8 @@ src/server/     ServerScriptService.Server
   Net/          Remotes, RateLimiter, RateLimiterCore, Validators
   Services/     DataService, TeamService, WorldService, PlayerService,
                 QueueService, MatchService, CombatService,
-                ShopService, SpinService, FriendsService, LeaderboardService
+                ShopService, SpinService, FriendsService, LeaderboardService,
+                AnalyticsService
   Match/        MatchStateMachine (чистая FSM), MatchRuntime
   Combat/       DamageCalc, ShootValidation, WeaponState
   Economy/      ShopLogic, SpinLogic
@@ -114,11 +122,14 @@ src/server/     ServerScriptService.Server
 src/client/     StarterPlayer.StarterPlayerScripts.Client
   ClientState                          единое хранилище состояния клиента + сигналы
   Controllers/                         Input, MouseLock, Camera, CharacterVisuals,
-                                       Viewmodel, Recoil, WeaponClient, VFX,
-                                       Spectator, MobileControls
+                                       CharacterAnimator, Viewmodel, Recoil,
+                                       WeaponClient, VFX, Spectator,
+                                       MobileControls, Quality
   UI/                                  UIController, UITheme, Components/, Screens/
 
 tests/          юнит-тесты чистых модулей, запускаются вне Roblox через Luau CLI
+  harness/      исполнение Roblox-кода вне Studio через Lune: загрузка всех модулей,
+                постройка всех карт, сборка всего оружия, старт всех контроллеров
 ```
 
 ### Принципы / Design rules
@@ -153,6 +164,7 @@ rojo build default.project.json -o LaserTag.rbxlx
 stylua --check src/ tests/     # форматирование
 selene src/ tests/             # линт (использует lasertag.yml, сеть не нужна)
 luau tests/run.luau            # юнит-тесты чистых модулей
+lune run tests/harness/run     # исполнение Roblox-кода вне Studio
 rojo build default.project.json -o /tmp/check.rbxlx
 ```
 

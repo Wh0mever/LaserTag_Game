@@ -1,8 +1,10 @@
 --!nonstrict
+local Constants = require("../src/shared/Constants")
 local DustDef = require("../src/shared/MapDefs/DustDef")
 local GameConfig = require("../src/shared/Config/GameConfig")
 local HubDef = require("../src/shared/MapDefs/HubDef")
 local MirageDef = require("../src/shared/MapDefs/MirageDef")
+local NexusDef = require("../src/shared/MapDefs/NexusDef")
 
 -- Every kind MapBuilder knows how to interpret. A def using anything else would
 -- silently build nothing, so the set is asserted rather than assumed.
@@ -58,6 +60,7 @@ return function(t)
 		{ name = "Hub", def = HubDef },
 		{ name = "Dust", def = DustDef },
 		{ name = "Mirage", def = MirageDef },
+		{ name = "Nexus", def = NexusDef },
 	}
 
 	-- Shape of every def --------------------------------------------------
@@ -142,7 +145,7 @@ return function(t)
 
 	-- Hub specifics --------------------------------------------------------
 	local portals = elementsOfKind(HubDef, "portal")
-	t.equal(#portals, 2, "the hub has exactly two portals")
+	t.equal(#portals, #Constants.MAPS, "the hub has one portal per playable map")
 
 	local portalMaps = {}
 	for _, portal in portals do
@@ -152,8 +155,12 @@ return function(t)
 			`hub portal to {tostring(portal.mapId)} has a walk-on pad`
 		)
 	end
-	t.equal(portalMaps.Dust, 1, "the hub has exactly one Dust portal")
-	t.equal(portalMaps.Mirage, 1, "the hub has exactly one Mirage portal")
+	-- Derived from Constants.MAPS rather than named one by one: the hub must
+	-- carry a portal for exactly the maps the rest of the game thinks are
+	-- playable, and adding a map should fail here if its portal was forgotten.
+	for _, mapId in Constants.MAPS do
+		t.equal(portalMaps[mapId], 1, `the hub has exactly one {mapId} portal`)
+	end
 
 	local lobbySpawns = elementsOfKind(HubDef, "lobbySpawn")
 	t.expect(#lobbySpawns >= 1, "the hub has at least one lobbySpawn")
@@ -176,7 +183,9 @@ return function(t)
 	t.expect(#elementsOfKind(HubDef, "wall") >= 4, "the hub is enclosed by at least four walls")
 
 	-- Playable maps --------------------------------------------------------
-	for _, entry in { { name = "Dust", def = DustDef }, { name = "Mirage", def = MirageDef } } do
+	for _, entry in
+		{ { name = "Dust", def = DustDef }, { name = "Mirage", def = MirageDef }, { name = "Nexus", def = NexusDef } }
+	do
 		local rooms = elementsOfKind(entry.def, "spawnRoom")
 		t.equal(#rooms, 2, `{entry.name} has exactly two spawn rooms`)
 

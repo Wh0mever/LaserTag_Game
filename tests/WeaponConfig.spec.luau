@@ -2,10 +2,11 @@
 local WeaponConfig = require("../src/shared/Config/WeaponConfig")
 
 return function(t)
-	-- Both weapons exist with the slots the hotbar expects.
+	-- Every weapon exists at the slot the hotbar expects.
 	t.equal(WeaponConfig.fromSlot(1), "Rifle", "slot 1 is the rifle")
 	t.equal(WeaponConfig.fromSlot(2), "Pistol", "slot 2 is the pistol")
-	t.equal(WeaponConfig.fromSlot(3), nil, "there is no third slot")
+	t.equal(WeaponConfig.fromSlot(3), "Lance", "slot 3 is the lance")
+	t.equal(WeaponConfig.fromSlot(#WeaponConfig.Order + 1), nil, "there is no slot past the last weapon")
 
 	t.expect(WeaponConfig.exists("Rifle"), "exists accepts a real weapon")
 	t.expect(not WeaponConfig.exists("RocketLauncher"), "exists rejects an unknown weapon")

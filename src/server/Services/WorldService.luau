@@ -20,6 +20,7 @@ local HubDef = require(Shared.MapDefs.HubDef)
 local LightingSetup = require(script.Parent.Parent.World.LightingSetup)
 local MapBuilder = require(script.Parent.Parent.World.MapBuilder)
 local MirageDef = require(Shared.MapDefs.MirageDef)
+local NexusDef = require(Shared.MapDefs.NexusDef)
 local SpawnDoors = require(script.Parent.Parent.World.SpawnDoors)
 
 local WorldService = {}
@@ -28,7 +29,7 @@ WorldService.Priority = 3
 
 -- Build order matters only for logging; the hub is first because it is where
 -- everyone lands.
-local DEFS = { HubDef, DustDef, MirageDef }
+local DEFS = { HubDef, DustDef, MirageDef, NexusDef }
 
 -- Above every map so a fallback spawn can never drop a player through the floor.
 local FALLBACK_SPAWN_HEIGHT = 12

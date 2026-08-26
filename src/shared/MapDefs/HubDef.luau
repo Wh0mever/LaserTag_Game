@@ -71,20 +71,28 @@ for index, from in corners do
 end
 
 -- Portals -----------------------------------------------------------------
--- Exactly two, one per playable map. QueueService reads padPart from the
--- BuildResult and writes queue counts into the SurfaceGui's "Status" label.
+-- One per playable map, spread evenly across the plaza so no pad is the
+-- obvious default. QueueService reads padPart from the BuildResult and writes
+-- queue counts into the SurfaceGui's "Status" label.
 
 add({
 	kind = "portal",
 	mapId = "Dust",
-	pos = { x = -44, y = 0, z = -48 },
+	pos = { x = -60, y = 0, z = -48 },
 	padSize = { x = 20, y = 1.2, z = 20 },
 })
 
 add({
 	kind = "portal",
 	mapId = "Mirage",
-	pos = { x = 44, y = 0, z = -48 },
+	pos = { x = 0, y = 0, z = -48 },
+	padSize = { x = 20, y = 1.2, z = 20 },
+})
+
+add({
+	kind = "portal",
+	mapId = "Nexus",
+	pos = { x = 60, y = 0, z = -48 },
 	padSize = { x = 20, y = 1.2, z = 20 },
 })
 
@@ -229,6 +237,7 @@ local HubDef = {
 		Board = { r = 26, g = 30, b = 42 },
 		PortalDust = { r = 240, g = 186, b = 92 },
 		PortalMirage = { r = 168, g = 112, b = 246 },
+		PortalNexus = { r = 0, g = 229, b = 255 },
 	},
 
 	elements = elements,

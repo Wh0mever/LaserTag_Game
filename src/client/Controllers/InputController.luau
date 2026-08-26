@@ -208,13 +208,19 @@ function InputController.init()
 		InputController.ReloadPressed:Fire()
 	end)
 
-	bind("Slot1", function()
-		InputController.SlotPressed:Fire(1)
-	end)
-
-	bind("Slot2", function()
-		InputController.SlotPressed:Fire(2)
-	end)
+	-- Bound from Constants.SLOTS rather than one call per slot: adding a weapon
+	-- should not need an edit here, and a slot with no keybind would otherwise
+	-- be silently unreachable on a keyboard.
+	for slot in Constants.SLOTS do
+		local bindName = `Slot{slot}`
+		if Constants.KEYBINDS[bindName] then
+			bind(bindName, function()
+				InputController.SlotPressed:Fire(slot)
+			end)
+		else
+			warn(`[InputController] slot {slot} has no {bindName} keybind; it can only be reached by clicking`)
+		end
+	end
 
 	for bindName, menuName in MENU_BINDS do
 		bind(bindName, function()

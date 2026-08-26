@@ -54,12 +54,22 @@ local MapBuilder = Env.load("src/server/World/MapBuilder")
 print("  MapBuilder loaded")
 
 local GameConfig = Env.load("src/shared/Config/GameConfig")
+local Constants = Env.load("src/shared/Constants")
 print("  GameConfig loaded")
+
+-- Taken from Constants rather than written out here: the hub must carry a
+-- portal for exactly the maps the rest of the game believes are playable, and
+-- a second list would be one more place to forget.
+local PLAYABLE_MAPS: { [string]: boolean } = {}
+for _, mapId in Constants.MAPS do
+	PLAYABLE_MAPS[mapId] = true
+end
 
 local MAPS = {
 	{ id = "Hub", def = Env.load("src/shared/MapDefs/HubDef"), isHub = true },
 	{ id = "Dust", def = Env.load("src/shared/MapDefs/DustDef"), isHub = false },
 	{ id = "Mirage", def = Env.load("src/shared/MapDefs/MirageDef"), isHub = false },
+	{ id = "Nexus", def = Env.load("src/shared/MapDefs/NexusDef"), isHub = false },
 }
 print(`  {#MAPS} map definitions loaded`)
 
@@ -124,12 +134,15 @@ for _, entry in MAPS do
 
 	if entry.isHub then
 		check(built.spawns.Lobby ~= nil and #built.spawns.Lobby > 0, "hub has lobby spawns")
-		check(#built.portals == 2, `hub has two portals (got {#built.portals})`)
+		check(
+			#built.portals == #Constants.MAPS,
+			`hub has a portal per playable map (got {#built.portals}, want {#Constants.MAPS})`
+		)
 		check(built.boards ~= nil and built.boards.TopKills ~= nil, "hub has the TopKills board")
 
 		for _, portal in built.portals do
 			check(portal.padPart ~= nil, `portal {portal.mapId} has a pad part`)
-			check(portal.mapId == "Dust" or portal.mapId == "Mirage", `portal targets a real map ({portal.mapId})`)
+			check(PLAYABLE_MAPS[portal.mapId] == true, `portal targets a real map ({portal.mapId})`)
 		end
 	else
 		check(built.spawns.A ~= nil and #built.spawns.A > 0, "team A has spawns")

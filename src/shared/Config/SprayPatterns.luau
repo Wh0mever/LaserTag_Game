@@ -78,9 +78,23 @@ local PISTOL_KICK = {
 	{ pitch = 1.30, yaw = 0.00 },
 }
 
+-- Lance: 6 entries, one per round. A single heavy vertical punch with almost no
+-- horizontal wander — the shot itself is accurate, so the cost is that the
+-- muzzle ends up somewhere else and has to be pulled back down before the next
+-- one is worth taking.
+local LANCE_KICK = {
+	{ pitch = 2.60, yaw = 0.00 },
+	{ pitch = 2.80, yaw = -0.10 },
+	{ pitch = 3.00, yaw = 0.10 },
+	{ pitch = 3.20, yaw = -0.10 },
+	{ pitch = 3.40, yaw = 0.10 },
+	{ pitch = 3.60, yaw = 0.00 },
+}
+
 SprayPatterns.Kick = {
 	Rifle = RIFLE_KICK,
 	Pistol = PISTOL_KICK,
+	Lance = LANCE_KICK,
 }
 
 -- Server-side inaccuracy cone in degrees, keyed by how deep into the spray we
@@ -97,6 +111,15 @@ SprayPatterns.Spread = {
 		{ upTo = 3, degrees = 0.6 },
 		{ upTo = 6, degrees = 1.0 },
 		{ upTo = math.huge, degrees = 1.5 },
+	},
+	-- The Lance is pin-accurate on the first shot and useless sprayed: the cone
+	-- opens by an order of magnitude on the second. That, rather than raw
+	-- damage, is what keeps a two-shot-kill weapon from dominating close range.
+	Lance = {
+		{ upTo = 1, degrees = 0.04 },
+		{ upTo = 2, degrees = 1.4 },
+		{ upTo = 4, degrees = 3.0 },
+		{ upTo = math.huge, degrees = 4.5 },
 	},
 }
 

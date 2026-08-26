@@ -35,6 +35,7 @@ GameConfig.MAP_ORIGINS = {
 	Hub = { x = 0, y = 0, z = 0 },
 	Dust = { x = 2000, y = 0, z = 0 },
 	Mirage = { x = 4000, y = 0, z = 0 },
+	Nexus = { x = 6000, y = 0, z = 0 },
 }
 
 GameConfig.MIN_MAP_SEPARATION = 1500

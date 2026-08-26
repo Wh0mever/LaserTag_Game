@@ -30,15 +30,17 @@ Constants.TEAMS = {
 
 Constants.TEAM_IDS = { "A", "B" }
 
--- Weapon slots. Slot 1 is the rifle (primary), slot 2 the pistol (secondary).
+-- Weapon slots. Slot 1 is the rifle (primary), slot 2 the pistol (secondary),
+-- slot 3 the long-range lance.
 Constants.SLOTS = {
 	[1] = "Rifle",
 	[2] = "Pistol",
+	[3] = "Lance",
 }
 Constants.DEFAULT_SLOT = 1
 
 -- Maps. Ids are used as folder names, match keys and portal targets.
-Constants.MAPS = { "Dust", "Mirage" }
+Constants.MAPS = { "Dust", "Mirage", "Nexus" }
 Constants.HUB_ID = "Hub"
 
 -- Keybinds (PC). Mobile uses ContextActionService buttons instead.
@@ -46,6 +48,7 @@ Constants.KEYBINDS = {
 	Reload = "R",
 	Slot1 = "One",
 	Slot2 = "Two",
+	Slot3 = "Three",
 	Equip = "E",
 	Shop = "Q",
 	Friends = "F",

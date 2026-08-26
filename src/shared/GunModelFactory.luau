@@ -195,6 +195,70 @@ local function buildPistol(model: Model, handle: BasePart, accent: Color3)
 end
 
 --[[
+	The Arc Lance: long, front-heavy and obviously a marksman weapon at a
+	glance. Reading an enemy's weapon before they fire is part of how a fight is
+	decided, so the silhouette is deliberately unlike the other two — a long
+	barrel, a big scope and a charge coil rather than a compact body.
+]]
+local function buildLance(model: Model, handle: BasePart, accent: Color3)
+	handle.Size = Vector3.new(0.46, 0.62, 4.4)
+
+	addPart(model, handle, {
+		name = "Barrel",
+		size = Vector3.new(0.22, 0.22, 2.6),
+		offset = Vector3.new(0, 0.08, -2.6),
+		color = DETAIL_COLOR,
+	})
+	addPart(model, handle, {
+		name = "Scope",
+		size = Vector3.new(0.3, 0.3, 1.5),
+		offset = Vector3.new(0, 0.5, -0.5),
+		color = DETAIL_COLOR,
+	})
+	addPart(model, handle, {
+		name = "ScopeLens",
+		size = Vector3.new(0.22, 0.22, 0.1),
+		offset = Vector3.new(0, 0.5, -1.28),
+		color = accent,
+		material = Enum.Material.Neon,
+	})
+	addPart(model, handle, {
+		name = "Grip",
+		size = Vector3.new(0.34, 0.95, 0.5),
+		offset = Vector3.new(0, -0.72, 0.9),
+		color = BODY_COLOR,
+	})
+	addPart(model, handle, {
+		name = "Stock",
+		size = Vector3.new(0.4, 0.62, 1.1),
+		offset = Vector3.new(0, -0.16, 2.5),
+		color = BODY_COLOR,
+	})
+	addPart(model, handle, {
+		name = "Bipod",
+		size = Vector3.new(0.9, 0.12, 0.12),
+		offset = Vector3.new(0, -0.34, -1.9),
+		color = DETAIL_COLOR,
+	})
+	addPart(model, handle, {
+		name = "ChargeCoil",
+		size = Vector3.new(0.52, 0.52, 0.5),
+		offset = Vector3.new(0, 0.02, -1.2),
+		color = accent,
+		material = Enum.Material.Neon,
+	})
+	addPart(model, handle, {
+		name = "SkinStripe",
+		size = Vector3.new(0.49, 0.16, 2.6),
+		offset = Vector3.new(0, 0.24, 0),
+		color = accent,
+		material = Enum.Material.Neon,
+	})
+
+	addStuds(model, handle, { count = 4, spacing = 0.62, startZ = -0.4, y = 0.36, color = BODY_COLOR })
+end
+
+--[[
 	Build a weapon model.
 
 	`weaponId` must exist in WeaponConfig; `skinId` falls back to the default
@@ -233,6 +297,8 @@ function GunModelFactory.build(weaponId: string, skinId: string?): Model?
 
 	if weaponId == "Rifle" then
 		buildRifle(model, handle, accent)
+	elseif weaponId == "Lance" then
+		buildLance(model, handle, accent)
 	else
 		buildPistol(model, handle, accent)
 	end

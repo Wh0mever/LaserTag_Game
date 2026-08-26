@@ -95,10 +95,72 @@ SkinCatalog.Skins = {
 		isDefault = false,
 		pattern = "flame",
 	},
+	arctic = {
+		id = "arctic",
+		displayName = "Arctic",
+		price = 500,
+		rarity = "Common",
+		color = { r = 176, g = 232, b = 255 },
+		accentColor = { r = 60, g = 110, b = 150 },
+		isDefault = false,
+	},
+	ember = {
+		id = "ember",
+		displayName = "Ember",
+		price = 900,
+		rarity = "Rare",
+		color = { r = 255, g = 122, b = 26 },
+		accentColor = { r = 96, g = 32, b = 8 },
+		isDefault = false,
+	},
+	voidwalker = {
+		id = "voidwalker",
+		displayName = "Voidwalker",
+		price = 1800,
+		rarity = "Epic",
+		color = { r = 122, g = 62, b = 255 },
+		accentColor = { r = 24, g = 10, b = 48 },
+		isDefault = false,
+		pattern = "pulse",
+	},
+	prism = {
+		id = "prism",
+		displayName = "Prism",
+		price = 3200,
+		rarity = "Epic",
+		color = { r = 255, g = 128, b = 220 },
+		accentColor = { r = 90, g = 220, b = 255 },
+		isDefault = false,
+		pattern = "pulse",
+	},
+	eclipse = {
+		id = "eclipse",
+		displayName = "Eclipse",
+		price = 7500,
+		rarity = "Legendary",
+		color = { r = 255, g = 236, b = 168 },
+		accentColor = { r = 18, g = 16, b = 28 },
+		isDefault = false,
+		pattern = "flame",
+	},
 }
 
 -- Display order for the shop grid, cheapest first.
-SkinCatalog.Order = { "default", "crimson", "gold", "cyan", "toxic", "magenta", "galaxy", "dragon" }
+SkinCatalog.Order = {
+	"default",
+	"crimson",
+	"arctic",
+	"gold",
+	"cyan",
+	"toxic",
+	"ember",
+	"magenta",
+	"voidwalker",
+	"galaxy",
+	"prism",
+	"dragon",
+	"eclipse",
+}
 
 SkinCatalog.DEFAULT_SKIN_ID = "default"
 

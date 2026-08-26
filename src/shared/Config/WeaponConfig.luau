@@ -53,9 +53,35 @@ WeaponConfig.Weapons = {
 		beamWidth = 0.22,
 		muzzleOffset = { x = 0, y = 0, z = -1.4 },
 	},
+
+	Lance = {
+		id = "Lance",
+		displayName = "ARC LANCE",
+		slot = 3,
+		automatic = false,
+
+		-- The long-range answer to the rifle, and priced in tempo rather than
+		-- damage-per-second: two body shots kill, but at barely three shots a
+		-- second, so a miss costs more than any other weapon here. Spamming it
+		-- is punished hard by the spread table below, which opens up almost
+		-- immediately — this rewards holding an angle, not duelling up close.
+		damage = 55,
+		headshotMultiplier = 1.9, -- 104.5: a headshot kills outright
+		fireRate = 0.62,
+		magSize = 6,
+		reloadTime = 2.6,
+		range = 600,
+
+		baseSpreadDeg = 0.04, -- the tightest first shot in the game
+		sprayResetTime = 0.9, -- and the longest wait to get it back
+		recoilRecovery = 5,
+
+		beamWidth = 0.36,
+		muzzleOffset = { x = 0, y = 0, z = -3.2 },
+	},
 }
 
-WeaponConfig.Order = { "Rifle", "Pistol" }
+WeaponConfig.Order = { "Rifle", "Pistol", "Lance" }
 
 -- Extra inaccuracy while moving faster than this (studs/second).
 WeaponConfig.MOVING_SPEED_THRESHOLD = 8
