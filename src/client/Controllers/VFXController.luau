@@ -59,6 +59,10 @@ VFXController.Priority = 8
 local SOUNDS = {
 	Rifle = { id = "rbxasset://sounds/electronicpingshort.wav", volume = 0.4, speed = 2.6, jitter = 0.08 },
 	Pistol = { id = "rbxasset://sounds/electronicpingshort.wav", volume = 0.5, speed = 1.8, jitter = 0.1 },
+	-- Pitched well below the others and louder: the Lance has to be audible
+	-- across the map, because knowing a marksman is holding an angle is most of
+	-- how you avoid walking into one.
+	Lance = { id = "rbxasset://sounds/electronicpingshort.wav", volume = 0.7, speed = 0.75, jitter = 0.04 },
 	Impact = { id = "rbxasset://sounds/snap.mp3", volume = 0.3, speed = 1.7, jitter = 0.18 },
 	Hitmarker = { id = "rbxasset://sounds/clickfast.wav", volume = 0.55, speed = 1.9, jitter = 0.04 },
 	Kill = { id = "rbxasset://sounds/clickfast.wav", volume = 0.75, speed = 1.15, jitter = 0 },

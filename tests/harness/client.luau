@@ -154,6 +154,24 @@ for _, entry in loadedModules do
 end
 
 --------------------------------------------------------------------------------
+-- Every weapon must make a noise
+--
+-- A missing sound key returns silently, so a weapon added without one simply
+-- fires without a sound and nothing anywhere complains. That is exactly the
+-- kind of gap that survives to production, so it is asserted rather than left
+-- to be noticed.
+--------------------------------------------------------------------------------
+
+heading("Weapon sounds")
+
+local WeaponConfig = Env.load("src/shared/Config/WeaponConfig")
+local VFXSound = Env.load("src/client/Controllers/VFX/VFXSound")
+
+for _, weaponId in WeaponConfig.Order do
+	check(VFXSound.has(weaponId), `{weaponId} has a firing sound`)
+end
+
+--------------------------------------------------------------------------------
 -- What the run left behind
 --------------------------------------------------------------------------------
 

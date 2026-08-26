@@ -82,6 +82,18 @@ function VFXSound.playLocal(key: string)
 	sound:Play()
 end
 
+--[[
+	Whether a key has a sound behind it.
+
+	playLocal returns silently for an unknown key, which is right at runtime — a
+	missing sound should never interrupt a fight — but it also means a weapon
+	added without one fires mutely and nothing says so. This is what lets that be
+	checked instead of discovered.
+]]
+function VFXSound.has(key: string): boolean
+	return flat[key] ~= nil
+end
+
 function VFXSound.getGroup(): SoundGroup?
 	return group
 end
