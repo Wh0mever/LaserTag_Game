@@ -31,11 +31,13 @@ local SpinConfig = require("../src/shared/Config/SpinConfig")
 
 local R = EconomyConfig.REWARDS
 
--- The average player this file reasons about: fifteen kills in a ten-minute
--- match, a fifth of them headshots, winning half the time. Not a measurement —
--- there is nothing to measure yet — but a stated assumption that every number
--- below is relative to, so changing it changes the whole file honestly.
-local AVERAGE_KILLS = 15
+-- The average player this file reasons about: GameConfig's assumed kills in a
+-- ten-minute match, a fifth of them headshots, winning half the time. The kill
+-- count lives in GameConfig rather than here because the match rules lean on it
+-- too — the score limit is set above it so it stays a mercy rule — and the shop
+-- being tuned for a different pace than the match produces is exactly the kind
+-- of disagreement neither file could see on its own.
+local AVERAGE_KILLS = GameConfig.ASSUMED_KILLS_PER_PLAYER
 local HEADSHOT_SHARE = 0.2
 local WIN_RATE = 0.5
 

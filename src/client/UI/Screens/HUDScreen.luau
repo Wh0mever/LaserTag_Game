@@ -86,6 +86,19 @@ local function onMatchChanged(match)
 			label.Text = tostring(match.scores and match.scores[teamId] or 0)
 		end
 	end
+
+	-- The target arrives on the phase broadcast and survives the 1 Hz ticks,
+	-- which only carry the scores. It rises as the lobby fills, so it is read
+	-- every time rather than latched on the first InProgress.
+	local target = widgets.scoreTarget
+	if target then
+		local limit = match.data and match.data.scoreLimit
+		local live = match.phase == "InProgress" and type(limit) == "number" and limit > 0
+		target.Visible = live
+		if live then
+			target.Text = `FIRST TO {limit}`
+		end
+	end
 end
 
 local function onAmmoChanged(ammo)

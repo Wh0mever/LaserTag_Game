@@ -16,6 +16,7 @@
 		.root            Frame        -- toggle this to show/hide the whole HUD
 		.timer           TextLabel
 		.scores          {[teamId]: TextLabel}
+		.scoreTarget     TextLabel    -- "FIRST TO 144"; hidden when there is no target
 		.healthFill      Frame        -- width is the health fraction
 		.healthLabel     TextLabel
 		.ammoWeapon      TextLabel
@@ -81,6 +82,25 @@ local function buildTimer(parent: Instance): TextLabel
 	label.Name = "Value"
 	label.Size = UDim2.fromScale(1, 1)
 	label.Parent = holder
+	return label
+end
+
+--[[
+	The kill target, under the score chips.
+
+	A deathmatch needs a number to race to or the score chips are just a tally.
+	The target scales with team size and rises as the lobby fills, so it is drawn
+	from the match payload rather than baked in, and hidden entirely until a
+	match is running.
+]]
+local function buildScoreTarget(parent: Instance): TextLabel
+	local label = centered(UITheme.label("", UITheme.TextSizes.Tiny, UITheme.Colors.TextDim, UITheme.Fonts.Bold))
+	label.Name = "ScoreTarget"
+	label.Size = UDim2.fromOffset(220, 16)
+	label.Position = UDim2.new(0.5, 0, 0, 60 + CHIP_HEIGHT + 4)
+	label.AnchorPoint = Vector2.new(0.5, 0)
+	label.Visible = false
+	label.Parent = parent
 	return label
 end
 
@@ -303,6 +323,7 @@ function HUDWidgets.build(parent: Instance, onSlot: (slot: number) -> ())
 			A = buildScoreChip("A", true, root),
 			B = buildScoreChip("B", false, root),
 		},
+		scoreTarget = buildScoreTarget(root),
 		healthFill = healthFill,
 		healthLabel = healthLabel,
 		ammoWeapon = ammoWeapon,

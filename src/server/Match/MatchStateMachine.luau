@@ -41,13 +41,14 @@ MatchStateMachine.States = {
 local States = MatchStateMachine.States
 
 -- Mirrors GameConfig.MIN_PLAYERS / COUNTDOWN_DURATION / MATCH_DURATION /
--- RESULTS_DURATION / EMPTY_TEAM_GRACE.
+-- RESULTS_DURATION / EMPTY_TEAM_GRACE / SCORE_LIMIT_PER_PLAYER.
 MatchStateMachine.DEFAULTS = {
 	minPlayers = 2,
 	countdownDuration = 10,
 	matchDuration = 600,
 	resultsDuration = 10,
 	emptyTeamGrace = 30,
+	scoreLimitPerPlayer = 18,
 }
 
 -- Mirrors Constants.TEAM_IDS.
@@ -59,6 +60,7 @@ export type Config = {
 	matchDuration: number,
 	resultsDuration: number,
 	emptyTeamGrace: number,
+	scoreLimitPerPlayer: number,
 }
 
 export type Effect = { [string]: any }
@@ -72,7 +74,32 @@ export type State = {
 	remaining: { A: number, B: number },
 	emptyTeamTimeLeft: number?,
 	winnerTeam: string?,
+	scoreLimit: number,
 }
+
+--[[
+	The kill target for a match with `teamSize` players a side.
+
+	A deathmatch with no score to race to is just a countdown: the match ran the
+	full ten minutes whatever the scoreline, so a side 80-20 down at the halfway
+	mark played five more minutes with nothing left to play for.
+
+	The target scales with team size because the kill rate does. A fixed number
+	that gives an 8v8 a real race would be reached in the first minute of a 1v1,
+	and one tuned for a 1v1 would never be approached with sixteen players on the
+	map.
+
+	`scoreLimitPerPlayer` is set above what an even match actually reaches (the
+	economy model's average player takes 15 kills in a full match, so an even
+	side finishes near 15 x teamSize), which is what keeps this a mercy rule
+	rather than the thing that normally ends a match. A side running at roughly
+	1.5x its opponent's pace hits it a minute or two early; an even one never
+	does, and the ten-minute clock stays the real limit.
+]]
+function MatchStateMachine.scoreLimitFor(teamSize: number, perPlayer: number): number
+	local size = math.max(math.floor(teamSize), 1)
+	return size * math.max(math.floor(perPlayer), 1)
+end
 
 --------------------------------------------------------------------------------
 -- Effect helpers
@@ -138,9 +165,16 @@ local function enterInProgress(state: State, effects: { Effect })
 	state.emptyTeamTimeLeft = nil
 	state.winnerTeam = nil
 	state.queued = 0
+	-- Two players on the pads means one a side; the roster event that follows
+	-- raises this as the lobby fills.
+	state.scoreLimit = MatchStateMachine.scoreLimitFor(math.ceil(queued / 2), state.config.scoreLimitPerPlayer)
 
 	emit(effects, { type = "startMatch", queued = queued })
-	broadcast(effects, States.InProgress, { timeLeft = state.timeLeft, scores = copyScores(state) })
+	broadcast(
+		effects,
+		States.InProgress,
+		{ timeLeft = state.timeLeft, scores = copyScores(state), scoreLimit = state.scoreLimit }
+	)
 end
 
 --[[
@@ -269,12 +303,21 @@ local function applyTick(state: State, dt: number, effects: { Effect })
 	end
 end
 
-local function applyKill(state: State, teamId: any)
+local function applyKill(state: State, teamId: any, effects: { Effect })
 	if state.phase ~= States.InProgress then
 		return
 	end
-	if type(teamId) == "string" and state.scores[teamId] then
-		state.scores[teamId] += 1
+	if type(teamId) ~= "string" or not state.scores[teamId] then
+		return
+	end
+
+	state.scores[teamId] += 1
+
+	-- Reaching the target ends it there and then. Checked on the kill rather
+	-- than on the tick so the match stops on the shot that won it, not up to a
+	-- second later with the score sitting past the limit on everyone's HUD.
+	if state.scoreLimit > 0 and state.scores[teamId] >= state.scoreLimit then
+		enterResults(state, effects, teamId)
 	end
 end
 
@@ -289,6 +332,31 @@ local function applyRoster(state: State, remainingA: number, remainingB: number,
 
 	if state.phase ~= States.InProgress then
 		return
+	end
+
+	--[[
+		Grow the target with the lobby, and only ever grow it.
+
+		A match that starts as a 1v1 and fills to 8v8 would otherwise be racing a
+		target set for two people, and would end within a minute of the lobby
+		filling. Lowering it when players leave is worse still: a side already
+		past the new limit would win the instant somebody disconnected, which
+		hands the match to whoever benefits from a rage-quit.
+	]]
+	local largestTeam = math.max(state.remaining.A, state.remaining.B)
+	local raised =
+		math.max(state.scoreLimit, MatchStateMachine.scoreLimitFor(largestTeam, state.config.scoreLimitPerPlayer))
+
+	if raised ~= state.scoreLimit then
+		state.scoreLimit = raised
+		-- Re-broadcast the phase so the HUD's target follows the lobby. The 1 Hz
+		-- tick carries only the scores, so without this the target would stay at
+		-- whatever the first two players implied for the rest of the match.
+		broadcast(effects, States.InProgress, {
+			timeLeft = state.timeLeft,
+			scores = copyScores(state),
+			scoreLimit = state.scoreLimit,
+		})
 	end
 
 	if state.remaining.A <= 0 and state.remaining.B <= 0 then
@@ -341,6 +409,9 @@ function MatchStateMachine.new(config: { [string]: any }?): State
 		remaining = { A = 0, B = 0 },
 		emptyTeamTimeLeft = nil,
 		winnerTeam = nil,
+		-- Zero until a match starts, which also disables the check: an Idle state
+		-- has no team size to scale a target from.
+		scoreLimit = 0,
 	}
 end
 
@@ -372,7 +443,7 @@ function MatchStateMachine.handle(state: State, event: { [string]: any }): (Stat
 	elseif kind == "tick" then
 		applyTick(state, tonumber(event.dt) or 0, effects)
 	elseif kind == "kill" then
-		applyKill(state, event.teamId)
+		applyKill(state, event.teamId, effects)
 	elseif kind == "playerLeft" then
 		applyRoster(state, tonumber(event.remainingA) or 0, tonumber(event.remainingB) or 0, effects)
 	elseif kind == "forceEnd" then
