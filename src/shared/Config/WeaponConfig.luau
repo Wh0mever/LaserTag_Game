@@ -25,6 +25,12 @@ WeaponConfig.Weapons = {
 		reloadTime = 2.2,
 		range = 400,
 
+		-- The rifle led on both rate of fire and magazine, which made it the
+		-- right pick at every distance on every map and left the other two with
+		-- no band of their own. It keeps close and mid range — where 600 RPM
+		-- belongs — and gives up long range instead of also winning there.
+		falloff = { start = 90, finish = 240, minFactor = 0.5 },
+
 		baseSpreadDeg = 0.15,
 		sprayResetTime = 0.3,
 		recoilRecovery = 10,
@@ -39,12 +45,26 @@ WeaponConfig.Weapons = {
 		slot = 2,
 		automatic = false,
 
-		damage = 34,
-		headshotMultiplier = 1.75, -- 59.5 to the head: 2 headshots kill
-		fireRate = 0.35,
-		magSize = 12,
+		-- Two body shots up close, and the fastest kill in the game there — which
+		-- is the whole reason to reach for it over the rifle, and why it is also
+		-- the weapon to switch to rather than reload in the middle of a fight.
+		-- It pays for that with the harshest falloff here: by 120 studs it needs
+		-- five hits, so it cannot follow you out of the room.
+		damage = 50,
+		headshotMultiplier = 2.0, -- 100 point blank: a clean headshot ends it
+		fireRate = 0.3,
+		magSize = 8,
 		reloadTime = 1.4,
 		range = 300,
+
+		-- `start` is deliberately a room's width rather than a duelling radius.
+		-- Because the multiplier is exactly 2.0, "two body shots" and "one
+		-- headshot" are the same 100 damage, so both stop killing at the same
+		-- distance — and damage is floored, so one stud past `start` a two-tap
+		-- deals 98 rather than 100. That edge is unreadable to a player, so it
+		-- belongs at the far side of a room (45 studs) where the pistol is
+		-- visibly out of its element, not at 30 where it still feels close.
+		falloff = { start = 45, finish = 130, minFactor = 0.4 },
 
 		baseSpreadDeg = 0.3,
 		sprayResetTime = 0.5,
@@ -71,6 +91,11 @@ WeaponConfig.Weapons = {
 		magSize = 6,
 		reloadTime = 2.6,
 		range = 600,
+
+		-- Deliberately no falloff block. Every other weapon fades, so this is the
+		-- only one that still hits for its full damage across a lane — which is
+		-- what a marksman weapon is for, and what stops the rifle owning every
+		-- distance at once.
 
 		baseSpreadDeg = 0.04, -- the tightest first shot in the game
 		sprayResetTime = 0.9, -- and the longest wait to get it back

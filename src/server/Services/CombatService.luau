@@ -154,7 +154,12 @@ local function applyHit(shooter: Player, weaponId: string, shot): (boolean, bool
 		return false, false
 	end
 
-	local damage, isHeadshot = DamageCalc.compute(WeaponConfig.get(weaponId), shot.hitPartName, WeaponConfig.HEAD_PARTS)
+	-- Measured from the server's own eye position to where the server's own ray
+	-- landed, so the distance that decides falloff is never a client's claim.
+	local distance = (shot.hitPos - shot.eye).Magnitude
+
+	local damage, isHeadshot =
+		DamageCalc.compute(WeaponConfig.get(weaponId), shot.hitPartName, WeaponConfig.HEAD_PARTS, distance)
 
 	local healthBefore = humanoid.Health
 	humanoid:TakeDamage(damage)

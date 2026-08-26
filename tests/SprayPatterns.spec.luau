@@ -27,11 +27,23 @@ return function(t)
 	local fullSpray = SprayPatterns.accumulate("Rifle", 30)
 	t.expect(firstPhase.pitch > fullSpray.pitch * 0.35, "the initial climb dominates the vertical recoil")
 
-	-- The pistol is essentially vertical: tiny horizontal drift.
-	for index = 1, 12 do
+	-- The pistol is essentially vertical: tiny horizontal drift. Driven off the
+	-- magazine rather than a literal, so retuning the magazine cannot leave the
+	-- tail of the pattern unchecked.
+	local pistolMag = WeaponConfig.Weapons.Pistol.magSize
+	for index = 1, pistolMag do
 		local kick = SprayPatterns.getKick("Pistol", index)
 		t.expect(math.abs(kick.yaw) <= 0.1, `pistol stays near-vertical on shot {index}`)
 		t.expect(kick.pitch > 0, `pistol always kicks upward on shot {index}`)
+	end
+
+	-- And it climbs the whole way: an 8-round magazine holding four kills means
+	-- there is no "free" round late in the magazine to hose with.
+	for index = 2, pistolMag do
+		t.expect(
+			SprayPatterns.getKick("Pistol", index).pitch > SprayPatterns.getKick("Pistol", index - 1).pitch,
+			`pistol recoil grows on shot {index}`
+		)
 	end
 
 	-- Index clamping: past the end of the table we reuse the final entry, and a
@@ -68,5 +80,5 @@ return function(t)
 	t.equal(SprayPatterns.nextIndex("Rifle", 12, resetTime + 0.01, resetTime), 1, "a pause resets the pattern")
 	t.equal(SprayPatterns.nextIndex("Rifle", 12, resetTime - 0.01, resetTime), 13, "a short pause does not reset")
 	t.equal(SprayPatterns.nextIndex("Rifle", 30, 0.05, resetTime), 30, "index saturates at the pattern length")
-	t.equal(SprayPatterns.nextIndex("Pistol", 12, 0.05, 0.5), 12, "pistol index saturates too")
+	t.equal(SprayPatterns.nextIndex("Pistol", pistolMag, 0.05, 0.5), pistolMag, "pistol index saturates too")
 end
