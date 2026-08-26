@@ -108,7 +108,7 @@ local function refresh()
 			card.button:setColor(UITheme.Colors.PanelLight)
 			card.button:setEnabled(false)
 		else
-			card.button:setText(`BUY  {skin.price}`)
+			card.button:setText(`BUY  {CurrencyLabel.format(skin.price)}`)
 			card.button:setColor(UITheme.Colors.Coin)
 			card.button:setEnabled(affordable and not pending)
 		end
