@@ -12,6 +12,7 @@ local CONFIG = {
 	matchDuration = 20,
 	resultsDuration = 5,
 	emptyTeamGrace = 6,
+	scoreLimitPerPlayer = 4,
 }
 
 local function findEffect(effects, effectType: string)
@@ -315,4 +316,80 @@ return function(t)
 	t.equal(forcedQueue.phase, "Idle", "forceEnd during a countdown returns to Idle")
 	t.expect(findEffect(effects, "resetQueue") ~= nil, "forceEnd during a countdown drops the queue")
 	t.equal(findEffect(effects, "endMatch"), nil, "forceEnd before a match started pays nobody")
+
+	--------------------------------------------------------------------------
+	-- Score limit
+	--
+	-- Without one the match ran its full duration whatever the scoreline, so a
+	-- side well behind at the halfway mark played the rest with nothing left to
+	-- play for.
+	--------------------------------------------------------------------------
+
+	t.equal(
+		MatchStateMachine.DEFAULTS.scoreLimitPerPlayer,
+		GameConfig.SCORE_LIMIT_PER_PLAYER,
+		"DEFAULTS.scoreLimitPerPlayer tracks GameConfig"
+	)
+
+	t.equal(MatchStateMachine.scoreLimitFor(8, 18), 144, "the target scales with team size")
+	t.equal(MatchStateMachine.scoreLimitFor(1, 18), 18, "a one-a-side match still has a target")
+	t.equal(MatchStateMachine.scoreLimitFor(0, 18), 18, "an empty team is treated as one player, not zero")
+	t.equal(MatchStateMachine.scoreLimitFor(4, 0), 4, "a zero-per-player config cannot produce a zero target")
+
+	local idle = MatchStateMachine.new(CONFIG)
+	t.equal(idle.scoreLimit, 0, "an idle machine has no target to reach")
+
+	-- A two-player start is one a side.
+	local limited = MatchStateMachine.new(CONFIG)
+	MatchStateMachine.handle(limited, { type = "queueChanged", count = 2 })
+	_, effects = MatchStateMachine.handle(limited, { type = "tick", dt = CONFIG.countdownDuration })
+	t.equal(limited.scoreLimit, 4, "the target is set from the team size at kickoff")
+	local kickoff = broadcastFor(effects, "InProgress")
+	t.equal(kickoff and kickoff.data.scoreLimit, 4, "the kickoff broadcast carries the target")
+
+	-- Reaching it ends the match there and then, not on the next tick.
+	for _ = 1, 3 do
+		MatchStateMachine.handle(limited, { type = "kill", teamId = "A" })
+	end
+	t.equal(limited.phase, "InProgress", "a match below the target keeps running")
+
+	_, effects = MatchStateMachine.handle(limited, { type = "kill", teamId = "A" })
+	t.equal(limited.phase, "Results", "hitting the target ends the match")
+	local limitEnd = findEffect(effects, "endMatch")
+	t.equal(limitEnd and limitEnd.winnerTeam, "A", "the side that reached the target wins")
+	t.equal(limitEnd and limitEnd.scores.A, 4, "the winning score is the target exactly")
+	t.expect(limited.timeLeft > 0, "the match ended early, with time still on the clock")
+
+	-- A kill after the match has ended cannot push the score past the target.
+	MatchStateMachine.handle(limited, { type = "kill", teamId = "A" })
+	t.equal(limited.scores.A, 4, "a late kill does not score once the match is over")
+
+	-- The target follows the lobby up...
+	local filling = startedMatch(2)
+	t.equal(filling.scoreLimit, 4, "a match that starts as a duel targets a duel's worth of kills")
+
+	_, effects = MatchStateMachine.handle(filling, { type = "playerLeft", remainingA = 3, remainingB = 3 })
+	t.equal(filling.scoreLimit, 12, "the target grows as the lobby fills")
+	local raised = broadcastFor(effects, "InProgress")
+	t.equal(raised and raised.data.scoreLimit, 12, "a raised target is re-broadcast so the HUD can follow it")
+
+	-- ...and never back down. A falling target would hand the match to whoever
+	-- benefits from an opponent disconnecting.
+	_, effects = MatchStateMachine.handle(filling, { type = "playerLeft", remainingA = 1, remainingB = 1 })
+	t.equal(filling.scoreLimit, 12, "the target does not fall when players leave")
+	t.equal(broadcastFor(effects, "InProgress"), nil, "an unchanged target is not re-broadcast")
+
+	-- An even match never reaches the target and still ends on the clock, which
+	-- is what keeps this a mercy rule rather than the usual way a match ends.
+	local even = startedMatch(2)
+	for _ = 1, 3 do
+		MatchStateMachine.handle(even, { type = "kill", teamId = "A" })
+		MatchStateMachine.handle(even, { type = "kill", teamId = "B" })
+	end
+	t.equal(even.phase, "InProgress", "an even match is not cut short")
+
+	_, effects = MatchStateMachine.handle(even, { type = "tick", dt = CONFIG.matchDuration })
+	t.equal(even.phase, "Results", "an even match ends on the clock")
+	local evenEnd = findEffect(effects, "endMatch")
+	t.equal(evenEnd and evenEnd.winnerTeam, nil, "a level scoreline is a draw")
 end

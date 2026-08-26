@@ -237,6 +237,24 @@ function PlayerService.isSpawnProtected(player: Player): boolean
 	return type(until_) == "number" and workspace:GetServerTimeNow() < until_
 end
 
+--[[
+	End spawn protection now.
+
+	Called by CombatService the moment a shot is accepted. Protection exists so a
+	player is not killed before they can move, not so they can push out and trade
+	while nothing can hurt them — three seconds of one-way invulnerability is
+	long enough to cross most of a spawn lane and win a fight for free.
+
+	Firing is the signal because it is unambiguous: walking out of the spawn room
+	is something a player has to do either way, and taking damage cannot be it
+	(the whole point is that they do not).
+]]
+function PlayerService.clearSpawnProtection(player: Player)
+	if player:GetAttribute("SpawnProtectedUntil") ~= 0 then
+		player:SetAttribute("SpawnProtectedUntil", 0)
+	end
+end
+
 local function configureCharacter(player: Player, character: Model, teamId: string)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if humanoid then

@@ -88,6 +88,28 @@ function ShotResolver.isSpawnProtected(player: Player): boolean
 end
 
 --[[
+	End the shooter's spawn protection.
+
+	Protection is there so a player cannot be killed before they can move, not so
+	they can push out and trade while nothing can hurt them. Three seconds is
+	long enough to cross a spawn lane, so firing gives it up.
+
+	Same service-or-attribute path as isSpawnProtected: the attribute is the
+	authority either way, so this works whether or not PlayerService is loaded.
+]]
+function ShotResolver.clearSpawnProtection(player: Player)
+	local service = getPlayerService()
+	if service and type(service.clearSpawnProtection) == "function" then
+		service.clearSpawnProtection(player)
+		return
+	end
+
+	if player:GetAttribute("SpawnProtectedUntil") ~= 0 then
+		player:SetAttribute("SpawnProtectedUntil", 0)
+	end
+end
+
+--[[
 	Walk up from the hit part to the character that owns it. Accessories, hats
 	and welded weapon parts nest arbitrarily deep, so a hit part's immediate
 	parent is not reliably the character model.

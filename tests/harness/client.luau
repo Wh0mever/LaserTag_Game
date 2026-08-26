@@ -18,6 +18,10 @@
 
 local Env = require("./env")
 local fs = require("@lune/fs")
+-- The sandbox hands `Instance` to the modules it loads, not to this file, so a
+-- check that needs to construct one takes it from the same place the sandbox
+-- does.
+local roblox = require("@lune/roblox")
 
 -- Client code lives on the runtime side of Roblox — cameras, viewports, signals
 -- — which Lune's data model does not carry. This swaps in stand-ins for those
@@ -207,6 +211,27 @@ if type(CurrencyLabel.format) == "function" then
 	-- reading as a different currency to the grouped balance beside it.
 	check(CurrencyLabel.format(48000) == "48,000", `format groups thousands (got "{CurrencyLabel.format(48000)}")`)
 	check(CurrencyLabel.format(600) == "600", `format leaves short numbers alone (got "{CurrencyLabel.format(600)}")`)
+end
+
+-- The HUD is the one screen whose widgets a player never opens deliberately —
+-- it appears when a match starts — so nothing else here would build it. Doing
+-- so proves the whole widget tree constructs, and that HUDScreen's reads of it
+-- have something to read.
+local HUDWidgets = Env.load("src/client/UI/Screens/HUDWidgets")
+local hudOk, hud = pcall(function()
+	local screen = roblox.Instance.new("ScreenGui")
+	return HUDWidgets.build(screen, function() end)
+end)
+
+check(hudOk, `the HUD widget tree builds{if hudOk then "" else ": " .. tostring(hud)}`)
+if hudOk then
+	for _, name in { "timer", "scoreTarget", "healthFill", "ammoMag", "crosshair" } do
+		check(hud[name] ~= nil, `HUD exposes {name}`)
+	end
+	check(hud.scores and hud.scores.A ~= nil and hud.scores.B ~= nil, "HUD exposes a score chip per team")
+	-- The kill target starts hidden: there is no match, so there is no target,
+	-- and "FIRST TO 0" is worse than nothing.
+	check(hud.scoreTarget and hud.scoreTarget.Visible == false, "the kill target is hidden until a match runs")
 end
 
 --------------------------------------------------------------------------------

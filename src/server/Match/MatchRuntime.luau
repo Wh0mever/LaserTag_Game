@@ -47,6 +47,7 @@ local FSM_CONFIG = {
 	matchDuration = GameConfig.MATCH_DURATION,
 	resultsDuration = GameConfig.RESULTS_DURATION,
 	emptyTeamGrace = GameConfig.EMPTY_TEAM_GRACE,
+	scoreLimitPerPlayer = GameConfig.SCORE_LIMIT_PER_PLAYER,
 }
 
 local REWARD_REASONS = { win = "Match win", draw = "Match draw", played = "Match played" }

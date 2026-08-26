@@ -185,6 +185,11 @@ local function onShootRequest(player: Player, weaponId: string, seq: number, _or
 		return
 	end
 
+	-- A round has definitely left the barrel, so the shooter gives up spawn
+	-- protection here — before the shot is resolved, so it cannot be traded for
+	-- a free kill even on the shot that ends it.
+	ShotResolver.clearSpawnProtection(player)
+
 	local shot = ShotResolver.resolve(player, weaponId, direction, sprayIndex, nextRandom)
 	if not shot then
 		return

@@ -16,12 +16,44 @@ No `.rbxm` assets, no manual Studio editing — `rojo build` produces a complete
 Готов к вызову? Эта игра проверит твою ловкость и реакцию.
 
 Две команды — **Alpha** (зелёные) и **Bravo** (розовые) — сражаются **10 минут** в режиме
-Team Deathmatch. Побеждает команда, набравшая больше убийств. Между матчами все игроки находятся
-в **хабе**, где можно выбрать карту, зайти в магазин, сменить скин или крутануть колесо наград.
+Team Deathmatch. Побеждает команда, набравшая больше убийств, — либо та, что первой добралась до
+**цели по фрагам** и закончила матч досрочно. Между матчами все игроки находятся в **хабе**, где
+можно выбрать карту, зайти в магазин, сменить скин или крутануть колесо наград.
 
-Two teams — **Alpha** (green) and **Bravo** (pink) — fight a **10-minute** team deathmatch.
-The team with more kills wins. Between matches everyone waits in the **hub**, where they pick a map,
-visit the shop, change a skin or spin the reward wheel.
+Two teams — **Alpha** (green) and **Bravo** (pink) — fight a **10-minute** team deathmatch. The team
+with more kills wins, or the one that reaches the **kill target** first and ends it early. Between
+matches everyone waits in the **hub**, where they pick a map, visit the shop, change a skin or spin
+the reward wheel.
+
+### Темп матча / Match pacing
+
+| Параметр | Значение |
+|---|---|
+| Длительность | 600 с (10 минут) |
+| Отсчёт до старта / показ результатов | 10 с / 10 с |
+| Респаун | 3 с + 3 с защиты спавна |
+| Возврат в бой | 3.3–4.2 с пешком от спавна до центра |
+| Игроков | 2–16, добор по ходу матча |
+| **Цель по фрагам** | **18 × размер команды** |
+
+**Цель по фрагам** — это правило милосердия, а не обычный способ закончить матч. Раньше матч всегда
+шёл все 600 секунд: команда, горящая 80:20 к середине, доигрывала пять минут, которым уже нечего было
+решать. Цель масштабируется от размера команды (фиксированное число, дающее гонку при 8×8, было бы
+взято за минуту в дуэли) и **растёт вместе с лобби**, но никогда не падает — иначе матч доставался бы
+тому, кому выгоден чужой дисконнект.
+
+Порог стоит **выше** того, что набирает ровный матч (~15 × размер команды по допущению
+`GameConfig.ASSUMED_KILLS_PER_PLAYER`), поэтому равная игра по-прежнему заканчивается по часам, а
+разгром 2:1 обрывается примерно на 90% дистанции.
+
+Защита спавна **снимается первым же выстрелом**. Три секунды неуязвимости — это чтобы не убили,
+пока ты не успел двинуться, а не чтобы выйти и разменяться, пока тебе ничего не могут сделать.
+
+The kill target is a mercy rule rather than the usual ending: it scales with team size, only ever
+rises as the lobby fills, and sits above what an even match reaches, so a competitive game still ends
+on the clock while a two-to-one blowout ends about 90% of the way through. Spawn protection is
+dropped by the shooter's first shot — it exists so you are not killed before you can move, not so you
+can push out and trade while nothing can hurt you. `tests/Pacing.spec.luau` asserts the lot.
 
 ### Карты / Maps
 
