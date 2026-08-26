@@ -95,6 +95,7 @@ local SPECS = {
 	"SprayPatterns",
 	"WeaponConfig",
 	"DamageCalc",
+	"Balance",
 	"MatchStateMachine",
 	"ShopLogic",
 	"SpinLogic",

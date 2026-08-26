@@ -62,19 +62,18 @@ local RIFLE_KICK = {
 	{ pitch = 0.30, yaw = -0.24 },
 }
 
--- Pistol: 12 entries, essentially vertical with a slight alternating wobble.
+-- Pistol: 8 entries, one per round, essentially vertical with a slight
+-- alternating wobble. The climb is steeper than it was at twelve rounds because
+-- the magazine now holds four kills rather than four chances at one — every
+-- round is worth aiming, so every round costs something to fire.
 local PISTOL_KICK = {
 	{ pitch = 0.90, yaw = 0.00 },
-	{ pitch = 0.95, yaw = -0.05 },
-	{ pitch = 1.00, yaw = 0.05 },
-	{ pitch = 1.05, yaw = -0.05 },
-	{ pitch = 1.10, yaw = 0.05 },
+	{ pitch = 1.00, yaw = -0.05 },
+	{ pitch = 1.08, yaw = 0.05 },
 	{ pitch = 1.15, yaw = -0.05 },
-	{ pitch = 1.20, yaw = 0.05 },
-	{ pitch = 1.22, yaw = -0.05 },
-	{ pitch = 1.25, yaw = 0.05 },
-	{ pitch = 1.27, yaw = -0.05 },
-	{ pitch = 1.29, yaw = 0.05 },
+	{ pitch = 1.21, yaw = 0.05 },
+	{ pitch = 1.25, yaw = -0.05 },
+	{ pitch = 1.28, yaw = 0.05 },
 	{ pitch = 1.30, yaw = 0.00 },
 }
 

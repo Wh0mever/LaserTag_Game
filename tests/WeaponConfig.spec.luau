@@ -36,19 +36,32 @@ return function(t)
 	t.expect(rifle.reloadTime > pistol.reloadTime, "the rifle reloads slower")
 	t.expect(rifle.range > pistol.range, "the rifle reaches further")
 
-	-- Time to kill a full-health target with body shots.
+	-- Shots to kill a full-health target at point blank.
 	local MAX_HEALTH = 100
-	local rifleShots = math.ceil(MAX_HEALTH / rifle.damage)
-	local pistolShots = math.ceil(MAX_HEALTH / pistol.damage)
-	t.equal(rifleShots, 5, "the rifle needs 5 body shots")
-	t.equal(pistolShots, 3, "the pistol needs 3 body shots")
-
-	-- Headshot kills.
+	t.equal(math.ceil(MAX_HEALTH / rifle.damage), 5, "the rifle needs 5 body shots")
+	t.equal(math.ceil(MAX_HEALTH / pistol.damage), 2, "the pistol needs 2 body shots")
 	t.equal(math.ceil(MAX_HEALTH / (rifle.damage * rifle.headshotMultiplier)), 3, "the rifle needs 3 headshots")
-	t.equal(math.ceil(MAX_HEALTH / (pistol.damage * pistol.headshotMultiplier)), 2, "the pistol needs 2 headshots")
+	t.equal(math.ceil(MAX_HEALTH / (pistol.damage * pistol.headshotMultiplier)), 1, "one pistol headshot is lethal")
 
-	-- The rifle still kills faster overall despite the lower per-shot damage.
-	t.expect(rifleShots * rifle.fireRate < pistolShots * pistol.fireRate, "the rifle has the lower time-to-kill")
+	-- Who actually kills faster is deliberately NOT asserted here. It depends on
+	-- range, which depends on falloff, which lives in DamageCalc — and the answer
+	-- is meant to differ per band rather than be a fixed ranking. tests/
+	-- Balance.spec.luau owns that, and owns it with the right arithmetic: the
+	-- first shot costs no time, so an N-shot kill is N-1 intervals, not N. The
+	-- version that used to sit here counted N and therefore reported the rifle as
+	-- the faster weapon at every distance — which is the exact conclusion the
+	-- falloff pass was undoing.
+
+	-- Every weapon either fades with distance or is the one that does not, and
+	-- the marksman weapon is the one that does not.
+	local fadeless = {}
+	for id, weapon in pairs(WeaponConfig.Weapons) do
+		if weapon.falloff == nil then
+			table.insert(fadeless, id)
+		end
+	end
+	t.equal(#fadeless, 1, "exactly one weapon holds its damage at any range")
+	t.equal(fadeless[1], "Lance", "and it is the lance")
 
 	-- Origin tolerance must be generous enough for lag but far below a teleport.
 	t.expect(
