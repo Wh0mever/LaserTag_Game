@@ -212,8 +212,15 @@ end
 print(`  total instances across all maps: {grandTotal}`)
 check(grandTotal > 0, "something was built")
 
--- This is the number every client loads at once while StreamingEnabled is off.
-print(`  every client currently loads all {grandTotal} of them on join`)
+-- Every client loads all of this on join: the three worlds coexist in one place
+-- and streaming is off. That is a deliberate choice and this number is why it
+-- holds — it is an order of magnitude under what a phone struggles with, and
+-- streaming would buy nothing while adding parts appearing late around a
+-- player who has already been shot at. The guard is here so that if the maps
+-- ever grow into territory where the trade changes, this fails rather than the
+-- framerate quietly sagging on someone's phone.
+print(`  every client loads all {grandTotal} of them on join (streaming is off by choice)`)
+check(grandTotal < 8000, `the whole world stays inside a mobile budget (got {grandTotal})`)
 
 --------------------------------------------------------------------------------
 -- Result

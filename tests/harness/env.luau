@@ -39,6 +39,7 @@ local recorded: { [string]: number } = {}
 
 Env.collisionGroups = {}
 Env.collisionRules = {}
+Env.renderBindings = {}
 
 local function record(what: string)
 	recorded[what] = (recorded[what] or 0) + 1
@@ -74,6 +75,113 @@ local function indexTree(dir: string)
 		elseif entry:match("%.luau$") then
 			pathKind[full:gsub("%.luau$", "")] = "file"
 		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Runtime methods Lune's data model does not carry
+--
+-- Lune models the Roblox *file format*, so Instances have properties but no
+-- signals. Code that listens for a property change is perfectly ordinary and
+-- would otherwise fail here for a reason that has nothing to do with it being
+-- wrong. These are implemented once, for every class, and never fire — nothing
+-- in this sandbox changes on its own.
+--------------------------------------------------------------------------------
+
+local function inertSignal()
+	return {
+		Connect = function(_self, fn)
+			record("event:Connect")
+			return { Disconnect = function() end, Connected = true, fn = fn }
+		end,
+		Once = function(_self, fn)
+			return { Disconnect = function() end, Connected = true, fn = fn }
+		end,
+		Wait = function()
+			error("[harness] nothing will ever fire this event", 2)
+		end,
+	}
+end
+
+Env.inertSignal = inertSignal
+
+--[[
+	Roblox's typeof(), which Lune does not provide.
+
+	Every Lune Roblox value is plain `userdata`, with nothing on the metatable to
+	tell them apart, so plain `type()` reports "userdata" for all of them. That
+	matters because guard clauses across this codebase are written as
+	`typeof(x) == "Instance"` — with the fallback those asserts fail on perfectly
+	good arguments, and the harness reports bugs that are its own.
+
+	Each kind is identified by a property only it answers to.
+]]
+local function probe(value: any, property: string): boolean
+	local ok, result = pcall(function()
+		return (value :: any)[property]
+	end)
+	return ok and result ~= nil
+end
+
+local function harnessTypeof(value: any): string
+	local basic = type(value)
+	if basic ~= "userdata" then
+		return basic
+	end
+
+	if probe(value, "ClassName") then
+		return "Instance"
+	end
+	if probe(value, "EnumType") then
+		return "EnumItem"
+	end
+	if probe(value, "LookVector") then
+		return "CFrame"
+	end
+	if probe(value, "Magnitude") then
+		return if probe(value, "Z") then "Vector3" else "Vector2"
+	end
+	if probe(value, "R") and probe(value, "B") then
+		return "Color3"
+	end
+	if probe(value, "Scale") and probe(value, "Offset") then
+		return "UDim"
+	end
+	if probe(value, "X") and probe(value, "Y") then
+		return "UDim2"
+	end
+	if probe(value, "Keypoints") then
+		return "NumberSequence"
+	end
+	if probe(value, "Direction") then
+		return "Ray"
+	end
+
+	return "userdata"
+end
+
+roblox.implementMethod("Instance", "GetPropertyChangedSignal", function()
+	return inertSignal()
+end)
+
+roblox.implementMethod("Instance", "GetAttributeChangedSignal", function()
+	return inertSignal()
+end)
+
+-- Events are read as properties (`button.Activated:Connect(...)`), so they need
+-- implementProperty rather than implementMethod. Declared on the base classes so
+-- every button, frame and label inherits them.
+for _, entry in
+	{
+		{ class = "GuiButton", events = { "Activated", "MouseButton1Click", "MouseButton1Down", "MouseButton1Up" } },
+		{ class = "GuiObject", events = { "MouseEnter", "MouseLeave", "InputBegan", "InputEnded", "InputChanged" } },
+		{ class = "Instance", events = { "Changed", "ChildAdded", "ChildRemoved", "AncestryChanged", "Destroying" } },
+	}
+do
+	for _, eventName in entry.events do
+		roblox.implementProperty(entry.class, eventName, function()
+			return inertSignal()
+		end)
 	end
 end
 
@@ -181,19 +289,16 @@ local function makeInstanceService(className: string)
 end
 
 local function buildServices()
-	-- Real Instances: the world builder parents actual parts into these.
-	services.Workspace = makeInstanceService("Folder")
-	services.Workspace.Name = "Workspace"
-	services.Lighting = makeInstanceService("Folder")
-	services.Lighting.Name = "Lighting"
-	services.Teams = makeInstanceService("Folder")
-	services.Teams.Name = "Teams"
-	services.ServerStorage = makeInstanceService("Folder")
-	services.ServerStorage.Name = "ServerStorage"
-	services.StarterGui = makeInstanceService("Folder")
-	services.StarterGui.Name = "StarterGui"
-	services.SoundService = makeInstanceService("Folder")
-	services.SoundService.Name = "SoundService"
+	-- Real service classes, not stand-in Folders. Lune validates every property
+	-- against Roblox's class database, so `Lighting.Technology` and
+	-- `Workspace.CurrentCamera` are checked for real — and a typo in one fails
+	-- here instead of silently doing nothing in Studio.
+	services.Workspace = makeInstanceService("Workspace")
+	services.Lighting = makeInstanceService("Lighting")
+	services.Teams = makeInstanceService("Teams")
+	services.ServerStorage = makeInstanceService("ServerStorage")
+	services.StarterGui = makeInstanceService("StarterGui")
+	services.SoundService = makeInstanceService("SoundService")
 
 	-- Module trees: these resolve to files rather than Instances.
 	services.ReplicatedStorage = Env.handleFor(REPO_ROOT .. "/src")
@@ -282,6 +387,13 @@ local function buildServices()
 		IsStudio = function()
 			return false
 		end,
+		BindToRenderStep = function(_self, name: string)
+			record("RunService:BindToRenderStep")
+			Env.renderBindings[name] = true
+		end,
+		UnbindFromRenderStep = function(_self, name: string)
+			Env.renderBindings[name] = nil
+		end,
 	}
 
 	-- DataStores fail closed here: every call errors, which is exactly the
@@ -306,6 +418,94 @@ local function buildServices()
 		end,
 	}
 
+	----------------------------------------------------------------------------
+	-- Client side
+	--
+	-- Enough of a local player for client modules to evaluate. There is no
+	-- rendering here, so nothing that draws is verified — but a misspelled
+	-- property or a bad require fails, and those are the faults that stop a
+	-- client booting at all.
+	----------------------------------------------------------------------------
+
+	local camera = roblox.Instance.new("Camera")
+	camera.Name = "Camera"
+	services.Workspace.CurrentCamera = camera
+
+	local playerGui = roblox.Instance.new("Folder")
+	playerGui.Name = "PlayerGui"
+
+	local localPlayer = {
+		Name = "HarnessPlayer",
+		DisplayName = "HarnessPlayer",
+		UserId = 1,
+		Character = nil,
+		PlayerGui = playerGui,
+		CharacterAdded = signal(),
+		CharacterRemoving = signal(),
+		GetAttribute = function()
+			return nil
+		end,
+		SetAttribute = function() end,
+		GetAttributeChangedSignal = function()
+			return signal()
+		end,
+		FindFirstChild = function(_self, name: string)
+			if name == "PlayerGui" then
+				return playerGui
+			end
+			return nil
+		end,
+		WaitForChild = function(_self, name: string)
+			if name == "PlayerGui" then
+				return playerGui
+			end
+			return nil
+		end,
+		IsFriendsWith = function()
+			return false
+		end,
+	}
+	services.Players.LocalPlayer = localPlayer
+
+	services.UserInputService = {
+		Name = "UserInputService",
+		TouchEnabled = false,
+		KeyboardEnabled = true,
+		MouseEnabled = true,
+		GamepadEnabled = false,
+		InputBegan = signal(),
+		InputEnded = signal(),
+		InputChanged = signal(),
+		WindowFocusReleased = signal(),
+		GetMouseDelta = function()
+			return roblox.Vector2.new(0, 0)
+		end,
+	}
+
+	services.ContextActionService = {
+		Name = "ContextActionService",
+		BindAction = function()
+			record("ContextActionService:BindAction")
+		end,
+		UnbindAction = function() end,
+		SetPosition = function() end,
+		SetTitle = function() end,
+		SetImage = function() end,
+	}
+
+	services.TweenService = {
+		Name = "TweenService",
+		Create = function()
+			return {
+				Play = function() end,
+				Cancel = function() end,
+				Completed = signal(),
+			}
+		end,
+	}
+
+	services.GuiService = { Name = "GuiService", Select = function() end }
+	services.Debris = { Name = "Debris", AddItem = function() end }
 	services.TeleportService = { Name = "TeleportService" }
 	services.HttpService = {
 		Name = "HttpService",
@@ -317,7 +517,6 @@ local function buildServices()
 		end,
 	}
 	services.MarketplaceService = { Name = "MarketplaceService" }
-	services.TweenService = { Name = "TweenService" }
 	services.CollectionService = {
 		Name = "CollectionService",
 		GetTagged = function()
@@ -386,6 +585,22 @@ local function buildEnvironment(scriptHandle: any)
 		OverlapParams = {
 			new = function()
 				return { FilterType = nil, FilterDescendantsInstances = {}, MaxParts = 0 }
+			end,
+		},
+
+		-- Also a property bag: nothing tweens here, but the UI builds its whole
+		-- timing table at module scope, so this has to exist for any screen to
+		-- load at all.
+		TweenInfo = {
+			new = function(time, style, direction, repeatCount, reverses, delayTime)
+				return {
+					Time = time or 1,
+					EasingStyle = style,
+					EasingDirection = direction,
+					RepeatCount = repeatCount or 0,
+					Reverses = reverses or false,
+					DelayTime = delayTime or 0,
+				}
 			end,
 		},
 
@@ -461,7 +676,7 @@ local function buildEnvironment(scriptHandle: any)
 		xpcall = xpcall,
 		select = select,
 		type = type,
-		typeof = roblox.typeof or type,
+		typeof = harnessTypeof,
 		tostring = tostring,
 		tonumber = tonumber,
 		ipairs = ipairs,
@@ -513,7 +728,16 @@ function Env.requireHandle(target: any): any
 		environment = buildEnvironment(target),
 	})
 
-	local result = chunk()
+	-- On failure the cache entry is cleared. Leaving the cycle guard behind
+	-- would hand `false` to every later requirer, so one broken module would
+	-- report as a dozen confusing "attempt to index boolean" failures elsewhere
+	-- and bury its own error.
+	local ok, result = pcall(chunk)
+	if not ok then
+		moduleResults[file] = nil
+		error(result, 0)
+	end
+
 	moduleResults[file] = result
 	return result
 end
@@ -531,6 +755,111 @@ end
 
 function Env.workspace()
 	return services.Workspace
+end
+
+--[[
+	Swap in runtime-shaped stand-ins for the client scenario.
+
+	Lune models Roblox's *data*, not its runtime: there are no signals, and
+	properties that only exist while a game is running — a camera's ViewportSize
+	above all — have no value to read. Server code barely notices, because it
+	mostly builds Instances. Client code is made of exactly those things.
+
+	So for the client the Workspace and LocalPlayer become plain tables that
+	answer the runtime questions. Everything the UI actually creates is still a
+	real Instance, so a bad property in a Frame or TextLabel still fails.
+]]
+function Env.enableClientRuntime()
+	local signal = inertSignal
+
+	-- A real Camera, not a stand-in: client code parents things to it and hands
+	-- it to functions that demand an Instance. ViewportSize only exists while a
+	-- game runs, so it has no stored default — writing one makes it readable.
+	local camera = roblox.Instance.new("Camera")
+	camera.Name = "Camera"
+	camera.ViewportSize = roblox.Vector2.new(1920, 1080)
+	camera.CFrame = roblox.CFrame.new()
+	camera.FieldOfView = 70
+	camera.Parent = services.Workspace
+	services.Workspace.CurrentCamera = camera
+
+	-- No physics engine here. Raycast answering "nothing was hit" is honest:
+	-- what a ray would have struck is decided by the pure damage and spread
+	-- maths the unit tests already cover.
+	roblox.implementMethod("Workspace", "Raycast", function()
+		record("workspace:Raycast")
+		return nil
+	end)
+	roblox.implementMethod("Workspace", "GetPartBoundsInBox", function()
+		return {}
+	end)
+	roblox.implementMethod("Workspace", "GetServerTimeNow", function()
+		return os.clock()
+	end)
+
+	-- The server creates ReplicatedStorage.Remotes at boot, so on a real client
+	-- it always exists by the time anything waits for it. Here nothing has
+	-- booted, and a client that hangs on WaitForChild would report as a failure
+	-- of the module rather than of the sandbox. Any name resolves: the point is
+	-- to let client code wire itself up, and the payload contracts are checked
+	-- on the server side instead.
+	local remoteCache: { [string]: any } = {}
+	local function fakeRemote(name: string)
+		local existing = remoteCache[name]
+		if existing then
+			return existing
+		end
+
+		local remote
+		remote = {
+			Name = name,
+			ClassName = "RemoteEvent",
+			OnClientEvent = signal(),
+			FireServer = function()
+				record("remote:FireServer")
+			end,
+			InvokeServer = function()
+				record("remote:InvokeServer")
+				return nil
+			end,
+			IsA = function(_self, className: string)
+				return className == "RemoteEvent" or className == "Instance"
+			end,
+		}
+		remoteCache[name] = remote
+		return remote
+	end
+
+	local remotesFolder = {
+		Name = "Remotes",
+		FindFirstChild = function(_self, name: string)
+			return fakeRemote(name)
+		end,
+		WaitForChild = function(_self, name: string)
+			return fakeRemote(name)
+		end,
+		GetChildren = function()
+			local all = {}
+			for _, remote in remoteCache do
+				table.insert(all, remote)
+			end
+			return all
+		end,
+	}
+	rawset(services.ReplicatedStorage, "Remotes", remotesFolder)
+
+	local localPlayer = services.Players.LocalPlayer
+	localPlayer.FindFirstChildOfClass = function(_self, className: string)
+		if className == "PlayerGui" then
+			return localPlayer.PlayerGui
+		end
+		return nil
+	end
+	localPlayer.WaitForChildOfClass = localPlayer.FindFirstChildOfClass
+	localPlayer.GetChildren = function()
+		return { localPlayer.PlayerGui }
+	end
+	localPlayer.Kick = function() end
 end
 
 function Env.service(name: string)

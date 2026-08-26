@@ -16,6 +16,7 @@ local SCENARIOS = {
 	{ name = "modules", what = "every server and shared module loads" },
 	{ name = "world", what = "all three maps build and are playable" },
 	{ name = "models", what = "every weapon builds in every skin" },
+	{ name = "client", what = "every client module loads and boots" },
 }
 
 local failed = {}

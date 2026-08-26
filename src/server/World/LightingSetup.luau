@@ -81,10 +81,11 @@ function LightingSetup.apply()
 	colorCorrection.Saturation = 0.16
 	colorCorrection.TintColor = Color3.fromRGB(255, 252, 250)
 
-	local sunRays = ensure("SunRaysEffect", "LaserTagSunRays")
-	sunRays.Enabled = true
-	sunRays.Intensity = 0.06
-	sunRays.Spread = 0.6
+	-- No SunRaysEffect. It is a screen-space pass that costs frames on every
+	-- device, and both arenas are enclosed — players would almost never see the
+	-- sun it draws rays from. In a game decided by reaction time, that is a bad
+	-- trade. The neon look comes from Material.Neon plus the bloom above, which
+	-- do not depend on it.
 
 	applied = true
 end
