@@ -25,6 +25,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
 assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.json")
 
+local AnalyticsService = require(script.Parent.AnalyticsService)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
 local GameConfig = require(Shared.Config.GameConfig)
 local MathUtil = require(Shared.Util.MathUtil)
@@ -144,10 +145,21 @@ function DataService.addCoins(player: Player, amount: number, reason: string): b
 	data.Coins += granted
 	syncCoins(player, data)
 	Remotes.fireClient(RemoteNames.CoinsChanged, player, data.Coins, granted, reason or "Reward")
+
+	-- Reported here rather than at each call site: this is the single point every
+	-- coin enters a balance, so the dashboard cannot drift out of step with what
+	-- players were actually paid.
+	AnalyticsService.coinsEarned(player, granted, data.Coins, reason or "Reward")
 	return true
 end
 
-function DataService.trySpendCoins(player: Player, amount: number): boolean
+--[[
+	`sku` names what the coins bought. It is reporting only — nothing about the
+	deduction depends on it — but without it the dashboard can say how much
+	players spend and never on what, which is the half that decides whether a
+	skin is worth keeping in the shop.
+]]
+function DataService.trySpendCoins(player: Player, amount: number, sku: string?): boolean
 	local data = DataService.getData(player)
 	if not data then
 		return false
@@ -160,6 +172,7 @@ function DataService.trySpendCoins(player: Player, amount: number): boolean
 	data.Coins -= amount
 	syncCoins(player, data)
 	Remotes.fireClient(RemoteNames.CoinsChanged, player, data.Coins, -amount, "Spend")
+	AnalyticsService.coinsSpent(player, amount, data.Coins, sku or "Unknown")
 	return true
 end
 

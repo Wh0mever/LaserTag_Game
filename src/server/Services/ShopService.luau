@@ -97,7 +97,7 @@ local function onBuySkinRequest(player: Player, skinId: string)
 	local spent = coinsBefore - data.Coins
 	data.Coins = coinsBefore
 
-	if spent > 0 and not DataService.trySpendCoins(player, spent) then
+	if spent > 0 and not DataService.trySpendCoins(player, spent, skinId) then
 		-- Only reachable if the profile went inactive between the two calls.
 		-- Undo the grant rather than leave the player holding a free skin.
 		data.OwnedSkins[skinId] = nil

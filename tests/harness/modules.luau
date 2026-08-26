@@ -117,6 +117,47 @@ for _, path in modules do
 end
 
 --------------------------------------------------------------------------------
+-- Analytics must never take a match down
+--
+-- Reporting is a side channel. The sandbox provides an AnalyticsService with no
+-- methods on it — the same shape as the service being unavailable, throttled or
+-- changed by an engine release — and every entry point has to survive that
+-- quietly. This is the one property worth asserting rather than reading.
+--------------------------------------------------------------------------------
+
+print("")
+print("Analytics under an unavailable service")
+print(string.rep("-", 60))
+
+local analyticsOk, analyticsErr = pcall(function()
+	local Analytics = Env.load("src/server/Services/AnalyticsService")
+	local player = { Name = "Nobody", UserId = 7, DisplayName = "Nobody" }
+
+	Analytics.coinsEarned(player, 25, 125, "Kill")
+	Analytics.coinsSpent(player, 400, 0, "crimson")
+	Analytics.matchQueued(player, "Dust")
+	Analytics.matchStarted(player, "Dust")
+	Analytics.killScored(player)
+	Analytics.matchFinished(player, true, 30, 12)
+	Analytics.spinResolved(player, 3, "coins", 300)
+	Analytics.cleanupPlayer(player)
+
+	-- Reporting a match that never started must be a no-op, not an error: a
+	-- player can be placed by a mid-match join that skipped the queue step.
+	Analytics.matchFinished(player, false, 0, 0)
+
+	assert(not Analytics.isAvailable(), "analytics should switch itself off after the first failure")
+end)
+
+if analyticsOk then
+	print("  every entry point survived; the service switched itself off")
+else
+	failedCount += 1
+	table.insert(failures, { path = "src/server/Services/AnalyticsService", err = tostring(analyticsErr) })
+	print(`  FAILED: {analyticsErr}`)
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 

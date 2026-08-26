@@ -27,6 +27,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
 assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.json")
 
+local AnalyticsService = require(script.Parent.Parent.Services.AnalyticsService)
 local DataService = require(script.Parent.Parent.Services.DataService)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
 local GameConfig = require(Shared.Config.GameConfig)
@@ -218,6 +219,7 @@ end
 function MatchRuntime:_place(player: Player, teamId: string)
 	player:SetAttribute("InMatch", self.mapId)
 	TeamService.assignToTeam(player, teamId)
+	AnalyticsService.matchStarted(player, self.mapId)
 	task.spawn(PlayerService.spawnInMatch, player, self.mapId, teamId)
 end
 
@@ -277,6 +279,12 @@ function MatchRuntime:_endMatch(effect: { [string]: any })
 			if DataService.addCoins(player, amount, reason) then
 				rewards[player.UserId] = amount
 			end
+
+			-- The only place a match reports. Where players stop appearing in
+			-- this funnel is where the match loop is losing them.
+			local ownScore = if teamId == "A" then effect.scores.A else effect.scores.B
+			local enemyScore = if teamId == "A" then effect.scores.B else effect.scores.A
+			AnalyticsService.matchFinished(player, won, ownScore, enemyScore)
 
 			-- Writes to an OrderedDataStore, so it must not block the payout loop.
 			task.spawn(LeaderboardService.flush, player)
@@ -338,6 +346,20 @@ function MatchRuntime:onQueueChanged(players: { Player })
 	for _, player in players do
 		if isPresent(player) and #list < GameConfig.MAX_PLAYERS_PER_MATCH then
 			table.insert(list, player)
+		end
+	end
+
+	-- The first funnel step, and only for players who were not already queued:
+	-- the pad roster is re-sent on every poll, so reporting the whole list each
+	-- time would restart the funnel for people standing still. A player who
+	-- queues and never reaches Playing is one the countdown lost.
+	local wasQueued = {}
+	for _, player in self.queued do
+		wasQueued[player] = true
+	end
+	for _, player in list do
+		if not wasQueued[player] then
+			AnalyticsService.matchQueued(player, self.mapId)
 		end
 	end
 
@@ -404,6 +426,9 @@ function MatchRuntime:registerKill(victim: Player, killer: Player?, _weaponId: s
 		local killerTeam = self.roster[killer] or TeamService.getTeamId(killer)
 		if killerTeam and killerTeam ~= victimTeam then
 			self.kills[killer] = (self.kills[killer] or 0) + 1
+			-- Counted, not sent: analytics is rate-limited and this fires
+			-- hundreds of times an hour. It is reported once at match end.
+			AnalyticsService.killScored(killer)
 			self:_dispatch({ type = "kill", teamId = killerTeam })
 		end
 	end

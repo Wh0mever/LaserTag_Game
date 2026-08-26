@@ -31,6 +31,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
 assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.json")
 
+local AnalyticsService = require(script.Parent.AnalyticsService)
 local DataService = require(script.Parent.DataService)
 local RemoteNames = require(Shared.RemoteNames)
 local Remotes = require(script.Parent.Parent.Net.Remotes)
@@ -91,7 +92,7 @@ local function performSpin(player: Player, data: any)
 	local spin = data.Spin
 
 	local free = SpinLogic.canSpinFree(spin, now)
-	if not free and not DataService.trySpendCoins(player, SpinConfig.EXTRA_SPIN_COST) then
+	if not free and not DataService.trySpendCoins(player, SpinConfig.EXTRA_SPIN_COST, "ExtraSpin") then
 		return failure(ERRORS.NeedCoins, data)
 	end
 
@@ -117,6 +118,10 @@ local function performSpin(player: Player, data: any)
 	if coinsAwarded > 0 then
 		DataService.addCoins(player, coinsAwarded, "Spin")
 	end
+
+	-- Sent per spin rather than aggregated: spins are rare, and this is what
+	-- makes it checkable that the wheel pays out the odds it advertises.
+	AnalyticsService.spinResolved(player, segmentIndex, rewardKind, if free then 0 else SpinConfig.EXTRA_SPIN_COST)
 
 	DataService.pushSnapshot(player)
 
