@@ -43,6 +43,11 @@ local POP_SCALE = 1.12
 --[[
 	Groups a balance with thousands separators. Roblox has no locale formatter, so
 	this is done by hand; the value is always a whole number of coins.
+
+	Exposed as CurrencyLabel.format because prices are shown outside this
+	component too — the shop's BUY buttons carry them — and a Legendary skin
+	reading "BUY 48000" next to a balance reading "48,000" looks like two
+	different currencies.
 ]]
 local function formatCoins(value: number): string
 	local text = tostring(math.max(MathUtil.round(value), 0))
@@ -55,6 +60,8 @@ local function formatCoins(value: number): string
 
 	return grouped
 end
+
+CurrencyLabel.format = formatCoins
 
 function CurrencyLabel.create(props: { [string]: any })
 	assert(type(props) == "table", "CurrencyLabel.create expects a props table")

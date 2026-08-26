@@ -188,6 +188,28 @@ for _, key in SOUND_KEYS do
 end
 
 --------------------------------------------------------------------------------
+-- Shared UI helpers
+--
+-- A screen only builds its widgets when the player opens it, so a helper that
+-- one screen borrows from another is never touched by init() or start(). If it
+-- is missing the game boots perfectly and then errors the first time somebody
+-- presses SHOP — which is precisely the kind of failure a load-time harness
+-- would otherwise wave through.
+--------------------------------------------------------------------------------
+
+heading("Shared UI helpers")
+
+local CurrencyLabel = Env.load("src/client/UI/Components/CurrencyLabel")
+
+check(type(CurrencyLabel.format) == "function", "CurrencyLabel exposes format() for other screens")
+if type(CurrencyLabel.format) == "function" then
+	-- Prices reach five digits, which is where an unformatted number starts
+	-- reading as a different currency to the grouped balance beside it.
+	check(CurrencyLabel.format(48000) == "48,000", `format groups thousands (got "{CurrencyLabel.format(48000)}")`)
+	check(CurrencyLabel.format(600) == "600", `format leaves short numbers alone (got "{CurrencyLabel.format(600)}")`)
+end
+
+--------------------------------------------------------------------------------
 -- What the run left behind
 --------------------------------------------------------------------------------
 

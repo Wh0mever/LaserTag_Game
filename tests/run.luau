@@ -99,6 +99,7 @@ local SPECS = {
 	"MatchStateMachine",
 	"ShopLogic",
 	"SpinLogic",
+	"Economy",
 	"RateLimiterCore",
 	"MapDefs",
 }
