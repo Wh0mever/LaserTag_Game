@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  format:
+    name: Format (StyLua)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ok-nick/setup-aftman@v0.4.2
+      - run: stylua --check src/ tests/
+
+  lint:
+    name: Lint (Selene)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ok-nick/setup-aftman@v0.4.2
+      # Uses the pinned lasertag.yml standard library, so no API dump download.
+      - run: selene src/ tests/
+
+  test:
+    name: Unit tests (Luau CLI)
+    runs-on: ubuntu-latest
+    env:
+      # Pinned like every other tool in aftman.toml. An upstream release must
+      # not be able to turn a pull request red on its own; bump this on purpose.
+      LUAU_VERSION: "0.735"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Luau CLI
+        env:
+          # Unauthenticated api.github.com calls share a 60-per-hour quota with
+          # every other job on the runner's IP, which is the likeliest way this
+          # step fails for a reason that has nothing to do with the change.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if ! curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -o release.json \
+            "https://api.github.com/repos/luau-lang/luau/releases/tags/${LUAU_VERSION}"; then
+            echo "::error::Could not read the Luau ${LUAU_VERSION} release: the tag may not exist, the token may be rejected, or api.github.com is unreachable."
+            exit 1
+          fi
+
+          # Discovered rather than hardcoded: if upstream renames the archive,
+          # this fails here with the list of what it does publish, instead of
+          # 404-ing later on a guessed URL.
+          URL="$(jq -r 'first(.assets[] | select(.name | test("(ubuntu|linux).*\\.zip")) | .browser_download_url) // empty' release.json)"
+          if [ -z "${URL}" ]; then
+            echo "::error::Luau ${LUAU_VERSION} publishes no Linux archive. Assets in this release:"
+            jq -r '.assets[].name' release.json
+            exit 1
+          fi
+
+          if ! curl -fsSL -o luau.zip "${URL}"; then
+            echo "::error::Downloading ${URL} failed."
+            exit 1
+          fi
+
+          unzip -oq luau.zip -d .luau
+
+          # -print -quit rather than a pipe into head: under pipefail, head
+          # closing the pipe early would fail the step on a successful find.
+          BIN="$(find .luau -maxdepth 2 -type f -name luau -print -quit)"
+          if [ -z "${BIN}" ]; then
+            echo "::error::No luau binary inside the archive. It contains:"
+            unzip -l luau.zip
+            exit 1
+          fi
+
+          chmod +x "${BIN}"
+
+          # Executing a trivial script, not --version: the Luau CLI has no
+          # version flag and exits non-zero on an unknown one, which under
+          # `set -e` would fail this step on a perfectly good binary. Running
+          # code is also the property the next step actually depends on.
+          printf 'print("luau ok")\n' > smoke.luau
+          "${BIN}" smoke.luau
+          rm smoke.luau
+
+          echo "LUAU_BIN=${BIN}" >> "${GITHUB_ENV}"
+      - name: Run tests
+        run: |
+          "${LUAU_BIN}" tests/run.luau
+
+  harness:
+    name: Execute Roblox code (Lune)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ok-nick/setup-aftman@v0.4.2
+      # Most of this repository only runs inside Roblox. The harness executes it
+      # against Lune's real Instance/CFrame/Enum implementations, so a bad
+      # property or a broken map definition fails here rather than in a playtest.
+      - run: lune run tests/harness/run
+
+  build:
+    name: Build place (Rojo)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ok-nick/setup-aftman@v0.4.2
+      - run: rojo build default.project.json -o LaserTag.rbxlx
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LaserTag-place
+          path: LaserTag.rbxlx

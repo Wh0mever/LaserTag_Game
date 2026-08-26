@@ -1,0 +1,3 @@
+# Vendored third-party source is kept byte-identical to upstream so it can be
+# diffed against a new release; formatting it would defeat that.
+src/server/Vendor/

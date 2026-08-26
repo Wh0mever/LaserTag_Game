@@ -1,0 +1,25 @@
+# Rojo build artifacts
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+*.rbxl.lock
+*.rbxlx.lock
+/build/
+
+# Tooling
+sourcemap.json
+roblox.yml
+globalTypes.d.luau
+/Packages/
+/ServerPackages/
+/DevPackages/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
