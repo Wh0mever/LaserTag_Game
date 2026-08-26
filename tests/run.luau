@@ -102,6 +102,7 @@ local SPECS = {
 	"Economy",
 	"RateLimiterCore",
 	"MapDefs",
+	"MapBalance",
 }
 
 print("Running LaserTag unit tests\n")

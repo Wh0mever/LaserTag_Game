@@ -23,9 +23,15 @@ local WeaponConfig = require("../src/shared/Config/WeaponConfig")
 local MAX_HEALTH = 100
 
 -- Where each weapon is meant to win, and where it is meant to lose.
+--
+-- These are distances the maps actually contain, not round numbers. The longest
+-- clear sightline in the game is 234 studs on Nexus, 183 on Dust and 99 on
+-- Mirage (tests/MapBalance.spec.luau measures them and fails if they drift), so
+-- LONG was 240 — past the edge of every arena. The lance owned a band that
+-- could not be reached, which is the same as owning nothing.
 local CLOSE = 20
 local MID = 120
-local LONG = 240
+local LONG = 200
 
 --[[
 	Seconds from the first hit to the killing hit at `distance`. The first shot

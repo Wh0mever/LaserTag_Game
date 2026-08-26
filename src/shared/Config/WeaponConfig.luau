@@ -29,7 +29,14 @@ WeaponConfig.Weapons = {
 		-- right pick at every distance on every map and left the other two with
 		-- no band of their own. It keeps close and mid range — where 600 RPM
 		-- belongs — and gives up long range instead of also winning there.
-		falloff = { start = 90, finish = 240, minFactor = 0.5 },
+		--
+		-- `finish` is set from the maps rather than chosen: at 90-240 the lance
+		-- only overtook the rifle past 240 studs, and the longest clear sightline
+		-- in the game is 234 (Nexus), 183 (Dust), 99 (Mirage). The lance's whole
+		-- band sat beyond the edge of every arena, so it was never the right
+		-- answer anywhere. At 70-200 the crossover lands near 150, which Dust and
+		-- Nexus both contain and Mirage deliberately does not.
+		falloff = { start = 70, finish = 200, minFactor = 0.45 },
 
 		baseSpreadDeg = 0.15,
 		sprayResetTime = 0.3,
