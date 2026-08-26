@@ -41,35 +41,55 @@ local VFXController = {}
 VFXController.Priority = 8
 
 --------------------------------------------------------------------------------
--- SOUND SOURCES — drop real asset ids in here
+-- SOUND SOURCES
 --------------------------------------------------------------------------------
 --[[
-	This build ships with no uploaded audio, so every `id` below is an
-	engine-local `rbxasset://` path: a placeholder chosen only because it exists
-	offline, then pitched and gated to stand in for the real sound.
+	Every id below is a real Creator Store asset, and each was checked against
+	Roblox's own catalogue before being written here: sound effect rather than
+	music, free, published and purchasable. An id that fails any of those loads
+	as silence in a published place, and silence is invisible in code review —
+	so none of these are guesses.
 
-	To use real audio, replace `id` with an `rbxassetid://...` value and set
-	`speed` back to 1. Nothing outside this table has to change.
+	Where there was a choice, the pick came from ProSoundEffects: it is Roblox's
+	licensed library, which means it is professionally produced and will not
+	disappear under moderation. Much of the rest of the audio catalogue is ripped
+	from commercial games, and building a published experience on that is a
+	takedown waiting to happen.
 
 	  volume  0-10, passed straight to Sound.Volume
-	  speed   base Sound.PlaybackSpeed
+	  speed   base Sound.PlaybackSpeed — 1 plays the sample as recorded
 	  jitter  random +/- applied to speed on every play, so a sustained burst of
 	          the same sample does not phase-lock into a machine tone
+
+	To audition or replace one: open the id on the Creator Store, or swap in
+	another `rbxassetid://` value. Nothing outside this table has to change.
 ]]
 local SOUNDS = {
-	Rifle = { id = "rbxasset://sounds/electronicpingshort.wav", volume = 0.4, speed = 2.6, jitter = 0.08 },
-	Pistol = { id = "rbxasset://sounds/electronicpingshort.wav", volume = 0.5, speed = 1.8, jitter = 0.1 },
-	-- Pitched well below the others and louder: the Lance has to be audible
+	-- Weapons. The rifle and pistol come from one creator so they sound like
+	-- they belong to the same armoury; a mismatched pair reads as two games.
+	Rifle = { id = "rbxassetid://8964303934", volume = 0.5, speed = 1, jitter = 0.06 }, -- Laser Assault Rifle Shot
+	Pistol = { id = "rbxassetid://8969857660", volume = 0.55, speed = 1.05, jitter = 0.08 }, -- Laser Pistol Shot
+
+	-- Slightly slowed and the loudest of the three: the Lance has to carry
 	-- across the map, because knowing a marksman is holding an angle is most of
 	-- how you avoid walking into one.
-	Lance = { id = "rbxasset://sounds/electronicpingshort.wav", volume = 0.7, speed = 0.75, jitter = 0.04 },
-	Impact = { id = "rbxasset://sounds/snap.mp3", volume = 0.3, speed = 1.7, jitter = 0.18 },
-	Hitmarker = { id = "rbxasset://sounds/clickfast.wav", volume = 0.55, speed = 1.9, jitter = 0.04 },
-	Kill = { id = "rbxasset://sounds/clickfast.wav", volume = 0.75, speed = 1.15, jitter = 0 },
-	Reload = { id = "rbxasset://sounds/switch.wav", volume = 0.45, speed = 1, jitter = 0.05 },
-	Equip = { id = "rbxasset://sounds/switch.wav", volume = 0.35, speed = 1.6, jitter = 0 },
-	Empty = { id = "rbxasset://sounds/clickfast.wav", volume = 0.35, speed = 0.7, jitter = 0 },
-	Hurt = { id = "rbxasset://sounds/bass.wav", volume = 0.35, speed = 1.4, jitter = 0.1 },
+	Lance = { id = "rbxassetid://9118786206", volume = 0.75, speed = 0.9, jitter = 0.03 }, -- Sci-Fi Weapon 5 (ProSoundEffects)
+
+	Impact = { id = "rbxassetid://201858087", volume = 0.35, speed = 1.15, jitter = 0.15 }, -- laser_impact
+
+	-- Two tiers of confirmation: a tick for a hit, something fuller for a kill,
+	-- so a player knows which happened without looking away from the fight.
+	Hitmarker = { id = "rbxassetid://7167425696", volume = 0.5, speed = 1, jitter = 0.03 }, -- hitmarker
+	Kill = { id = "rbxassetid://208341701", volume = 0.7, speed = 1, jitter = 0 }, -- Headshot Hitmarker
+
+	Reload = { id = "rbxassetid://8561502124", volume = 0.5, speed = 1, jitter = 0.04 }, -- laser gun reload
+	Equip = { id = "rbxassetid://9118139406", volume = 0.4, speed = 1.1, jitter = 0 }, -- Relay Clicks 23 (ProSoundEffects)
+
+	-- Deliberately dry and mechanical against the energy weapons: an empty
+	-- magazine should sound like nothing fired, not like a weak shot.
+	Empty = { id = "rbxassetid://9116321197", volume = 0.4, speed = 1, jitter = 0 }, -- Locking Wrench 10 (ProSoundEffects)
+
+	Hurt = { id = "rbxassetid://78164261999660", volume = 0.45, speed = 1, jitter = 0.08 }, -- Zapped Power
 }
 
 local FALLBACK_BEAM_COLOR = Color3.fromRGB(0, 229, 255)
