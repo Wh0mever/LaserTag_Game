@@ -51,6 +51,23 @@ GameConfig.SCORE_LIMIT_PER_PLAYER = 18
 -- Broadcast cadence for the HUD timer/score (unreliable, 1 Hz).
 GameConfig.TICK_INTERVAL = 1
 
+--[[
+	Idle removal. A player who has neither moved nor fired for this long is
+	warned, then returned to the hub.
+
+	An idle player in a team mode costs more than their own experience: they are
+	free kills, they make it seven against eight, they raise the kill target for
+	both sides (it scales off the larger roster and never falls once raised), and
+	they take the end-of-match payout for standing still — which breaks the
+	economy's assumption that coins come from playing.
+
+	The thresholds are generous on purpose. Firing counts as activity, so a
+	marksman holding a lane with the Arc Lance is not caught; being caught needs
+	both hands off for over a minute of a ten-minute match.
+]]
+GameConfig.IDLE_WARN_SECONDS = 45
+GameConfig.IDLE_REMOVE_SECONDS = 75
+
 -- Queue ------------------------------------------------------------------
 
 -- How often the server samples the portal pads for players standing on them.

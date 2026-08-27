@@ -26,6 +26,7 @@ assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.js
 local Constants = require(Shared.Constants)
 local DamageCalc = require(script.Parent.Parent.Combat.DamageCalc)
 local DataService = require(script.Parent.DataService)
+local MatchService = require(script.Parent.MatchService)
 local RemoteNames = require(Shared.RemoteNames)
 local Remotes = require(script.Parent.Parent.Net.Remotes)
 local ShootValidation = require(script.Parent.Parent.Combat.ShootValidation)
@@ -189,6 +190,11 @@ local function onShootRequest(player: Player, weaponId: string, seq: number, _or
 	-- protection here — before the shot is resolved, so it cannot be traded for
 	-- a free kill even on the shot that ends it.
 	ShotResolver.clearSpawnProtection(player)
+
+	-- ...and it is proof the player is present, which is what keeps a marksman
+	-- holding a lane from being removed as idle for playing the Arc Lance the
+	-- way it was designed.
+	MatchService.markActivity(player)
 
 	local shot = ShotResolver.resolve(player, weaponId, direction, sprayIndex, nextRandom)
 	if not shot then

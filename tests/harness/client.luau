@@ -239,6 +239,30 @@ for _, definition in SettingsConfig.Definitions do
 end
 
 --------------------------------------------------------------------------------
+-- The notice banner
+--
+-- It is the only way the server explains an idle removal, and it fires from a
+-- remote that nothing else in this harness triggers. A banner stuck visible
+-- would sit over the game; one that never appears would make being pulled out
+-- of a match look arbitrary.
+--------------------------------------------------------------------------------
+
+heading("Notice banner")
+
+local NoticeScreen = Env.load("src/client/UI/Screens/NoticeScreen")
+
+check(type(NoticeScreen.show) == "function", "NoticeScreen exposes show()")
+
+local bannerOk, bannerErr = pcall(NoticeScreen.show, "Returned to the hub", "error")
+check(bannerOk, `showing a notice does not error{if bannerOk then "" else ": " .. tostring(bannerErr)}`)
+
+-- An empty or non-string message must be ignored rather than rendered as a
+-- blank bar the player cannot explain.
+check(pcall(NoticeScreen.show, "", "info"), "an empty notice is ignored without erroring")
+check(pcall(NoticeScreen.show, nil, "info"), "a nil notice is ignored without erroring")
+check(pcall(NoticeScreen.show, "Unknown severity", "not-a-severity"), "an unknown severity falls back")
+
+--------------------------------------------------------------------------------
 -- The welcome card shows to new players and nobody else
 --
 -- An onboarding card that reopens for a returning player is worse than no card

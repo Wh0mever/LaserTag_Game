@@ -35,6 +35,7 @@ RemoteNames.DamageTaken = "DamageTaken"
 RemoteNames.KillFeedEvent = "KillFeedEvent"
 RemoteNames.DeathInfo = "DeathInfo"
 RemoteNames.AmmoSync = "AmmoSync"
+RemoteNames.Notice = "Notice"
 
 -- Declarative manifest consumed by Net/Remotes.init().
 RemoteNames.MANIFEST = {
@@ -60,6 +61,11 @@ RemoteNames.MANIFEST = {
 	{ name = RemoteNames.KillFeedEvent, kind = "Event" },
 	{ name = RemoteNames.DeathInfo, kind = "Event" },
 	{ name = RemoteNames.AmmoSync, kind = "Event" },
+	-- A short banner the player reads wherever they are. Reliable rather than
+	-- unreliable: the one message it carries today explains why somebody is
+	-- about to be taken out of a match, and a dropped packet would make that
+	-- removal look arbitrary.
+	{ name = RemoteNames.Notice, kind = "Event" },
 }
 
 return RemoteNames
