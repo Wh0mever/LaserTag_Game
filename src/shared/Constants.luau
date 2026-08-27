@@ -53,6 +53,9 @@ Constants.KEYBINDS = {
 	Shop = "Q",
 	Friends = "F",
 	Spin = "P",
+	-- O for options. Escape is not available: Roblox reserves it for its own
+	-- menu and a game cannot take it.
+	Settings = "O",
 	MouseUnlock = "RightControl",
 	Scoreboard = "Tab",
 }

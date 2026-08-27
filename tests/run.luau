@@ -100,6 +100,7 @@ local SPECS = {
 	"Pacing",
 	"ShopLogic",
 	"SpinLogic",
+	"Settings",
 	"Economy",
 	"RateLimiterCore",
 	"MapDefs",

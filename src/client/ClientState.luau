@@ -38,6 +38,7 @@ assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.js
 
 local Constants = require(Shared.Constants)
 local RemoteNames = require(Shared.RemoteNames)
+local SettingsConfig = require(Shared.Config.SettingsConfig)
 local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
@@ -65,6 +66,9 @@ ClientState.stats = {}
 ClientState.ownedSkins = {}
 ClientState.equippedSkins = {}
 ClientState.spin = { nextFreeAt = 0, pity = 0 }
+-- Defaults until ProfileLoaded arrives, so a slider built during boot has a
+-- real value to draw rather than nil.
+ClientState.settings = SettingsConfig.defaults()
 
 ClientState.match = { mapId = nil, phase = "Idle", timeLeft = 0, scores = { A = 0, B = 0 }, data = {} }
 ClientState.queue = { mapId = nil, count = 0, needed = 0, countdown = nil }
@@ -80,6 +84,7 @@ ClientState.isTouch = false
 
 ClientState.CoinsChanged = Signal.new()
 ClientState.ProfileChanged = Signal.new()
+ClientState.SettingsChanged = Signal.new()
 ClientState.MatchChanged = Signal.new()
 ClientState.AmmoChanged = Signal.new()
 ClientState.SlotChanged = Signal.new()
@@ -202,8 +207,49 @@ local function onProfileLoaded(snapshot)
 	ClientState.ownedSkins = snapshot.ownedSkins or {}
 	ClientState.equippedSkins = snapshot.equippedSkins or {}
 	ClientState.spin = snapshot.spin or { nextFreeAt = 0, pity = 0 }
+	-- Sanitised again on arrival: the client builds its sliders from these, and
+	-- a value outside a slider's range would render a knob off the end of its
+	-- track. Cheap, and it means the UI never has to defend itself.
+	ClientState.settings = SettingsConfig.sanitize(snapshot.settings)
 
 	ClientState.ProfileChanged:Fire(snapshot)
+	ClientState.SettingsChanged:Fire(ClientState.settings)
+end
+
+--[[
+	Apply a setting locally. Does NOT touch the network.
+
+	SettingsController listens on SettingsChanged and pushes the value at the
+	camera, the sound group or the input service, so this is what makes a change
+	felt — and it is called on every step of a slider drag, which is why it must
+	stay free.
+]]
+function ClientState.applySetting(id: string, value: number)
+	local clamped = SettingsConfig.clamp(id, value)
+	if clamped == nil then
+		return
+	end
+
+	ClientState.settings[id] = clamped
+	ClientState.SettingsChanged:Fire(ClientState.settings)
+end
+
+--[[
+	Persist the current settings.
+
+	Separate from applySetting because one drag across a slider produces dozens
+	of steps: sending each would spend the remote's whole rate budget on a single
+	gesture and get the player throttled for changing a setting. Callers apply on
+	every step and save once, on release.
+
+	Fire-and-forget by design — the value is already applied locally, so a lost
+	packet costs a stored preference rather than a responsive slider.
+]]
+function ClientState.saveSettings()
+	local remote = ClientState.getRemote(RemoteNames.SaveSettingsRequest)
+	if remote then
+		(remote :: any):FireServer(ClientState.settings)
+	end
 end
 
 local function onCoinsChanged(newCoins: number, delta: number, reason: string)

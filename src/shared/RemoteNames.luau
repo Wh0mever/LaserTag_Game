@@ -21,6 +21,7 @@ RemoteNames.BuySkinRequest = "BuySkinRequest"
 RemoteNames.EquipSkinRequest = "EquipSkinRequest"
 RemoteNames.SpinRequest = "SpinRequest"
 RemoteNames.GetFriendsRequest = "GetFriendsRequest"
+RemoteNames.SaveSettingsRequest = "SaveSettingsRequest"
 
 -- Server -> Client
 RemoteNames.ProfileLoaded = "ProfileLoaded"
@@ -44,6 +45,9 @@ RemoteNames.MANIFEST = {
 	{ name = RemoteNames.EquipSkinRequest, kind = "Function" },
 	{ name = RemoteNames.SpinRequest, kind = "Function" },
 	{ name = RemoteNames.GetFriendsRequest, kind = "Function" },
+	-- An Event rather than a Function: the client applies a setting the moment
+	-- it is dragged and never waits on the server, so there is nothing to return.
+	{ name = RemoteNames.SaveSettingsRequest, kind = "Event" },
 
 	{ name = RemoteNames.ProfileLoaded, kind = "Event" },
 	{ name = RemoteNames.CoinsChanged, kind = "Event" },

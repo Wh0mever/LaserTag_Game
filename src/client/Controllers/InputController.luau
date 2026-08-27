@@ -10,7 +10,7 @@
 	  FireReleased       ()
 	  ReloadPressed      ()
 	  SlotPressed        (slot: number)
-	  MenuToggled        (name: "Equip" | "Shop" | "Friends" | "Spin")
+	  MenuToggled        (name: "Equip" | "Shop" | "Friends" | "Spin" | "Settings")
 	  MouseUnlockToggled (unlocked: boolean)
 	  ScoreboardHeld     (isHeld: boolean)
 
@@ -34,7 +34,7 @@ local InputController = {}
 InputController.Priority = 2
 
 local KEYBINDS = Constants.KEYBINDS
-local MENU_BINDS = { Equip = "Equip", Shop = "Shop", Friends = "Friends", Spin = "Spin" }
+local MENU_BINDS = { Equip = "Equip", Shop = "Shop", Friends = "Friends", Spin = "Spin", Settings = "Settings" }
 
 local trove = Trove.new()
 local fireHeld = false
