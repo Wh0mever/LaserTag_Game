@@ -239,6 +239,37 @@ for _, definition in SettingsConfig.Definitions do
 end
 
 --------------------------------------------------------------------------------
+-- The welcome card shows to new players and nobody else
+--
+-- An onboarding card that reopens for a returning player is worse than no card
+-- at all: it becomes a door to close on every join. The gate is one comparison
+-- against a stat, which is exactly the kind of thing that looks right and is
+-- inverted.
+--------------------------------------------------------------------------------
+
+heading("Welcome card")
+
+local UIControllerModule = Env.load("src/client/UI/UIController")
+local WelcomeScreen = Env.load("src/client/UI/Screens/WelcomeScreen")
+
+check(type(WelcomeScreen.open) == "function", "the welcome card can be reopened from settings")
+
+-- Veteran first: a successful open latches the once-per-session flag, so
+-- checking the other order would prove nothing.
+ClientStateModule.stats = { MatchesPlayed = 5 }
+ClientStateModule.ProfileChanged:Fire({ stats = ClientStateModule.stats })
+check(not UIControllerModule.isMenuOpen("Welcome"), "a player who has played is not shown the card")
+
+ClientStateModule.stats = { MatchesPlayed = 0 }
+ClientStateModule.ProfileChanged:Fire({ stats = ClientStateModule.stats })
+check(UIControllerModule.isMenuOpen("Welcome"), "a player who has never played is shown the card")
+
+-- ...and only once, however many times the profile lands.
+UIControllerModule.closeMenu("Welcome")
+ClientStateModule.ProfileChanged:Fire({ stats = ClientStateModule.stats })
+check(not UIControllerModule.isMenuOpen("Welcome"), "the card does not reopen on a second profile push")
+
+--------------------------------------------------------------------------------
 -- Shared UI helpers
 --
 -- A screen only builds its widgets when the player opens it, so a helper that

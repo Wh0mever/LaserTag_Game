@@ -169,6 +169,29 @@ function SettingsScreen.init()
 
 	buildKeyList(body, #SettingsConfig.Definitions + 1)
 
+	-- The only way back to the welcome card, which otherwise shows once on a
+	-- first join and is gone. Required lazily to keep the two screens from
+	-- forming a require cycle through their module bodies.
+	local howTo = Button.create({
+		name = "HowToPlay",
+		text = "HOW TO PLAY",
+		size = UDim2.fromOffset(126, 30),
+		position = UDim2.new(1, -232, 0, 13),
+		anchorPoint = Vector2.new(1, 0),
+		parent = panel.body,
+		color = UITheme.Colors.PanelLight,
+		onActivated = function()
+			local ok, WelcomeScreen = pcall(require, script.Parent.WelcomeScreen)
+			if ok and type(WelcomeScreen) == "table" and type(WelcomeScreen.open) == "function" then
+				WelcomeScreen.open()
+			end
+		end,
+	})
+	howTo.instance.ZIndex = 4
+	trove:Add(function()
+		howTo:destroy()
+	end)
+
 	local reset = Button.create({
 		name = "Reset",
 		text = "RESET TO DEFAULTS",
