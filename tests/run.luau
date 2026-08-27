@@ -97,6 +97,7 @@ local SPECS = {
 	"DamageCalc",
 	"Balance",
 	"MatchStateMachine",
+	"IdleTracker",
 	"Pacing",
 	"ShopLogic",
 	"SpinLogic",

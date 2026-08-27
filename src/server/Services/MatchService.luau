@@ -119,6 +119,21 @@ function MatchService.registerKill(victim: Player, killer: Player?, weaponId: st
 	runtime:registerKill(victim, killer, weaponId, isHeadshot == true)
 end
 
+--[[
+	Note that `player` did something only a present player does, so the idle
+	tracker does not mistake them for absent. Called by CombatService on an
+	accepted shot.
+
+	Silently does nothing for a player who is not in a match, which is the common
+	case for anything that fires from a shared code path.
+]]
+function MatchService.markActivity(player: Player)
+	local runtime = runtimeForPlayer(player)
+	if runtime then
+		runtime:markActivity(player)
+	end
+end
+
 function MatchService.getPhase(mapId: string): string
 	local runtime = runtimes[mapId]
 	return if runtime then runtime:getPhase() else MatchStateMachine.States.Idle

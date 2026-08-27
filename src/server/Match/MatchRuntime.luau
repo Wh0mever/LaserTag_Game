@@ -31,6 +31,7 @@ local AnalyticsService = require(script.Parent.Parent.Services.AnalyticsService)
 local DataService = require(script.Parent.Parent.Services.DataService)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
 local GameConfig = require(Shared.Config.GameConfig)
+local IdleTracker = require(script.Parent.IdleTracker)
 local LeaderboardService = require(script.Parent.Parent.Services.LeaderboardService)
 local MatchStateMachine = require(script.Parent.MatchStateMachine)
 local PlayerService = require(script.Parent.Parent.Services.PlayerService)
@@ -61,6 +62,10 @@ function MatchRuntime.new(mapId: string)
 		kills = {} :: { [Player]: number }, -- kills this match, for BestKillsInMatch
 		pending = {} :: { { [string]: any } }, -- events raised while one is dispatching
 		dispatching = false,
+		idle = IdleTracker.new({
+			warnAfter = GameConfig.IDLE_WARN_SECONDS,
+			removeAfter = GameConfig.IDLE_REMOVE_SECONDS,
+		}),
 	}, MatchRuntime)
 end
 
@@ -221,6 +226,10 @@ function MatchRuntime:_place(player: Player, teamId: string)
 	player:SetAttribute("InMatch", self.mapId)
 	TeamService.assignToTeam(player, teamId)
 	AnalyticsService.matchStarted(player, self.mapId)
+	-- Where they stood before this match says nothing about whether they are
+	-- playing it, and the idle clock starts now rather than at some earlier
+	-- sighting.
+	IdleTracker.reset(self.idle, player, workspace:GetServerTimeNow())
 	task.spawn(PlayerService.spawnInMatch, player, self.mapId, teamId)
 end
 
@@ -454,7 +463,82 @@ function MatchRuntime:tick(dt: number)
 				Remotes.fireClient(RemoteNames.MatchTick, player, self.mapId, timeLeft, scores.A, scores.B)
 			end
 		end
+
+		self:_stepIdle()
 	end
+end
+
+--[[
+	Sample every player's position and act on whoever has stopped playing.
+
+	Only while a match is in progress: standing still in the hub is not idling,
+	it is reading the shop.
+]]
+function MatchRuntime:_stepIdle()
+	local now = workspace:GetServerTimeNow()
+
+	for player in self.roster do
+		local character = isPresent(player) and player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local position = nil
+		if root and root:IsA("BasePart") then
+			local at = root.Position
+			position = { x = at.X, y = at.Y, z = at.Z }
+		end
+
+		IdleTracker.observe(self.idle, player, position, now)
+	end
+
+	for _, action in IdleTracker.step(self.idle, now) do
+		local player = action.id
+		if not self.roster[player] then
+			-- Left the match between the sample and now.
+			IdleTracker.forget(self.idle, player)
+			continue
+		end
+
+		if action.action == IdleTracker.Actions.Warn then
+			local seconds = math.ceil(IdleTracker.secondsUntilRemoval(self.idle, player, now))
+			Remotes.fireClient(
+				RemoteNames.Notice,
+				player,
+				`Move or fire within {seconds}s or you will be returned to the hub`,
+				"warning"
+			)
+		elseif action.action == IdleTracker.Actions.Remove then
+			self:_removeIdle(player)
+		end
+	end
+end
+
+--[[
+	Take one idle player out of the match and put them back in the hub.
+
+	Not a kick: they keep their session and can walk onto a pad again, which
+	takes being present. Dropping them from the roster before the payout loop is
+	the point — an idle player collecting the end-of-match award is what breaks
+	the economy's assumption that coins come from playing.
+]]
+function MatchRuntime:_removeIdle(player: Player)
+	self.roster[player] = nil
+	self.kills[player] = nil
+	IdleTracker.forget(self.idle, player)
+
+	if isPresent(player) then
+		player:SetAttribute("InMatch", "")
+		TeamService.moveToLobby(player)
+		Remotes.fireClient(
+			RemoteNames.Notice,
+			player,
+			"Returned to the hub — you were not moving. Step on a pad to play again.",
+			"error"
+		)
+		task.spawn(PlayerService.spawnInHub, player)
+	end
+
+	-- The roster shrank, which may have emptied a team: the state machine owns
+	-- what that means, so it has to hear about it.
+	self:_syncRoster()
 end
 
 function MatchRuntime:onPlayerRemoving(player: Player)
@@ -464,10 +548,26 @@ function MatchRuntime:onPlayerRemoving(player: Player)
 		self:_dispatch({ type = "queueChanged", count = #self.queued })
 	end
 
+	IdleTracker.forget(self.idle, player)
+
 	if self.roster[player] then
 		self.roster[player] = nil
 		self.kills[player] = nil
 		self:_syncRoster()
+	end
+end
+
+--[[
+	Record that `player` did something only a present player does.
+
+	Firing is the signal that keeps a marksman honest: the Arc Lance is designed
+	to be played by holding a lane without moving, and position sampling alone
+	would remove the player for playing the weapon the way it was built to be
+	played.
+]]
+function MatchRuntime:markActivity(player: Player)
+	if self.roster[player] then
+		IdleTracker.markActive(self.idle, player, workspace:GetServerTimeNow())
 	end
 end
 

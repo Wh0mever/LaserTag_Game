@@ -49,6 +49,35 @@ the reward wheel.
 Защита спавна **снимается первым же выстрелом**. Три секунды неуязвимости — это чтобы не убили,
 пока ты не успел двинуться, а не чтобы выйти и разменяться, пока тебе ничего не могут сделать.
 
+#### Простой / Idle
+
+Игрок, который **45 секунд** не двигался и не стрелял, получает предупреждение, а через **75** —
+возвращается в хаб. Не кик: сессия остаётся, встать на пад можно снова, но для этого надо
+присутствовать.
+
+В командном режиме простой стоит дороже, чем испорченный вечер одного человека: стоящий игрок —
+бесплатные фраги, команда играет 7×8, а цель по фрагам поднимается **обеим** сторонам (она считается
+от большего состава и никогда не опускается). И он забирает награду за матч за то, что стоял — это
+ломает допущение экономики, что монеты приходят из игры.
+
+Два случая наивная реализация переворачивает с ног на голову, и оба закреплены тестами:
+
+- **Респаун — не движение.** Игрока, которого фармят на спавне, телепортирует на сотню стадов каждые
+  несколько секунд. Считать это активностью значило бы сделать самого очевидно отсутствующего игрока
+  в матче самым занятым. Всё, что больше `maxStep`, переустанавливает точку отсчёта, но не трогает
+  таймер.
+- **Стоять неподвижно — не простой, если ты стреляешь.** «Ланс» существует ровно для того, чтобы
+  держать линию не двигаясь. Отслеживание одной позиции удаляло бы игрока за то, что он использует
+  оружие по назначению, поэтому выстрел считается активностью.
+
+Решение живёт в чистом модуле `src/server/Match/IdleTracker.luau` — без Roblox API, часов и `Player`,
+поэтому оба случая проверяются вне Studio.
+
+An idle player is warned at 45 seconds and returned to the hub at 75. A respawn is deliberately not
+counted as movement — a player farmed at their spawn is teleported constantly, and counting that
+would exempt exactly the player who most needs removing — and firing counts as activity, so a
+marksman holding a lane with the Arc Lance is not removed for playing the weapon as designed.
+
 The kill target is a mercy rule rather than the usual ending: it scales with team size, only ever
 rises as the lobby fills, and sits above what an even match reaches, so a competitive game still ends
 on the clock while a two-to-one blowout ends about 90% of the way through. Spawn protection is
