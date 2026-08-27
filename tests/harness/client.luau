@@ -192,6 +192,53 @@ for _, key in SOUND_KEYS do
 end
 
 --------------------------------------------------------------------------------
+-- Settings reach the things they configure
+--
+-- Each setting is a number stored on a profile that has to end up written onto
+-- some engine property. A value that is stored, replicated and never applied
+-- looks completely healthy from every side except the player's.
+--------------------------------------------------------------------------------
+
+heading("Settings")
+
+local SettingsConfig = Env.load("src/shared/Config/SettingsConfig")
+local SettingsController = Env.load("src/client/Controllers/SettingsController")
+local ClientStateModule = Env.load("src/client/ClientState")
+
+check(type(SettingsController.apply) == "function", "SettingsController exposes apply()")
+
+-- Push a value that is nowhere near any default, so a property that merely
+-- happens to hold the right number cannot pass by luck.
+local PROBE = { Sensitivity = 2.5, Volume = 0.25, FieldOfView = 95 }
+local applyOk, applyErr = pcall(SettingsController.apply, PROBE)
+check(applyOk, `applying settings does not error{if applyOk then "" else ": " .. tostring(applyErr)}`)
+
+if applyOk then
+	local CameraControllerModule = Env.load("src/client/Controllers/CameraController")
+	check(
+		CameraControllerModule.getFieldOfView() == PROBE.FieldOfView,
+		`field of view reaches the camera (got {CameraControllerModule.getFieldOfView()})`
+	)
+
+	local group = VFXSound.getGroup()
+	check(group ~= nil, "the sound group exists after start()")
+	if group then
+		check(group.Volume == PROBE.Volume, `volume reaches the sound group (got {group.Volume})`)
+	end
+end
+
+-- ClientState must hold a complete settings table from the very first frame:
+-- the sliders are built before any profile arrives.
+check(type(ClientStateModule.settings) == "table", "ClientState starts with a settings table")
+check(SettingsConfig.sanitize(ClientStateModule.settings) ~= nil, "the starting settings sanitise cleanly")
+for _, definition in SettingsConfig.Definitions do
+	check(
+		type(ClientStateModule.settings[definition.id]) == "number",
+		`ClientState has a starting value for {definition.id}`
+	)
+end
+
+--------------------------------------------------------------------------------
 -- Shared UI helpers
 --
 -- A screen only builds its widgets when the player opens it, so a helper that
@@ -217,6 +264,41 @@ end
 -- it appears when a match starts — so nothing else here would build it. Doing
 -- so proves the whole widget tree constructs, and that HUDScreen's reads of it
 -- have something to read.
+-- The slider is the newest component and the only one with a drag model, so it
+-- is built here rather than trusted to have been built by a screen that may
+-- have bailed out early.
+local Slider = Env.load("src/client/UI/Components/Slider")
+local sliderOk, slider = pcall(function()
+	return Slider.create({
+		settingId = "Sensitivity",
+		value = 1,
+		parent = roblox.Instance.new("ScreenGui"),
+	})
+end)
+
+check(sliderOk, `a slider builds{if sliderOk then "" else ": " .. tostring(slider)}`)
+if sliderOk then
+	check(slider:getValue() == 1, `the slider starts on its given value (got {slider:getValue()})`)
+
+	-- setValue must move the knob without pretending the player dragged it.
+	local notified = false
+	slider._onChanged = function()
+		notified = true
+	end
+	slider:setValue(2)
+	check(slider:getValue() == 2, `setValue moves the slider (got {slider:getValue()})`)
+	check(not notified, "setValue does not fire onChanged")
+
+	-- Out-of-range input is the normal case: a drag that leaves the track sends
+	-- positions past both ends.
+	slider:setValue(999)
+	check(slider:getValue() == SettingsConfig.get("Sensitivity").max, "setValue clamps above the range")
+	slider:setValue(-999)
+	check(slider:getValue() == SettingsConfig.get("Sensitivity").min, "setValue clamps below the range")
+
+	slider:destroy()
+end
+
 local HUDWidgets = Env.load("src/client/UI/Screens/HUDWidgets")
 local hudOk, hud = pcall(function()
 	local screen = roblox.Instance.new("ScreenGui")

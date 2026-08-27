@@ -65,6 +65,9 @@ local camera: Camera? = workspace.CurrentCamera
 local recoilPitch = 0
 local recoilYaw = 0
 local recoveryRate = DEFAULT_RECOIL_RECOVERY
+-- Roblox's own default; replaced by the player's setting once the profile
+-- arrives, and re-applied whenever the engine hands out a new Camera.
+local fieldOfView = 70
 
 local deathCamActive = false
 local deathTargetPart: BasePart? = nil
@@ -83,6 +86,32 @@ function CameraController.getCamera(): Camera?
 		camera = workspace.CurrentCamera
 	end
 	return camera
+end
+
+--[[
+	Set the camera's field of view, in degrees.
+
+	Exposed here rather than written directly by the settings controller because
+	this module owns the Camera instance — the same rule that keeps it from
+	touching player.CameraMode, which MouseLockController owns. Re-applied on
+	every camera swap by `applyFieldOfView` below, since Roblox hands out a new
+	Camera on respawn and the player's choice must survive that.
+]]
+function CameraController.setFieldOfView(degrees: number)
+	if not MathUtil.isFinite(degrees) then
+		return
+	end
+
+	fieldOfView = math.clamp(degrees, 1, 120)
+
+	local cam = CameraController.getCamera()
+	if cam then
+		cam.FieldOfView = fieldOfView
+	end
+end
+
+function CameraController.getFieldOfView(): number
+	return fieldOfView
 end
 
 --[[
@@ -271,6 +300,10 @@ function CameraController.init()
 
 	trove:Connect(workspace:GetPropertyChangedSignal("CurrentCamera"), function()
 		camera = workspace.CurrentCamera
+		-- A respawn produces a fresh Camera at Roblox's default FOV, so the
+		-- player's chosen value has to be put back or it silently resets on
+		-- every death.
+		CameraController.setFieldOfView(fieldOfView)
 		if not deathCamActive then
 			restoreCamera()
 		end

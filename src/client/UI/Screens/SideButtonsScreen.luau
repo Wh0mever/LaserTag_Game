@@ -44,6 +44,7 @@ local MENUS = {
 	{ name = "Shop", label = "SHOP", icon = "★", key = Constants.KEYBINDS.Shop },
 	{ name = "Friends", label = "FRIENDS", icon = "●", key = Constants.KEYBINDS.Friends },
 	{ name = "Spin", label = "SPIN", icon = "◎", key = Constants.KEYBINDS.Spin },
+	{ name = "Settings", label = "SETTINGS", icon = "⚙", key = Constants.KEYBINDS.Settings },
 }
 
 local trove = Trove.new()

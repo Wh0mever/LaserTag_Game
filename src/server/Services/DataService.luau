@@ -32,6 +32,7 @@ local MathUtil = require(Shared.Util.MathUtil)
 local ProfileService = require(script.Parent.Parent.Vendor.ProfileService)
 local RemoteNames = require(Shared.RemoteNames)
 local Remotes = require(script.Parent.Parent.Net.Remotes)
+local SettingsConfig = require(Shared.Config.SettingsConfig)
 local Signal = require(Shared.Util.Signal)
 local SkinCatalog = require(Shared.Config.SkinCatalog)
 local SpinConfig = require(Shared.Config.SpinConfig)
@@ -65,6 +66,10 @@ local PROFILE_TEMPLATE = {
 		Pity = 0,
 		TotalSpins = 0,
 	},
+	-- Sensitivity, volume and field of view. Stored on the profile rather than
+	-- kept client-side because a sensitivity that resets on every join is worse
+	-- than no setting at all — the player would re-dial it every session.
+	Settings = SettingsConfig.defaults(),
 }
 
 local KEY_PREFIX = "Player_"
@@ -270,7 +275,27 @@ function DataService.getSnapshot(player: Player)
 			nextFreeAt = data.Spin.LastFreeSpinAt + SpinConfig.FREE_SPIN_INTERVAL,
 			pity = data.Spin.Pity,
 		},
+		-- Sanitised on the way out as well as on the way in: a profile written
+		-- by an older build could hold a key this one no longer has bounds for.
+		settings = SettingsConfig.sanitize(data.Settings),
 	}
+end
+
+--[[
+	Store a settings table for `player`.
+
+	The caller is expected to have sanitised already; doing it again here is
+	cheap and means no path can write an unbounded value into a persisted
+	profile, whatever a future caller forgets.
+]]
+function DataService.setSettings(player: Player, settings: any): boolean
+	local data = DataService.getData(player)
+	if not data then
+		return false
+	end
+
+	data.Settings = SettingsConfig.sanitize(settings)
+	return true
 end
 
 function DataService.pushSnapshot(player: Player)
