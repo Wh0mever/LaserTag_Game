@@ -171,7 +171,7 @@ local function apply()
 	-- Bound only while the cursor is free: a permanent binding would be a write
 	-- war with engine code for the whole session to no purpose, since during
 	-- play the camera module already wants exactly what this wants.
-	setGuard(false) -- SABOTAGE: one-shot write only
+	setGuard(effectiveUnlocked)
 	writeCursor()
 end
 
