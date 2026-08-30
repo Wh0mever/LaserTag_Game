@@ -224,7 +224,7 @@ end
 	felt — and it is called on every step of a slider drag, which is why it must
 	stay free.
 ]]
-function ClientState.applySetting(id: string, value: number)
+function ClientState.applySetting(id: string, value: any)
 	local clamped = SettingsConfig.clamp(id, value)
 	if clamped == nil then
 		return

@@ -232,8 +232,12 @@ end
 check(type(ClientStateModule.settings) == "table", "ClientState starts with a settings table")
 check(SettingsConfig.sanitize(ClientStateModule.settings) ~= nil, "the starting settings sanitise cleanly")
 for _, definition in SettingsConfig.Definitions do
+	-- A choice stores its option id, a slider stores a number. Both must be
+	-- present before any profile lands, or the panel builds a control with
+	-- nothing in it.
+	local expected = if definition.kind == "choice" then "string" else "number"
 	check(
-		type(ClientStateModule.settings[definition.id]) == "number",
+		type(ClientStateModule.settings[definition.id]) == expected,
 		`ClientState has a starting value for {definition.id}`
 	)
 end
@@ -454,12 +458,150 @@ check(
 )
 UIControllerModule.closeMenu("Spin")
 
--- The camera is never taken out of first person to achieve any of this: doing
--- so would dolly the view out of the player's head every time a panel opened.
+-- Opening and closing a panel must not move the camera. Freeing the cursor by
+-- changing perspective would dolly the view in or out of the player's head
+-- every time a menu opened, which is what the old implementation did and why
+-- it never worked.
+local PerspectiveModule = Env.load("src/client/Controllers/PerspectiveController")
+local cameraModeBefore = Env.service("Players").LocalPlayer.CameraMode
+UIControllerModule.openMenu("Settings")
 check(
-	Env.service("Players").LocalPlayer.CameraMode == roblox.Enum.CameraMode.LockFirstPerson,
-	"the camera stays first person throughout"
+	Env.service("Players").LocalPlayer.CameraMode == cameraModeBefore,
+	"opening a panel does not change the camera mode"
 )
+UIControllerModule.closeMenu("Settings")
+check(
+	Env.service("Players").LocalPlayer.CameraMode == cameraModeBefore,
+	"closing a panel does not change the camera mode"
+)
+
+-- And the camera mode does follow the perspective, which is the one thing that
+-- is allowed to move it.
+local expectedMode = if PerspectiveModule.isFirstPerson()
+	then roblox.Enum.CameraMode.LockFirstPerson
+	else roblox.Enum.CameraMode.Classic
+check(
+	Env.service("Players").LocalPlayer.CameraMode == expectedMode,
+	`the camera mode matches the {PerspectiveModule.get()}-person perspective`
+)
+
+--------------------------------------------------------------------------------
+-- Perspective
+--
+-- Four things have to move together when the player switches shoulder: the
+-- camera, their own body, the viewmodel, and where a shot claims to come from.
+-- The last is the one that stops the game working rather than looking wrong.
+--------------------------------------------------------------------------------
+
+heading("Perspective")
+
+local Perspective = Env.load("src/client/Controllers/PerspectiveController")
+local localPlayer = Env.service("Players").LocalPlayer
+
+check(
+	Perspective.get() == SettingsConfig.get("Perspective").default,
+	"the perspective starts on its configured default"
+)
+
+-- THE CHECK THIS SECTION EXISTS FOR. The server refuses a shot whose claimed
+-- origin is more than MAX_ORIGIN_DEVIATION from where it believes the player's
+-- eyes are. The third-person camera sits further back than that, so a client
+-- sending the camera position — which is what a first-person client can get
+-- away with, and what this game used to do — would have every shot in third
+-- person rejected as spoofing. WeaponClient sends the head position instead.
+check(
+	Perspective.THIRD_ZOOM > WeaponConfig.MAX_ORIGIN_DEVIATION,
+	string.format(
+		"the third-person camera is further from the head than the server's origin tolerance "
+			.. "(%d studs vs %d) — which is why a shot is fired from the head, not the camera",
+		Perspective.THIRD_ZOOM,
+		WeaponConfig.MAX_ORIGIN_DEVIATION
+	)
+)
+
+for _, case in
+	{
+		{ mode = Perspective.THIRD, first = false, camera = roblox.Enum.CameraMode.Classic },
+		{ mode = Perspective.FIRST, first = true, camera = roblox.Enum.CameraMode.LockFirstPerson },
+	}
+do
+	SettingsController.apply({ Perspective = case.mode })
+
+	check(Perspective.get() == case.mode, `the {case.mode} perspective is adopted`)
+	check(Perspective.isFirstPerson() == case.first, `{case.mode} reports first person as {tostring(case.first)}`)
+	check(localPlayer.CameraMode == case.camera, `{case.mode} sets the matching camera mode`)
+
+	-- Pinned to a single distance in both modes: a scrollable zoom silently
+	-- changes how far a player can see round a corner.
+	check(
+		localPlayer.CameraMinZoomDistance == localPlayer.CameraMaxZoomDistance,
+		`{case.mode} pins the zoom to one distance`
+	)
+	check(localPlayer.CameraMinZoomDistance == Perspective.zoom(), `{case.mode} uses its own zoom distance`)
+end
+
+-- An unrecognised value is not "leave it alone": it resolves to the default, so
+-- a corrupt profile cannot strand the camera somewhere no menu option matches.
+SettingsController.apply({ Perspective = "Sideways" })
+check(
+	Perspective.get() == SettingsConfig.get("Perspective").default,
+	"an unknown perspective falls back to the default"
+)
+
+-- The control the player actually uses. A slider would imply a middle setting
+-- between first and third person, and there is not one.
+local ChoiceRow = Env.load("src/client/UI/Components/ChoiceRow")
+local choiceOk, choice = pcall(function()
+	return ChoiceRow.create({
+		settingId = "Perspective",
+		value = Perspective.FIRST,
+		parent = roblox.Instance.new("ScreenGui"),
+	})
+end)
+
+check(choiceOk and choice ~= nil, `the perspective control builds{if choiceOk then "" else ": " .. tostring(choice)}`)
+if choiceOk and choice then
+	check(choice:getValue() == Perspective.FIRST, "the control starts on its given option")
+
+	local notified = 0
+	choice._onChanged = function()
+		notified += 1
+	end
+
+	choice:setValue(Perspective.THIRD)
+	check(choice:getValue() == Perspective.THIRD, "setValue selects the other option")
+	check(notified == 0, "setValue does not fire onChanged")
+
+	choice:setValue("Sideways")
+	check(choice:getValue() == SettingsConfig.get("Perspective").default, "an unknown option falls back to the default")
+
+	local options = choice.instance:FindFirstChild("Options")
+	check(options ~= nil, "the control has a row of options")
+	if options then
+		local buttons = 0
+		local widthScale = 0
+		for _, child in options:GetChildren() do
+			if child:IsA("TextButton") then
+				buttons += 1
+				widthScale += child.Size.X.Scale
+			end
+		end
+		check(buttons == #SettingsConfig.optionsFor("Perspective"), "there is a button per option")
+		check(widthScale <= 1.0001, `the option buttons fit across the row ({string.format("%.3f", widthScale)})`)
+	end
+
+	choice:destroy()
+end
+
+-- The panel picks its control from the definition's kind, so a choice control
+-- asked to render a slider setting must refuse rather than draw an empty row.
+check(
+	ChoiceRow.create({ settingId = "Sensitivity", value = 1, parent = roblox.Instance.new("ScreenGui") }) == nil,
+	"a slider setting cannot be built as a choice"
+)
+-- Leave the perspective as the player's default so later checks see a clean
+-- state rather than whatever the last case in the loop set.
+SettingsController.apply(ClientStateModule.settings)
 
 -- The equip panel lays its weapons out side by side, and the width of a column
 -- was a constant rather than a fraction of however many weapons exist. Adding

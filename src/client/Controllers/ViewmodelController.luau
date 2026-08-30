@@ -34,6 +34,7 @@ assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.js
 local ClientState = require(script.Parent.Parent.ClientState)
 local Constants = require(Shared.Constants)
 local GunModelFactory = require(Shared.GunModelFactory)
+local PerspectiveController = require(script.Parent.PerspectiveController)
 local RecoilController = require(script.Parent.RecoilController)
 local SkinCatalog = require(Shared.Config.SkinCatalog)
 local Trove = require(Shared.Util.Trove)
@@ -206,7 +207,10 @@ end
 	Rebuild only when the model on screen no longer matches what should be there.
 ]]
 local function refresh()
-	local wantModel = ClientState.isInMatch() and isAlive()
+	-- In third person the gun the player sees is the real welded one on their
+	-- character, put there by the server. Keeping this camera-parented copy as
+	-- well would draw a second gun floating in front of the lens.
+	local wantModel = ClientState.isInMatch() and isAlive() and PerspectiveController.isFirstPerson()
 	if not wantModel then
 		destroyViewmodel()
 		return
@@ -414,6 +418,11 @@ function ViewmodelController.init()
 	trove:Add(ClientState.SlotChanged:Connect(function(_slot: number, weaponId: string)
 		ViewmodelController.setWeapon(weaponId)
 	end))
+
+	-- Switching perspective mid-match either builds this gun or throws it away,
+	-- and doing nothing would leave the wrong one on screen until the next
+	-- respawn or weapon swap.
+	trove:Add(PerspectiveController.Changed:Connect(refresh))
 
 	-- A skin purchase or equip arrives as a fresh profile snapshot.
 	trove:Add(ClientState.ProfileChanged:Connect(refresh))

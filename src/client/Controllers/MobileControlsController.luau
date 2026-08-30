@@ -1,7 +1,7 @@
 --!nonstrict
 --[[
 	MobileControlsController.luau
-	Touch buttons for fire, reload and weapon switch.
+	Touch buttons for fire, reload, weapon switch and view.
 
 	Nothing downstream knows these exist. Each button publishes the exact same
 	InputController signal the keyboard and mouse publish — pressFire /
@@ -39,6 +39,7 @@ MobileControlsController.Priority = 11
 local FIRE_ACTION = "LaserTagFire"
 local RELOAD_ACTION = "LaserTagReload"
 local SWITCH_ACTION = "LaserTagSwitch"
+local VIEW_ACTION = "LaserTagView"
 
 -- Positions are relative to the ContextActionService touch frame, which the
 -- engine anchors in the bottom-right of the screen. The default jump button owns
@@ -48,6 +49,10 @@ local SWITCH_ACTION = "LaserTagSwitch"
 local FIRE_POSITION = UDim2.new(0.04, 0, 0.30, 0)
 local RELOAD_POSITION = UDim2.new(0.54, 0, 0.02, 0)
 local SWITCH_POSITION = UDim2.new(0.02, 0, 0.74, 0)
+-- Above reload, in the column furthest from the thumb that holds fire: changing
+-- view is deliberate rather than reflexive, so it does not want to be the button
+-- a panicking thumb lands on.
+local VIEW_POSITION = UDim2.new(0.54, 0, 0.46, 0)
 
 local trove = Trove.new()
 local enabled = false
@@ -71,6 +76,13 @@ end
 local function onReload(_actionName: string, state: Enum.UserInputState): Enum.ContextActionResult
 	if state == Enum.UserInputState.Begin then
 		InputController.ReloadPressed:Fire()
+	end
+	return Enum.ContextActionResult.Sink
+end
+
+local function onView(_actionName: string, state: Enum.UserInputState): Enum.ContextActionResult
+	if state == Enum.UserInputState.Begin then
+		InputController.PerspectiveToggled:Fire()
 	end
 	return Enum.ContextActionResult.Sink
 end
@@ -108,16 +120,20 @@ local function bindAll()
 	-- No key codes: on a touch device the button IS the input, and binding a key
 	-- as well would double-handle it on a phone with a keyboard attached.
 	ContextActionService:BindAction(FIRE_ACTION, onFire, true)
-	ContextActionService:SetTitle(FIRE_ACTION, "FIRE")
+	ContextActionService:SetTitle(FIRE_ACTION, "ОГОНЬ")
 	ContextActionService:SetPosition(FIRE_ACTION, FIRE_POSITION)
 
 	ContextActionService:BindAction(RELOAD_ACTION, onReload, true)
-	ContextActionService:SetTitle(RELOAD_ACTION, "RELOAD")
+	ContextActionService:SetTitle(RELOAD_ACTION, "ПЕРЕЗАР.")
 	ContextActionService:SetPosition(RELOAD_ACTION, RELOAD_POSITION)
 
 	ContextActionService:BindAction(SWITCH_ACTION, onSwitch, true)
 	ContextActionService:SetTitle(SWITCH_ACTION, titleForOtherSlot())
 	ContextActionService:SetPosition(SWITCH_ACTION, SWITCH_POSITION)
+
+	ContextActionService:BindAction(VIEW_ACTION, onView, true)
+	ContextActionService:SetTitle(VIEW_ACTION, "ВИД")
+	ContextActionService:SetPosition(VIEW_ACTION, VIEW_POSITION)
 end
 
 local function unbindAll()
@@ -133,6 +149,7 @@ local function unbindAll()
 	ContextActionService:UnbindAction(FIRE_ACTION)
 	ContextActionService:UnbindAction(RELOAD_ACTION)
 	ContextActionService:UnbindAction(SWITCH_ACTION)
+	ContextActionService:UnbindAction(VIEW_ACTION)
 end
 
 local function refresh()

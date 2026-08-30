@@ -18,9 +18,10 @@
 local SettingsConfig = require("../src/shared/Config/SettingsConfig")
 
 --[[
-	Every value in `settings` is a finite number inside its definition's bounds,
-	and there is exactly one entry per definition. Returns a reason string when
-	it does not hold, so a failure names the offending key.
+	Every value in `settings` is one this setting may legally hold — a finite
+	number inside a slider's bounds, or one of a choice's option ids — and there
+	is exactly one entry per definition. Returns a reason string when it does
+	not hold, so a failure names the offending key.
 ]]
 local function violation(settings: any): string?
 	if type(settings) ~= "table" then
@@ -33,12 +34,27 @@ local function violation(settings: any): string?
 		if not definition then
 			return `unknown key "{tostring(key)}"`
 		end
-		if type(value) ~= "number" or value ~= value then
-			return `"{key}" is not a number: {tostring(value)}`
+
+		if definition.kind == "choice" then
+			local known = false
+			for _, option in definition.options do
+				if option.id == value then
+					known = true
+					break
+				end
+			end
+			if not known then
+				return `"{key}" is not one of its options: {tostring(value)}`
+			end
+		else
+			if type(value) ~= "number" or value ~= value then
+				return `"{key}" is not a number: {tostring(value)}`
+			end
+			if value < definition.min or value > definition.max then
+				return `"{key}" is out of range: {value} not in {definition.min}..{definition.max}`
+			end
 		end
-		if value < definition.min or value > definition.max then
-			return `"{key}" is out of range: {value} not in {definition.min}..{definition.max}`
-		end
+
 		seen += 1
 	end
 
@@ -61,16 +77,45 @@ return function(t)
 
 		t.expect(type(definition.label) == "string" and #definition.label > 0, `{definition.id} has a label`)
 		t.expect(type(definition.hint) == "string" and #definition.hint > 0, `{definition.id} explains itself`)
-		t.expect(definition.max > definition.min, `{definition.id} has a range`)
-		t.expect(definition.step > 0, `{definition.id} has a positive step`)
-		t.expect(
-			definition.default >= definition.min and definition.default <= definition.max,
-			`{definition.id} defaults inside its own range`
-		)
 
-		-- A step that does not divide the range leaves a value at one end the
-		-- slider can approach but never actually land on.
-		t.expect(definition.step <= definition.max - definition.min, `{definition.id} step is smaller than its range`)
+		if definition.kind == "choice" then
+			t.expect(
+				type(definition.options) == "table" and #definition.options >= 2,
+				`{definition.id} offers a choice`
+			)
+
+			local optionIds = {}
+			local defaultIsAnOption = false
+			for _, option in definition.options do
+				t.expect(type(option.id) == "string" and #option.id > 0, `{definition.id} option has an id`)
+				t.expect(type(option.label) == "string" and #option.label > 0, `{definition.id} option has a label`)
+				t.expect(optionIds[option.id] == nil, `{definition.id} option {option.id} appears once`)
+				optionIds[option.id] = true
+				if option.id == definition.default then
+					defaultIsAnOption = true
+				end
+			end
+
+			-- A default that is not on the list would make every fresh profile
+			-- invalid the moment it was read back.
+			t.expect(defaultIsAnOption, `{definition.id} defaults to one of its own options`)
+			t.expect(SettingsConfig.isChoice(definition.id), `{definition.id} reports itself as a choice`)
+		else
+			t.expect(definition.max > definition.min, `{definition.id} has a range`)
+			t.expect(definition.step > 0, `{definition.id} has a positive step`)
+			t.expect(
+				definition.default >= definition.min and definition.default <= definition.max,
+				`{definition.id} defaults inside its own range`
+			)
+
+			-- A step that does not divide the range leaves a value at one end the
+			-- slider can approach but never actually land on.
+			t.expect(
+				definition.step <= definition.max - definition.min,
+				`{definition.id} step is smaller than its range`
+			)
+			t.expect(not SettingsConfig.isChoice(definition.id), `{definition.id} is not a choice`)
+		end
 
 		t.equal(SettingsConfig.get(definition.id), definition, `{definition.id} is reachable by id`)
 	end
@@ -114,6 +159,9 @@ return function(t)
 	-- Values snap to the step, so a client cannot store a number the slider can
 	-- never return to.
 	for _, definition in SettingsConfig.Definitions do
+		if definition.kind == "choice" then
+			continue
+		end
 		local midpoint = (definition.min + definition.max) / 2
 		local clamped = SettingsConfig.clamp(definition.id, midpoint) :: number
 		local steps = (clamped - definition.min) / definition.step
@@ -166,6 +214,10 @@ return function(t)
 	-- directions, so a round trip has to land back where it started.
 
 	for _, definition in SettingsConfig.Definitions do
+		if definition.kind == "choice" then
+			continue
+		end
+
 		t.equal(SettingsConfig.toFraction(definition.id, definition.min), 0, `{definition.id} min is fraction 0`)
 		t.equal(SettingsConfig.toFraction(definition.id, definition.max), 1, `{definition.id} max is fraction 1`)
 
@@ -223,4 +275,57 @@ return function(t)
 
 	-- A garbage value still renders something rather than erroring mid-frame.
 	t.expect(#SettingsConfig.display("Sensitivity", 0 / 0) > 0, "a NaN value still renders")
+
+	-- Choices -----------------------------------------------------------------
+	-- A choice stores a string, which is the one thing every other setting is
+	-- guaranteed not to be, so each numeric assumption above is re-checked here
+	-- from the other side.
+
+	local PERSPECTIVE = "Perspective"
+	t.expect(SettingsConfig.isChoice(PERSPECTIVE), "the perspective setting is a choice")
+	t.expect(not SettingsConfig.isChoice("NotASetting"), "an unknown setting is not a choice")
+
+	local options = SettingsConfig.optionsFor(PERSPECTIVE)
+	t.expect(type(options) == "table" and #options == 2, "perspective offers first and third person")
+	t.equal(SettingsConfig.optionsFor("Sensitivity"), nil, "a slider has no options")
+	t.equal(SettingsConfig.optionsFor("NotASetting"), nil, "an unknown setting has no options")
+
+	t.equal(SettingsConfig.clamp(PERSPECTIVE, "First"), "First", "a known option is kept")
+	t.equal(SettingsConfig.clamp(PERSPECTIVE, "Third"), "Third", "the other known option is kept")
+
+	-- Everything else is "no opinion", and the honest answer to that is the
+	-- default. A choice has no bounds, so there is nothing to clamp toward.
+	local DEFAULT_PERSPECTIVE = SettingsConfig.get(PERSPECTIVE).default
+	for _, hostile in { "first", "FIRST", "", "Fourth", 1, 0 / 0, true, {}, nil } do
+		t.equal(
+			SettingsConfig.clamp(PERSPECTIVE, hostile),
+			DEFAULT_PERSPECTIVE,
+			`an unrecognised perspective ({tostring(hostile)}) falls back to the default`
+		)
+	end
+
+	-- The display is the option's label, not its id: the id is a storage key and
+	-- the player should never see it.
+	t.equal(SettingsConfig.display(PERSPECTIVE, "First"), options[2].label, "a choice renders its option's label")
+	t.equal(
+		SettingsConfig.display(PERSPECTIVE, "nonsense"),
+		options[1].label,
+		"a bad choice renders the default's label"
+	)
+
+	-- It is never rendered as a slider, and asking would otherwise divide by a
+	-- range it does not have.
+	t.equal(SettingsConfig.toFraction(PERSPECTIVE, "First"), 0, "a choice has no slider fraction")
+	t.equal(SettingsConfig.fromFraction(PERSPECTIVE, 0.5), nil, "a choice cannot be read off a slider")
+
+	-- And the whole point: a payload mixing both kinds survives intact.
+	local mixed = SettingsConfig.sanitize({ Perspective = "First", Sensitivity = 2, Volume = 0.5, FieldOfView = 90 })
+	t.equal(violation(mixed), nil, "a payload of both kinds sanitises cleanly")
+	t.equal(mixed.Perspective, "First", "the chosen perspective survives sanitising")
+	t.equal(mixed.Sensitivity, 2, "a slider beside a choice is untouched")
+
+	local hostileMix = SettingsConfig.sanitize({ Perspective = 42, Sensitivity = "Third" })
+	t.equal(violation(hostileMix), nil, "swapping the two kinds' value types still sanitises")
+	t.equal(hostileMix.Perspective, DEFAULT_PERSPECTIVE, "a number for a choice falls back")
+	t.equal(hostileMix.Sensitivity, SettingsConfig.get("Sensitivity").default, "a string for a slider falls back")
 end

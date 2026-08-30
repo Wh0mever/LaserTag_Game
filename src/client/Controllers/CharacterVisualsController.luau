@@ -16,9 +16,10 @@
 	PlayerService.giveWeapons are descendants of the character, so they are picked
 	up by the same cache.
 
-	The death camera is the one time the local body must be visible — the player
-	is watching their killer from outside their own head — so hiding pauses while
-	CameraController.isDeathCamActive() is true.
+	Hiding pauses whenever the camera is outside the head: during the death
+	camera, which watches the killer from behind the body, and for the whole
+	match in third person, where the player's own back is the thing they are
+	aiming past.
 ]]
 
 local Players = game:GetService("Players")
@@ -30,6 +31,7 @@ assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.js
 
 local CameraController = require(script.Parent.CameraController)
 local ClientState = require(script.Parent.Parent.ClientState)
+local PerspectiveController = require(script.Parent.PerspectiveController)
 local Trove = require(Shared.Util.Trove)
 
 local CharacterVisualsController = {}
@@ -113,10 +115,13 @@ local function onRender()
 		return
 	end
 
-	if CameraController.isDeathCamActive() then
+	-- Two reasons to be visible, and they are the same reason: the camera is
+	-- outside the head. The death camera watches the killer from behind the
+	-- body, and third person watches the player's own back all match.
+	if CameraController.isDeathCamActive() or not PerspectiveController.isFirstPerson() then
 		if applied then
-			-- Restore once, then leave the parts alone for the rest of the death
-			-- camera so the engine's own fading still works.
+			-- Restore once, then leave the parts alone so the engine's own fading
+			-- still works.
 			setModifier(0)
 			applied = false
 		end
