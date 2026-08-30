@@ -108,7 +108,8 @@ local function build(gui: Instance)
 	constraint.MaxSize = Vector2.new(620, 400)
 	constraint.Parent = card
 
-	local title = centered("MATCH OVER", UITheme.TextSizes.Display, UITheme.Colors.Text, UITheme.Fonts.Heading)
+	local title =
+		centered("МАТЧ ОКОНЧЕН", UITheme.TextSizes.Display, UITheme.Colors.Text, UITheme.Fonts.Heading)
 	title.Name = "Headline"
 	title.Size = UDim2.new(1, 0, 0.22, 0)
 	title.Parent = card
@@ -153,11 +154,11 @@ end
 
 local function winnerText(winnerTeam: string?): (string, Color3)
 	if winnerTeam == nil then
-		return "DRAW", UITheme.Colors.TextDim
+		return "НИЧЬЯ", UITheme.Colors.TextDim
 	end
 
 	local team = Constants.TEAMS[winnerTeam]
-	return `{string.upper(team and team.name or winnerTeam)} WINS`, UITheme.teamColor(winnerTeam)
+	return `ПОБЕДА — {string.upper(team and team.name or winnerTeam)}`, UITheme.teamColor(winnerTeam)
 end
 
 --[[
@@ -195,7 +196,7 @@ local function show(match)
 
 	local earned = type(data.rewards) == "table" and data.rewards[player.UserId] or 0
 	if rewardLabel then
-		rewardLabel.Text = if earned > 0 then `+{earned} coins earned` else "No coins earned"
+		rewardLabel.Text = if earned > 0 then `+{earned} монет` else "Монет не начислено"
 		rewardLabel.TextColor3 = if earned > 0 then UITheme.Colors.Coin else UITheme.Colors.TextMuted
 	end
 
@@ -243,7 +244,9 @@ local function step()
 	end
 
 	lastCountdown = remaining
-	countdownLabel.Text = if remaining > 0 then `Returning to the hub in {remaining}…` else "Returning to the hub…"
+	countdownLabel.Text = if remaining > 0
+		then `Возврат в хаб через {remaining}…`
+		else "Возвращаемся в хаб…"
 end
 
 --------------------------------------------------------------------------------

@@ -46,14 +46,14 @@ SpinConfig.DUPLICATE_REFUND_RATIO = 0.6
 	want off it is the thing you are least likely to get.
 ]]
 SpinConfig.Segments = {
-	{ id = "coins_200", kind = "coins", label = "200 Coins", weight = 30, coins = 200 },
-	{ id = "coins_400", kind = "coins", label = "400 Coins", weight = 25, coins = 400 },
-	{ id = "coins_800", kind = "coins", label = "800 Coins", weight = 15, coins = 800 },
-	{ id = "coins_1500", kind = "coins", label = "1,500 Coins", weight = 10, coins = 1500 },
-	{ id = "skin_crimson", kind = "skin", label = "Crimson Skin", weight = 8, skinId = "crimson" },
-	{ id = "skin_arctic", kind = "skin", label = "Arctic Skin", weight = 6, skinId = "arctic" },
-	{ id = "skin_cyan", kind = "skin", label = "Deep Cyan Skin", weight = 4, skinId = "cyan" },
-	{ id = "skin_toxic", kind = "skin", label = "Toxic Skin", weight = 2, skinId = "toxic" },
+	{ id = "coins_200", kind = "coins", label = "200 монет", weight = 30, coins = 200 },
+	{ id = "coins_400", kind = "coins", label = "400 монет", weight = 25, coins = 400 },
+	{ id = "coins_800", kind = "coins", label = "800 монет", weight = 15, coins = 800 },
+	{ id = "coins_1500", kind = "coins", label = "1 500 монет", weight = 10, coins = 1500 },
+	{ id = "skin_crimson", kind = "skin", label = "Скин «Багровый»", weight = 8, skinId = "crimson" },
+	{ id = "skin_arctic", kind = "skin", label = "Скин «Арктика»", weight = 6, skinId = "arctic" },
+	{ id = "skin_cyan", kind = "skin", label = "Скин «Глубокий циан»", weight = 4, skinId = "cyan" },
+	{ id = "skin_toxic", kind = "skin", label = "Скин «Токсичный»", weight = 2, skinId = "toxic" },
 }
 
 function SpinConfig.totalWeight(): number

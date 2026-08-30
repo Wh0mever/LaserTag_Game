@@ -40,11 +40,11 @@ local BUTTON_GAP = 10
 -- Geometric glyphs only: this project ships no image assets, and these render
 -- in the Gotham family on every platform.
 local MENUS = {
-	{ name = "Equip", label = "EQUIP", icon = "◆", key = Constants.KEYBINDS.Equip },
-	{ name = "Shop", label = "SHOP", icon = "★", key = Constants.KEYBINDS.Shop },
-	{ name = "Friends", label = "FRIENDS", icon = "●", key = Constants.KEYBINDS.Friends },
-	{ name = "Spin", label = "SPIN", icon = "◎", key = Constants.KEYBINDS.Spin },
-	{ name = "Settings", label = "SETTINGS", icon = "⚙", key = Constants.KEYBINDS.Settings },
+	{ name = "Equip", label = "СКИНЫ", icon = "◆", key = Constants.KEYBINDS.Equip },
+	{ name = "Shop", label = "МАГАЗИН", icon = "★", key = Constants.KEYBINDS.Shop },
+	{ name = "Friends", label = "ДРУЗЬЯ", icon = "●", key = Constants.KEYBINDS.Friends },
+	{ name = "Spin", label = "КОЛЕСО", icon = "◎", key = Constants.KEYBINDS.Spin },
+	{ name = "Settings", label = "НАСТРОЙКИ", icon = "⚙", key = Constants.KEYBINDS.Settings },
 }
 
 local trove = Trove.new()

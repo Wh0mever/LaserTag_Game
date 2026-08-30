@@ -57,6 +57,15 @@ local OPEN_DELAY = 1.5
 
 local trove = Trove.new()
 local panel: any = nil
+-- Type metrics. The card is the first thing a new player reads and it was set
+-- in the two smallest sizes the theme has, so it read as fine print with half
+-- the panel empty beneath it. Rows are derived from these so bigger text moves
+-- the layout with it instead of overlapping.
+local TITLE_HEIGHT = 22
+local BODY_HEIGHT = 42
+local CONTROL_ROW = 24
+local LINE_HEIGHT = 1.12
+
 local shownThisSession = false
 
 --[[
@@ -74,20 +83,20 @@ local function steps(): { { title: string, body: string } }
 
 	return {
 		{
-			title = "1  ·  QUEUE",
-			body = "Stand on a portal pad in the hub. The sign above it shows who is waiting and counts down when the match is ready.",
+			title = "1  ·  ОЧЕРЕДЬ",
+			body = "Встаньте на площадку портала в хабе. Табличка над ней показывает, сколько человек уже ждёт, и ведёт обратный отсчёт, когда матч собран.",
 		},
 		{
-			title = "2  ·  FIGHT",
-			body = `Two teams, {minutes} minutes. Whoever has more kills at the end wins — or the first side to reach the kill target on the HUD, which ends it early. You respawn {Constants.RESPAWN_SECONDS} seconds after dying.`,
+			title = "2  ·  БОЙ",
+			body = `Две команды, {minutes} минут. Побеждает тот, у кого больше убийств к концу, — либо первая команда, набравшая цель по убийствам из HUD: тогда матч кончается досрочно. Возрождение через {Constants.RESPAWN_SECONDS} секунды после смерти.`,
 		},
 		{
-			title = "3  ·  SPEND",
-			body = "Kills and wins pay coins. Skins are cosmetic only — a skin never changes damage or accuracy.",
+			title = "3  ·  МОНЕТЫ",
+			body = "Убийства и победы приносят монеты. Скины — только внешний вид: они никогда не меняют урон и точность.",
 		},
 		{
-			title = "WEAPONS",
-			body = `{weaponNames[1]}, {weaponNames[2]} and {weaponNames[3]}. Each is the fastest kill at a different distance: the pistol up close, the rifle through the middle, the lance down a long lane. Switching to the right one matters more than any skin.`,
+			title = "ОРУЖИЕ",
+			body = `{weaponNames[1]}, {weaponNames[2]} и {weaponNames[3]}. Каждое убивает быстрее остальных на своей дистанции: пистолет — вплотную, винтовка — на средней, пика — вдоль длинного коридора. Вовремя переключиться важнее любого скина.`,
 		},
 	}
 end
@@ -95,21 +104,21 @@ end
 local function controlLines(): { { action: string, keys: string } }
 	if ClientState.isTouch then
 		return {
-			{ action = "Move", keys = "Left stick" },
-			{ action = "Look", keys = "Drag the right of the screen" },
-			{ action = "Fire", keys = "Fire button" },
-			{ action = "Reload / switch", keys = "Buttons beside fire" },
-			{ action = "Menus", keys = "Buttons down the left" },
+			{ action = "Движение", keys = "Левый стик" },
+			{ action = "Обзор", keys = "Свайп по правой половине" },
+			{ action = "Огонь", keys = "Кнопка огня" },
+			{ action = "Перезарядка и смена", keys = "Кнопки рядом с огнём" },
+			{ action = "Меню", keys = "Кнопки слева" },
 		}
 	end
 
 	return {
-		{ action = "Move / jump", keys = "W A S D  ·  Space" },
-		{ action = "Fire", keys = "Left mouse" },
-		{ action = "Reload", keys = Constants.KEYBINDS.Reload },
-		{ action = "Switch weapon", keys = "1  2  3" },
-		{ action = "Scoreboard", keys = "Tab (hold)" },
-		{ action = "Settings", keys = Constants.KEYBINDS.Settings },
+		{ action = "Движение и прыжок", keys = "W A S D  ·  Space" },
+		{ action = "Огонь", keys = "Левая кнопка мыши" },
+		{ action = "Перезарядка", keys = Constants.KEYBINDS.Reload },
+		{ action = "Смена оружия", keys = "1  2  3" },
+		{ action = "Таблица счёта", keys = "Tab (удерживать)" },
+		{ action = "Настройки", keys = Constants.KEYBINDS.Settings },
 	}
 end
 
@@ -117,22 +126,23 @@ local function buildStep(entry, order: number, parent: Instance)
 	local root = Instance.new("Frame")
 	root.Name = entry.title
 	root.LayoutOrder = order
-	root.Size = UDim2.new(1, 0, 0, 58)
+	root.Size = UDim2.new(1, 0, 0, TITLE_HEIGHT + BODY_HEIGHT)
 	root.AutomaticSize = Enum.AutomaticSize.Y
 	root.BackgroundTransparency = 1
 	root.ZIndex = 3
 	root.Parent = parent
 
-	local title = UITheme.label(entry.title, UITheme.TextSizes.Small, UITheme.Colors.Accent, UITheme.Fonts.Bold)
+	local title = UITheme.label(entry.title, UITheme.TextSizes.Body, UITheme.Colors.Accent, UITheme.Fonts.Bold)
 	title.Name = "Title"
-	title.Size = UDim2.new(1, 0, 0, 16)
+	title.Size = UDim2.new(1, 0, 0, TITLE_HEIGHT)
 	title.ZIndex = 3
 	title.Parent = root
 
-	local body = UITheme.label(entry.body, UITheme.TextSizes.Small, UITheme.Colors.TextDim)
+	local body = UITheme.label(entry.body, UITheme.TextSizes.Body, UITheme.Colors.TextDim)
 	body.Name = "Body"
-	body.Position = UDim2.new(0, 0, 0, 18)
-	body.Size = UDim2.new(1, 0, 0, 36)
+	body.Position = UDim2.new(0, 0, 0, TITLE_HEIGHT)
+	body.Size = UDim2.new(1, 0, 0, BODY_HEIGHT)
+	body.LineHeight = LINE_HEIGHT
 	body.TextWrapped = true
 	body.TextYAlignment = Enum.TextYAlignment.Top
 	body.AutomaticSize = Enum.AutomaticSize.Y
@@ -146,33 +156,34 @@ local function buildControls(parent: Instance, order: number)
 	local root = Instance.new("Frame")
 	root.Name = "Controls"
 	root.LayoutOrder = order
-	root.Size = UDim2.new(1, 0, 0, 20 + #lines * 18)
+	root.Size = UDim2.new(1, 0, 0, TITLE_HEIGHT + #lines * CONTROL_ROW)
 	root.BackgroundTransparency = 1
 	root.ZIndex = 3
 	root.Parent = parent
 
-	local header = UITheme.label("CONTROLS", UITheme.TextSizes.Small, UITheme.Colors.Accent, UITheme.Fonts.Bold)
+	local header =
+		UITheme.label("УПРАВЛЕНИЕ", UITheme.TextSizes.Body, UITheme.Colors.Accent, UITheme.Fonts.Bold)
 	header.Name = "Header"
-	header.Size = UDim2.new(1, 0, 0, 16)
+	header.Size = UDim2.new(1, 0, 0, TITLE_HEIGHT)
 	header.ZIndex = 3
 	header.Parent = root
 
 	for index, line in lines do
 		local row = Instance.new("Frame")
 		row.Name = line.action
-		row.Position = UDim2.new(0, 0, 0, 18 + (index - 1) * 18)
-		row.Size = UDim2.new(1, 0, 0, 16)
+		row.Position = UDim2.new(0, 0, 0, TITLE_HEIGHT + (index - 1) * CONTROL_ROW)
+		row.Size = UDim2.new(1, 0, 0, CONTROL_ROW - 2)
 		row.BackgroundTransparency = 1
 		row.ZIndex = 3
 		row.Parent = root
 
-		local action = UITheme.label(line.action, UITheme.TextSizes.Tiny, UITheme.Colors.TextMuted)
+		local action = UITheme.label(line.action, UITheme.TextSizes.Small, UITheme.Colors.TextDim)
 		action.Name = "Action"
 		action.Size = UDim2.new(0.5, 0, 1, 0)
 		action.ZIndex = 3
 		action.Parent = row
 
-		local keys = UITheme.label(line.keys, UITheme.TextSizes.Tiny, UITheme.Colors.Text, UITheme.Fonts.Number)
+		local keys = UITheme.label(line.keys, UITheme.TextSizes.Small, UITheme.Colors.Text, UITheme.Fonts.Number)
 		keys.Name = "Keys"
 		keys.AnchorPoint = Vector2.new(1, 0)
 		keys.Position = UDim2.fromScale(1, 0)
@@ -229,9 +240,9 @@ function WelcomeScreen.init()
 	end
 
 	panel = Panel.create({
-		title = "HOW TO PLAY",
-		subtitle = "Thirty seconds of reading, then go",
-		size = UDim2.fromScale(0.52, 0.7),
+		title = "КАК ИГРАТЬ",
+		subtitle = "Тридцать секунд на чтение — и в бой",
+		size = UDim2.fromScale(0.56, 0.78),
 		parent = gui,
 		accentColor = UITheme.Colors.Accent,
 		closeOnOverlay = false,
@@ -255,7 +266,7 @@ function WelcomeScreen.init()
 
 	local layout = Instance.new("UIListLayout")
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, 12)
+	layout.Padding = UDim.new(0, 18)
 	layout.Parent = body
 
 	local entries = steps()

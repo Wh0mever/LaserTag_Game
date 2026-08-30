@@ -31,8 +31,8 @@ local SettingsConfig = {}
 SettingsConfig.Definitions = {
 	{
 		id = "Sensitivity",
-		label = "MOUSE SENSITIVITY",
-		hint = "How far the view turns for the same mouse movement",
+		label = "ЧУВСТВИТЕЛЬНОСТЬ МЫШИ",
+		hint = "Насколько поворачивается вид при том же движении мыши",
 		min = 0.2,
 		max = 3,
 		default = 1,
@@ -41,8 +41,8 @@ SettingsConfig.Definitions = {
 	},
 	{
 		id = "Volume",
-		label = "SOUND VOLUME",
-		hint = "Weapons, hits and the reward wheel",
+		label = "ГРОМКОСТЬ",
+		hint = "Оружие, попадания и колесо наград",
 		min = 0,
 		max = 1,
 		default = 1,
@@ -53,8 +53,8 @@ SettingsConfig.Definitions = {
 	},
 	{
 		id = "FieldOfView",
-		label = "FIELD OF VIEW",
-		hint = "Wider sees more of the flanks; narrower makes distance easier to read",
+		label = "ПОЛЕ ЗРЕНИЯ",
+		hint = "Шире — видно фланги; уже — легче читать дистанцию",
 		min = 60,
 		max = 100,
 		default = 70,

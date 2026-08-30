@@ -174,7 +174,7 @@ local function buildSlices(rotor: Frame)
 		holder.BackgroundTransparency = 1
 
 		local tag = UITheme.label(
-			if segment.kind == "skin" then "SKIN" else tostring(segment.coins),
+			if segment.kind == "skin" then "СКИН" else tostring(segment.coins),
 			UITheme.TextSizes.Tiny,
 			readableOn(color),
 			UITheme.Fonts.Bold

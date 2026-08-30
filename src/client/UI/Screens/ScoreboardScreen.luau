@@ -142,7 +142,12 @@ local function build(): boolean
 	sizeConstraint.MaxSize = Vector2.new(860, 620)
 	sizeConstraint.Parent = panel
 
-	local title = UITheme.label("SCOREBOARD", UITheme.TextSizes.Heading, UITheme.Colors.Text, UITheme.Fonts.Heading)
+	local title = UITheme.label(
+		"ТАБЛИЦА СЧЁТА",
+		UITheme.TextSizes.Heading,
+		UITheme.Colors.Text,
+		UITheme.Fonts.Heading
+	)
 	title.Name = "Title"
 	title.Size = UDim2.new(1, 0, 0, HEADER_HEIGHT)
 	title.Parent = panel

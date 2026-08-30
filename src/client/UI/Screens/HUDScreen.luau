@@ -96,7 +96,7 @@ local function onMatchChanged(match)
 		local live = match.phase == "InProgress" and type(limit) == "number" and limit > 0
 		target.Visible = live
 		if live then
-			target.Text = `FIRST TO {limit}`
+			target.Text = `ДО {limit} УБИЙСТВ`
 		end
 	end
 end

@@ -115,15 +115,15 @@ local States = MatchStateMachine.States
 
 local function statusText(phase: string, count: number, needed: number, countdown: number?): string
 	if phase == States.Countdown and countdown then
-		return `STARTING IN {countdown}`
+		return `СТАРТ ЧЕРЕЗ {countdown}`
 	elseif phase == States.InProgress then
-		return "MATCH IN PROGRESS"
+		return "МАТЧ ИДЁТ"
 	elseif phase == States.Results then
-		return "MATCH ENDING"
+		return "МАТЧ ЗАВЕРШАЕТСЯ"
 	elseif count > 0 then
-		return `{count} / {needed} QUEUED`
+		return `В ОЧЕРЕДИ {count} / {needed}`
 	end
-	return "STAND ON THE PAD TO QUEUE"
+	return "ВСТАНЬ НА ПЛОЩАДКУ"
 end
 
 --[[

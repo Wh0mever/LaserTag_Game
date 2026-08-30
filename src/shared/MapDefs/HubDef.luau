@@ -103,7 +103,7 @@ add({
 	pos = { x = 0, y = 17, z = -94 },
 	size = { x = 56, y = 28, z = 1.6 },
 	facing = "+z",
-	title = "TOP KILLS",
+	title = "ЛУЧШИЕ СТРЕЛКИ",
 })
 
 -- Lobby ------------------------------------------------------------------
@@ -220,7 +220,7 @@ end
 
 local HubDef = {
 	id = "Hub",
-	displayName = "Hub Plaza",
+	displayName = "Площадь",
 	origin = { x = 0, y = 0, z = 0 },
 	killY = -60,
 

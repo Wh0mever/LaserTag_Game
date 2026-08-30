@@ -37,6 +37,8 @@ local ROW_HEIGHT = 46
 local HEADER_HEIGHT = 26
 local PREVIEW_HEIGHT = 16
 local STATUS_HEIGHT = 22
+-- Gap between weapon columns, in pixels.
+local COLUMN_GAP = 12
 
 local trove = Trove.new()
 local panel: any = nil
@@ -82,7 +84,7 @@ local function refresh()
 			local owned = isOwned(skinId)
 			row.instance.Visible = owned
 			row:update({
-				value = if skinId == current then "EQUIPPED" else "",
+				value = if skinId == current then "НАДЕТО" else "",
 				valueColor = UITheme.Colors.Accent,
 				selected = skinId == current,
 			})
@@ -96,7 +98,7 @@ local function equip(weaponId: string, skinId: string)
 	end
 
 	pending = true
-	setStatus("Equipping…", false)
+	setStatus("Экипируем…", false)
 
 	task.spawn(function()
 		local remote = ClientState.getRemote(RemoteNames.EquipSkinRequest)
@@ -111,14 +113,15 @@ local function equip(weaponId: string, skinId: string)
 		pending = false
 
 		if type(result) ~= "table" then
-			setStatus("Could not reach the server — try again", true)
+			setStatus("Сервер не ответил — попробуйте ещё раз", true)
 		elseif result.ok then
 			-- The server's answer, adopted; the client never picks the skin id.
 			ClientState.equippedSkins[weaponId] = result.skinId or skinId
 			local skin = SkinCatalog.get(ClientState.equippedSkins[weaponId])
-			setStatus(`{weaponId}: {skin and skin.displayName or skinId} equipped`, false)
+			local column = columns[weaponId]
+			setStatus(`{column and column.displayName or weaponId}: {skin and skin.displayName or skinId}`, false)
 		else
-			setStatus(result.err or "Equip refused", true)
+			setStatus(result.err or "Сервер отклонил смену скина", true)
 		end
 
 		refresh()
@@ -214,9 +217,18 @@ local function applyStacked(stacked: boolean)
 		return
 	end
 
+	-- Columns share the panel evenly. The fraction is computed from how many
+	-- weapons there are rather than written down: it was 0.5 from when there
+	-- were two, and adding the third left it running off the right edge with no
+	-- way to reach it. The padding between columns has to come out of their
+	-- width too, or the last one is pushed past the edge by the accumulated gap.
+	local count = math.max(1, #WeaponConfig.Order)
+	local share = 1 / count
+	local gap = COLUMN_GAP * (count - 1) / count
+
 	columnsLayout.FillDirection = if stacked then Enum.FillDirection.Vertical else Enum.FillDirection.Horizontal
 	for _, column in columns do
-		column.instance.Size = if stacked then UDim2.new(1, 0, 0.5, -6) else UDim2.new(0.5, -6, 1, 0)
+		column.instance.Size = if stacked then UDim2.new(1, 0, share, -gap) else UDim2.new(share, -gap, 1, 0)
 	end
 end
 
@@ -233,9 +245,9 @@ function EquipScreen.init()
 	end
 
 	panel = Panel.create({
-		title = "EQUIP",
-		subtitle = "Choose the laser colour for each weapon",
-		size = UDim2.fromScale(0.62, 0.7),
+		title = "СКИНЫ",
+		subtitle = "Цвет лазера для каждого оружия",
+		size = UDim2.fromScale(0.82, 0.72),
 		parent = gui,
 		closeOnOverlay = false,
 	})
@@ -254,7 +266,7 @@ function EquipScreen.init()
 	local layout = Instance.new("UIListLayout")
 	layout.FillDirection = Enum.FillDirection.Horizontal
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, 12)
+	layout.Padding = UDim.new(0, COLUMN_GAP)
 	layout.Parent = holder
 	columnsLayout = layout
 
