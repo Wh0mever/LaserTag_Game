@@ -105,6 +105,14 @@ heading("The rig")
 -- actually enforces. Sitting above the default buys headroom for the trim.
 check(bloom.Threshold >= 0.95, `the bloom threshold is not below the engine default (got {bloom.Threshold})`)
 
+-- The counterweight, and the reason it is a bound rather than a measurement:
+-- how far above reference white a Neon surface actually renders is a property
+-- of the renderer, and there is no renderer here. What can be pinned is that
+-- nobody answers a future white-out by raising this until nothing blooms at
+-- all — bloom is the only reason Material.Neon reads as glowing, so a threshold
+-- run up past the neon costs the game its whole look and no check would notice.
+check(bloom.Threshold <= 1.5, `the bloom threshold has not been raised past the neon (got {bloom.Threshold})`)
+
 -- Neon is emissive and ignores Lighting.Brightness; every diffuse surface
 -- scales with it. So this is the one dial that separates "the neon glows" from
 -- "the floor glows", and it only moves one of them.
