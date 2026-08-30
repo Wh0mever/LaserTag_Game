@@ -419,9 +419,51 @@ rojo serve
 1. Соберите место: `rojo build default.project.json -o LaserTag.rbxlx`.
 2. Откройте `LaserTag.rbxlx` в Roblox Studio.
 3. **File → Publish to Roblox As...**, создайте новый опыт.
-4. **Home → Game Settings → Security** → включите **Enable Studio Access to API Services**.
-   Без этого не работают DataStore: не сохранятся монеты, скины и глобальная таблица TOP KILLS.
-5. **Game Settings → Permissions** → сделайте опыт публичным, когда будете готовы.
+4. **Game Settings → Permissions** → сделайте опыт публичным, когда будете готовы.
+
+> **Про DataStore и «Enable Studio Access to API Services».**
+> В **опубликованной** игре DataStore работает сам, никакой настройки не нужно — монеты, скины и
+> TOP KILLS сохраняются из коробки. Галочка в **Game Settings → Security** нужна только для того,
+> чтобы к хранилищам обращалась **Studio**, и включать её на живой игре не стоит: Studio тогда
+> читает и пишет те же самые боевые данные, то есть тестовая сессия может затереть прогресс
+> реальных игроков. Включайте её на отдельном тестовом плейсе.
+
+### Автопубликация из CI / Automated publishing
+
+Джоб `Publish to Roblox` в `.github/workflows/ci.yml` заливает собранное место через
+[Open Cloud Place Publishing API](https://create.roblox.com/docs/cloud/guides/usage-place-publishing).
+Он срабатывает только на `main`, только после того, как прошли все пять проверок, и публикует
+**ровно тот артефакт, который проверялся**, а не пересобранный.
+
+Чтобы включить, добавьте три секрета в **Settings → Secrets and variables → Actions**:
+
+| Секрет | Где взять |
+|---|---|
+| `ROBLOX_API_KEY` | Creator Dashboard → Open Cloud → API Keys. Права: `universe-places` + операция **Write** на нужную игру |
+| `ROBLOX_UNIVERSE_ID` | Creator Dashboard → ваша игра → «…» → Copy Universe ID |
+| `ROBLOX_PLACE_ID` | Тот же плейс → «…» → Copy Place ID |
+
+Без них джоб не падает, а **пропускается** с пояснением: у клона репозитория попросту нет места,
+куда публиковать, и это не повод красить сборку.
+
+Ручной запуск (**Actions → CI → Run workflow**) даёт выбор: `Published` делает версию живой,
+`Saved` заливает её, не выпуская.
+
+**Чего этот путь не делает:**
+
+- **Не создаёт игру.** Universe ID и Place ID должны уже существовать — первый плейс создаётся
+  один раз шагами 1–3 выше.
+- **Не переключает на public.** Видимость через Open Cloud не меняется вообще; это тумблер в
+  Creator Dashboard.
+- **Не обновляет** `EditableImage`, `EditableMesh`, `PartOperation`, `SurfaceAppearance` и
+  `BaseWrap` — такие объекты публикуются только из Studio. В этой игре весь мир строится из обычных
+  `Part` кодом, ничего из списка нет, так что ограничение нас не задевает. Но если однажды появится
+  — оно проявится тем, что изменения молча не доедут.
+
+The `Publish to Roblox` job uploads the verified build artifact through the Open Cloud Place
+Publishing API on every green push to `main`. It skips with a notice when the three secrets are
+absent, so a clone of this repository stays green. It cannot create the experience or flip it to
+public — both are one-time steps on the Creator Dashboard.
 
 ### Проверка перед публикацией / Smoke test
 

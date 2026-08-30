@@ -5,6 +5,19 @@ on:
     branches: ["**"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      versionType:
+        description: "Published makes the new version live; Saved uploads it without releasing it."
+        type: choice
+        default: Published
+        options: [Published, Saved]
+
+# Two merges in quick succession would otherwise race to publish, and the loser
+# could land second with older content. Queue them instead of cancelling: a
+# publish that has already started should finish.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   format:
@@ -114,3 +127,88 @@ jobs:
         with:
           name: LaserTag-place
           path: LaserTag.rbxlx
+
+  publish:
+    name: Publish to Roblox
+    runs-on: ubuntu-latest
+    # Every check has to pass first. Publishing is the one job here with an
+    # effect outside this repository, so it is also the one that must never run
+    # on a red tree.
+    needs: [format, lint, test, harness, build]
+    # Never from a pull request, and never from a branch: a fork's PR must not
+    # be able to reach the live game, and neither should a work-in-progress
+    # branch that happens to be green.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    steps:
+      # The exact file the other jobs verified, rather than a fresh build. A
+      # rebuild would almost certainly be identical, and "almost certainly" is
+      # not what should be standing between a green test run and a live game.
+      - uses: actions/download-artifact@v4
+        with:
+          name: LaserTag-place
+
+      - name: Publish place
+        env:
+          ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
+          ROBLOX_UNIVERSE_ID: ${{ secrets.ROBLOX_UNIVERSE_ID }}
+          ROBLOX_PLACE_ID: ${{ secrets.ROBLOX_PLACE_ID }}
+          # Publishing makes the version live; Saved uploads it without
+          # releasing it. A push to main publishes; a manual run can choose.
+          VERSION_TYPE: ${{ github.event.inputs.versionType || 'Published' }}
+        run: |
+          set -euo pipefail
+
+          # A clone of this repository has none of these, and that is not a
+          # failure — it just has nowhere to publish to. Skipping loudly beats
+          # a red tick that means "you did not configure an optional feature".
+          if [ -z "${ROBLOX_API_KEY}" ] || [ -z "${ROBLOX_UNIVERSE_ID}" ] || [ -z "${ROBLOX_PLACE_ID}" ]; then
+            echo "::notice::Roblox publishing is not configured; skipping. Set ROBLOX_API_KEY, ROBLOX_UNIVERSE_ID and ROBLOX_PLACE_ID to enable it."
+            exit 0
+          fi
+
+          if [ ! -f LaserTag.rbxlx ]; then
+            echo "::error::LaserTag.rbxlx was not in the build artifact."
+            exit 1
+          fi
+
+          # Content-Type is what tells Roblox how to read the body: application/xml
+          # for the .rbxlx Rojo produces, application/octet-stream for a binary
+          # .rbxl. Sending the wrong one is rejected rather than misparsed, but the
+          # error does not say which of the two it wanted.
+          STATUS="$(curl -sS -o response.json -w '%{http_code}' \
+            -X POST \
+            -H "x-api-key: ${ROBLOX_API_KEY}" \
+            -H "Content-Type: application/xml" \
+            --data-binary @LaserTag.rbxlx \
+            "https://apis.roblox.com/universes/v1/${ROBLOX_UNIVERSE_ID}/places/${ROBLOX_PLACE_ID}/versions?versionType=${VERSION_TYPE}")"
+
+          if [ "${STATUS}" != "200" ]; then
+            echo "::error::Roblox returned HTTP ${STATUS}."
+            # The body carries the actual reason — a wrong scope, a place that is
+            # not in that universe, an expired key — and none of it is secret.
+            cat response.json || true
+            echo ""
+            case "${STATUS}" in
+              401) echo "::error::401 usually means the API key is wrong, expired, or its IP allow-list excludes GitHub's runners." ;;
+              403) echo "::error::403 usually means the key lacks universe-places:write for this universe." ;;
+              404) echo "::error::404 usually means the universe or place id is wrong, or the place is not part of that universe." ;;
+            esac
+            exit 1
+          fi
+
+          VERSION="$(jq -r '.versionNumber // empty' response.json)"
+          if [ -z "${VERSION}" ]; then
+            echo "::error::Roblox accepted the upload but returned no version number:"
+            cat response.json
+            echo ""
+            exit 1
+          fi
+
+          echo "::notice::${VERSION_TYPE} place version ${VERSION}."
+          {
+            echo "### Roblox"
+            echo ""
+            echo "- **${VERSION_TYPE}** version \`${VERSION}\`"
+            echo "- Place \`${ROBLOX_PLACE_ID}\` in universe \`${ROBLOX_UNIVERSE_ID}\`"
+            echo "- From commit \`${GITHUB_SHA}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
