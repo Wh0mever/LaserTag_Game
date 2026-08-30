@@ -57,9 +57,12 @@ function LightingSetup.apply()
 	-- Ambient, OutdoorAmbient and EnvironmentDiffuseScale all add sky light and
 	-- Future stacks them rather than choosing between them, so a value that
 	-- looks moderate in isolation is paid for three times over.
-	Lighting.Ambient = Color3.fromRGB(40, 42, 52)
-	Lighting.OutdoorAmbient = Color3.fromRGB(92, 96, 112)
-	Lighting.Brightness = 1.8
+	Lighting.Ambient = Color3.fromRGB(48, 50, 62)
+	Lighting.OutdoorAmbient = Color3.fromRGB(100, 104, 120)
+	-- 2.2 was not itself unreasonable — Roblox's own legacy migration lands
+	-- places between 1.8 and 3.1 — but it was paid on top of near-white floors.
+	-- With the palettes brought down this only needs to come off the top.
+	Lighting.Brightness = 2
 	-- Late afternoon rather than near-noon: at this latitude a high sun lands
 	-- almost square on the largest surface in the game, the hub floor, and a
 	-- raking angle is also what gives flat block geometry any shape at all.
