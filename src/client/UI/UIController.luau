@@ -242,14 +242,19 @@ function UIController.openMenu(name: string)
 		return
 	end
 
-	-- Exclusivity: at most one menu is ever on screen.
-	UIController.closeAll(name)
-
 	local ok, err = pcall(handle.open)
 	if not ok then
 		warn(`[UIController] {name}.open() failed: {err}`)
 		return
 	end
+
+	-- Exclusivity, applied AFTER the new panel is open rather than before.
+	-- Closing first meant that switching straight from the shop to the spinner
+	-- passed through a moment with nothing open, and everything listening to
+	-- MenuVisibilityChanged — the cursor above all — did a pointless lock and
+	-- unlock inside a single frame. No frame renders between these two calls,
+	-- so nobody ever sees two panels.
+	UIController.closeAll(name)
 
 	currentMenu = name
 	-- FireSync so MouseLockController frees the cursor in the same frame the

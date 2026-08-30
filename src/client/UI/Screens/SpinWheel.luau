@@ -1,16 +1,17 @@
 --!nonstrict
 --[[
 	SpinWheel.luau
-	The wheel widget for SpinScreen: the spokes, the pointer and the landing
+	The wheel widget for SpinScreen: the wedges, the pointer and the landing
 	animation. Split out so SpinScreen keeps only the request/odds/pity logic.
 
 	Helper module for SpinScreen: no init/start, so the Loader requires it and
 	leaves it alone.
 
-	The wheel is drawn as coloured spokes rather than true pie wedges — this
-	project ships no image assets and there is no primitive that fills an arc. A
-	spoke's width is proportional to its segment's share, but the odds table
-	beside the wheel is what the player should read.
+	A wedge is approximated by a run of thin radial bars, because this project
+	ships no image assets and Roblox has no primitive that fills an arc. Each
+	segment therefore covers its true share of the circle. The odds table beside
+	the wheel is still the authoritative reading of the chances — the wheel is
+	the part that has to look like one.
 
 	:landOn(index) replays a result. It never chooses one: the index comes from
 	the server's SpinResult, and this module has no random source at all.
@@ -27,7 +28,6 @@ local TweenService = game:GetService("TweenService")
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
 assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.json")
 
-local MathUtil = require(Shared.Util.MathUtil)
 local SkinCatalog = require(Shared.Config.SkinCatalog)
 local SpinConfig = require(Shared.Config.SpinConfig)
 local Trove = require(Shared.Util.Trove)
@@ -40,11 +40,24 @@ local SPIN_SECONDS = 3.2
 -- Whole turns before the wedge is presented, so the result never looks like it
 -- was nudged into place.
 local SPIN_TURNS = 4
-local SPOKE_MIN_WIDTH = 0.06
-local SPOKE_MAX_WIDTH = 0.34
--- Circumference (in wheel-scale units) at the spokes' mid radius; the share of
--- it a segment covers is how wide its spoke is drawn.
-local SPOKE_ARC = 2 * math.pi * 0.23
+
+-- Rim radius, as a fraction of the (square) wheel's height.
+local WHEEL_RADIUS = 0.46
+-- Degrees per bar. Smaller is smoother and costs one Frame each; 3 puts the
+-- whole wheel at ~120 Frames, which is a menu that opens rarely rather than
+-- anything a match renders.
+local SLICE_STEP = 3
+-- A bar is a rectangle, so at the rim it spans a chord rather than an arc.
+-- Widening past that chord makes neighbours overlap, which is what turns a row
+-- of bars into a solid wedge instead of a comb.
+local SLICE_WIDTH = 2 * WHEEL_RADIUS * math.sin(math.rad(SLICE_STEP) * 0.5) * 1.35
+-- Boundary lines. Four coin segments in a row are all Coin gold, so without
+-- these the wheel shows one 80-degree gold arc and the player cannot see that
+-- it is four different prizes.
+local DIVIDER_WIDTH = 0.007
+local LABEL_HEIGHT = 14
+-- Text sits out near the rim, clear of the hub disc.
+local LABEL_INSET = 0.1
 
 --------------------------------------------------------------------------------
 -- Segment maths
@@ -91,39 +104,90 @@ end
 -- Construction
 --------------------------------------------------------------------------------
 
-local function buildSpokes(rotor: Frame, angles: { number })
+--[[
+	One radial bar from the wheel's centre out to `height`, rotated to `angle`.
+	Rotation pivots on the AnchorPoint, so anchoring the bottom edge at the
+	centre makes the bar sweep like a clock hand.
+]]
+local function radial(parent: Frame, name: string, angle: number, width: number, height: number, zIndex: number): Frame
+	local bar = Instance.new("Frame")
+	bar.Name = name
+	bar.AnchorPoint = Vector2.new(0.5, 1)
+	bar.Position = UDim2.fromScale(0.5, 0.5)
+	bar.Size = UDim2.fromScale(width, height)
+	bar.Rotation = angle
+	bar.BorderSizePixel = 0
+	bar.ZIndex = zIndex
+	bar.Parent = parent
+	return bar
+end
+
+--[[
+	Dark text on a bright wedge, light text on a dark one. Rarity colours span
+	both — a Legendary gold and an Epic purple cannot share one text colour and
+	stay readable on either.
+]]
+local function readableOn(color: Color3): Color3
+	local luminance = 0.2126 * color.R + 0.7152 * color.G + 0.0722 * color.B
+	return if luminance > 0.55 then UITheme.Colors.PanelDark else UITheme.Colors.Text
+end
+
+--[[
+	Draws every segment as a run of thin bars covering its whole sweep, a
+	boundary line at its leading edge, and a label at its mid-angle.
+
+	Roblox ships no primitive that fills an arc and this project ships no image
+	assets, so a wedge has to be approximated. Bars are that approximation: they
+	cost one Frame per SLICE_STEP degrees and read as a solid sector, where the
+	single wide rectangle this replaced read as a playing card.
+]]
+local function buildSlices(rotor: Frame)
 	local total = SpinConfig.totalWeight()
+	local accumulated = 0
 
-	for index, segment in SpinConfig.Segments do
-		local share = total > 0 and segment.weight / total or 0
+	for _, segment in SpinConfig.Segments do
+		local sweep = total > 0 and segment.weight / total * 360 or 0
+		local color = SpinWheel.segmentColor(segment)
 
-		local spoke = Instance.new("Frame")
-		spoke.Name = segment.id
-		-- Rotation pivots on the AnchorPoint, so anchoring the bottom edge at the
-		-- wheel centre makes the spoke sweep like a clock hand.
-		spoke.AnchorPoint = Vector2.new(0.5, 1)
-		spoke.Position = UDim2.fromScale(0.5, 0.5)
-		spoke.Size = UDim2.new(MathUtil.clamp(SPOKE_ARC * share, SPOKE_MIN_WIDTH, SPOKE_MAX_WIDTH), 0, 0.46, 0)
-		spoke.Rotation = angles[index]
-		spoke.BackgroundColor3 = SpinWheel.segmentColor(segment)
-		spoke.BackgroundTransparency = 0.15
-		spoke.BorderSizePixel = 0
-		spoke.ZIndex = 4
-		spoke.Parent = rotor
-		UITheme.corner(UITheme.Radius.Small).Parent = spoke
+		local wedge = Instance.new("Frame")
+		wedge.Name = segment.id
+		wedge.Size = UDim2.fromScale(1, 1)
+		wedge.BackgroundTransparency = 1
+		wedge.ZIndex = 4
+		wedge.Parent = rotor
+
+		-- At least one bar even for a sliver: the rarest segment is the one a
+		-- player most wants to find on the wheel, so it must never vanish.
+		local bars = math.max(1, math.ceil(sweep / SLICE_STEP))
+		for step = 0, bars - 1 do
+			local bar =
+				radial(wedge, "Slice", accumulated + (step + 0.5) * (sweep / bars), SLICE_WIDTH, WHEEL_RADIUS, 4)
+			bar.BackgroundColor3 = color
+		end
+
+		local divider = radial(wedge, "Divider", accumulated, DIVIDER_WIDTH, WHEEL_RADIUS, 5)
+		divider.BackgroundColor3 = UITheme.Colors.PanelDark
+
+		-- The label rides its own radial frame, so it points outward from the
+		-- centre and turns with the wheel exactly like a real prize wheel's does.
+		local holder = radial(wedge, "Tag", accumulated + sweep * 0.5, 0.28, WHEEL_RADIUS, 6)
+		holder.BackgroundTransparency = 1
 
 		local tag = UITheme.label(
 			if segment.kind == "skin" then "SKIN" else tostring(segment.coins),
 			UITheme.TextSizes.Tiny,
-			UITheme.Colors.PanelDark,
+			readableOn(color),
 			UITheme.Fonts.Bold
 		)
-		tag.Name = "Tag"
-		tag.Position = UDim2.new(0, 0, 0, 6)
-		tag.Size = UDim2.new(1, 0, 0, 14)
+		tag.Name = "Text"
+		tag.AnchorPoint = Vector2.new(0.5, 0)
+		tag.Position = UDim2.fromScale(0.5, LABEL_INSET)
+		tag.Size = UDim2.new(1, 0, 0, LABEL_HEIGHT)
 		tag.TextXAlignment = Enum.TextXAlignment.Center
-		tag.ZIndex = 5
-		tag.Parent = spoke
+		tag.ZIndex = 6
+		tag.Parent = holder
+
+		accumulated += sweep
 	end
 end
 
@@ -159,7 +223,7 @@ function SpinWheel.create(parent: Instance)
 	rotor.BackgroundTransparency = 1
 	rotor.ZIndex = 3
 	rotor.Parent = wheel
-	buildSpokes(rotor, angles)
+	buildSlices(rotor)
 
 	local hub = Instance.new("Frame")
 	hub.Name = "Hub"

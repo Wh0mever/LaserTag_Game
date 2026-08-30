@@ -20,13 +20,7 @@
 		"Lighting": {
 			"$properties": {
 				"Technology": "Future",
-				"Ambient": [60, 60, 70],
-				"OutdoorAmbient": [110, 110, 125],
-				"Brightness": 2,
-				"ClockTime": 15,
-				"GlobalShadows": true,
-				"EnvironmentDiffuseScale": 0.4,
-				"EnvironmentSpecularScale": 0.3
+				"GlobalShadows": true
 			}
 		},
 

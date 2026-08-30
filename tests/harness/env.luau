@@ -49,6 +49,31 @@ function Env.calls(): { [string]: number }
 	return recorded
 end
 
+--[[
+	Runs every render-step binding once, lowest priority first, the way Roblox
+	orders them. Nothing here renders — the point is the ordering, which is the
+	whole mechanism behind bindings that exist to overwrite what an engine
+	binding at a lower priority just wrote.
+]]
+function Env.stepRender()
+	local ordered = {}
+	for name, binding in Env.renderBindings do
+		table.insert(ordered, { name = name, priority = binding.priority, callback = binding.callback })
+	end
+	table.sort(ordered, function(a, b)
+		if a.priority ~= b.priority then
+			return a.priority < b.priority
+		end
+		return a.name < b.name
+	end)
+
+	for _, entry in ordered do
+		if type(entry.callback) == "function" then
+			pcall(entry.callback, 1 / 60)
+		end
+	end
+end
+
 --------------------------------------------------------------------------------
 -- Module tree
 --
@@ -387,9 +412,12 @@ local function buildServices()
 		IsStudio = function()
 			return false
 		end,
-		BindToRenderStep = function(_self, name: string)
+		-- The callback is kept, not discarded: a binding that exists is not the
+		-- same claim as a binding that does the right thing when a frame passes,
+		-- and Env.stepRender() is how a scenario asks for that second one.
+		BindToRenderStep = function(_self, name: string, priority: number?, callback: any)
 			record("RunService:BindToRenderStep")
-			Env.renderBindings[name] = true
+			Env.renderBindings[name] = { priority = priority or 0, callback = callback }
 		end,
 		UnbindFromRenderStep = function(_self, name: string)
 			Env.renderBindings[name] = nil

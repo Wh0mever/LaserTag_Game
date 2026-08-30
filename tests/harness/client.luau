@@ -372,6 +372,172 @@ if hudOk then
 end
 
 --------------------------------------------------------------------------------
+-- The cursor
+--
+-- The bug this section exists for looked exactly like working code: with a
+-- panel open the client set MouseBehavior to Default and MouseIconEnabled to
+-- true, and a harness that asked the client what it wanted was green while the
+-- player could not move the mouse at all.
+--
+-- The reason is that Roblox's own camera module writes LockCenter every frame
+-- while it believes the camera is first person, which the pinned 0.5 zoom makes
+-- permanent. So the only assertion worth making is the one after a frame has
+-- passed: the adversary writes LockCenter, the frame runs, and the cursor has
+-- to still be free at the end of it.
+--------------------------------------------------------------------------------
+
+heading("The cursor")
+
+local UserInputServiceStub = Env.service("UserInputService")
+local MouseLock = Env.load("src/client/Controllers/MouseLockController")
+local UIControllerModule = Env.load("src/client/UI/UIController")
+
+--[[
+	Stands in for CameraModule:Update, which is bound at
+	Enum.RenderPriority.Camera and takes the cursor on every rendered frame.
+	Registered at exactly that priority so Env.stepRender() runs it in the real
+	order relative to the client's own binding.
+]]
+Env.service("RunService"):BindToRenderStep("HarnessPlayerModule", 200, function()
+	UserInputServiceStub.MouseBehavior = roblox.Enum.MouseBehavior.LockCenter
+	UserInputServiceStub.MouseIconEnabled = false
+end)
+
+check(MouseLock.isEnabled(), "the cursor manager runs on a mouse-and-keyboard client")
+check(not MouseLock.isUnlocked(), "the cursor starts captured, with no menu open")
+
+Env.stepRender()
+check(
+	UserInputServiceStub.MouseBehavior == roblox.Enum.MouseBehavior.LockCenter,
+	"during play the cursor stays captured across a frame"
+)
+
+for _, name in { "Shop", "Spin", "Equip", "Settings", "Friends" } do
+	UIControllerModule.openMenu(name)
+
+	check(UIControllerModule.isMenuOpen(name), `{name} registered itself and opens through UIController`)
+	check(MouseLock.isUnlocked(), `{name} frees the cursor`)
+	check(
+		UserInputServiceStub.MouseBehavior == roblox.Enum.MouseBehavior.Default,
+		`{name} asks for a free cursor (got {UserInputServiceStub.MouseBehavior})`
+	)
+
+	-- THE CHECK THAT MATTERS. Everything above passed while the bug was live.
+	Env.stepRender()
+	check(
+		UserInputServiceStub.MouseBehavior == roblox.Enum.MouseBehavior.Default,
+		`{name} keeps the cursor free after the camera module has run (got {UserInputServiceStub.MouseBehavior})`
+	)
+	check(UserInputServiceStub.MouseIconEnabled == true, `{name} keeps a cursor drawn to click with`)
+
+	UIControllerModule.closeMenu(name)
+	check(not MouseLock.isUnlocked(), `closing {name} recaptures the cursor`)
+
+	Env.stepRender()
+	check(
+		UserInputServiceStub.MouseBehavior == roblox.Enum.MouseBehavior.LockCenter,
+		`closing {name} leaves the cursor captured across a frame`
+	)
+end
+
+-- Switching straight between two panels must never pass through a captured
+-- cursor: the player is mid-click and the pointer would jump to screen centre.
+UIControllerModule.openMenu("Shop")
+UIControllerModule.openMenu("Spin")
+check(UIControllerModule.isMenuOpen("Spin"), "opening a second panel switches to it")
+check(not UIControllerModule.isMenuOpen("Shop"), "opening a second panel closes the first")
+check(MouseLock.isUnlocked(), "switching panels never recaptures the cursor")
+Env.stepRender()
+check(
+	UserInputServiceStub.MouseBehavior == roblox.Enum.MouseBehavior.Default,
+	"the cursor survives a panel switch and a frame"
+)
+UIControllerModule.closeMenu("Spin")
+
+-- The camera is never taken out of first person to achieve any of this: doing
+-- so would dolly the view out of the player's head every time a panel opened.
+check(
+	Env.service("Players").LocalPlayer.CameraMode == roblox.Enum.CameraMode.LockFirstPerson,
+	"the camera stays first person throughout"
+)
+
+-- The wheel is the one widget whose correctness is geometric: it has to paint
+-- each segment across its true share of the circle. Nothing else checks that,
+-- and a wheel that draws a 30% prize across 43 degrees looks like a bug in the
+-- odds rather than in the drawing.
+local SpinWheel = Env.load("src/client/UI/Screens/SpinWheel")
+local SpinConfig = Env.load("src/shared/Config/SpinConfig")
+
+local wheelOk, wheel = pcall(function()
+	return SpinWheel.create(roblox.Instance.new("ScreenGui"))
+end)
+
+check(wheelOk, `the reward wheel builds{if wheelOk then "" else ": " .. tostring(wheel)}`)
+if wheelOk then
+	local rotor = wheel.instance:FindFirstChild("Rotor")
+	check(rotor ~= nil, "the wheel has a rotor to spin")
+	check(wheel.instance:FindFirstChild("Hub") ~= nil, "the wheel has a centre hub")
+	check(wheel.instance:FindFirstChild("Pointer") ~= nil, "the wheel has a pointer to land under")
+
+	local total = SpinConfig.totalWeight()
+	local sweepSum = 0
+
+	for _, segment in SpinConfig.Segments do
+		local sweep = total > 0 and segment.weight / total * 360 or 0
+		sweepSum += sweep
+
+		local wedge = rotor and rotor:FindFirstChild(segment.id)
+		check(wedge ~= nil, `the wheel draws a wedge for {segment.id}`)
+		if not wedge then
+			continue
+		end
+
+		check(wedge:FindFirstChild("Divider") ~= nil, `{segment.id} has a boundary line`)
+		check(wedge:FindFirstChild("Tag") ~= nil, `{segment.id} is labelled`)
+
+		local lowest, highest = math.huge, -math.huge
+		local barWidth, radius, bars = 0, 0, 0
+		for _, child in wedge:GetChildren() do
+			if child.Name == "Slice" then
+				bars += 1
+				lowest = math.min(lowest, child.Rotation)
+				highest = math.max(highest, child.Rotation)
+				barWidth = child.Size.X.Scale
+				radius = child.Size.Y.Scale
+			end
+		end
+
+		check(bars > 0, `{segment.id} is drawn with at least one bar`)
+		if bars == 0 then
+			continue
+		end
+
+		-- A bar is a rectangle: at the rim it spans a chord, and the angle that
+		-- chord subtends is how much of the circle the bar actually covers.
+		local subtended = 2 * math.deg(math.asin(math.clamp(barWidth / (2 * radius), -1, 1)))
+		local painted = (highest - lowest) + subtended
+
+		-- Below its own sweep and the wheel lies about the odds in the player's
+		-- favour or against it; far above and it eats the neighbouring prize.
+		check(
+			painted >= sweep - 0.5,
+			`{segment.id} covers its {string.format("%.1f", sweep)} degrees (painted {string.format("%.1f", painted)})`
+		)
+		check(
+			painted <= sweep + 8,
+			`{segment.id} does not spill into its neighbour (sweep {string.format("%.1f", sweep)}, painted {string.format(
+				"%.1f",
+				painted
+			)})`
+		)
+	end
+
+	check(math.abs(sweepSum - 360) < 0.001, `the segments account for the whole circle (got {sweepSum})`)
+
+	wheel:destroy()
+end
+
+--------------------------------------------------------------------------------
 -- What the run left behind
 --------------------------------------------------------------------------------
 
