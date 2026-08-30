@@ -139,22 +139,22 @@ local function fetch()
 
 		pending = false
 		-- Stays disabled for the rest of the cooldown window, then comes back.
-		setButton("REFRESH", false)
+		setButton("ОБНОВИТЬ", false)
 		task.delay(math.max(REFRESH_COOLDOWN - (os.clock() - lastFetchAt), 0), function()
-			setButton("REFRESH", true)
+			setButton("ОБНОВИТЬ", true)
 		end)
 
 		releaseAll()
 		if type(result) ~= "table" then
 			fill(sections.inServer, {}, "", UITheme.Colors.Positive)
 			fill(sections.online, {}, "", UITheme.Colors.AccentAlt)
-			sections.inServer.empty.Text = "Could not load your friends list"
+			sections.inServer.empty.Text = "Не удалось загрузить список друзей"
 			return
 		end
 
-		sections.inServer.empty.Text = "No friends in this server yet"
-		fill(sections.inServer, result.inServer or {}, "HERE", UITheme.Colors.Positive)
-		fill(sections.online, result.online or {}, "ONLINE", UITheme.Colors.AccentAlt)
+		sections.inServer.empty.Text = "Друзей на этом сервере пока нет"
+		fill(sections.inServer, result.inServer or {}, "ЗДЕСЬ", UITheme.Colors.Positive)
+		fill(sections.online, result.online or {}, "В СЕТИ", UITheme.Colors.AccentAlt)
 	end)
 end
 
@@ -219,8 +219,8 @@ function FriendsScreen.init()
 	end
 
 	panel = Panel.create({
-		title = "FRIENDS",
-		subtitle = "Jump into the same server, or see who is around",
+		title = "ДРУЗЬЯ",
+		subtitle = "Кто сейчас в игре и на этом сервере",
 		size = UDim2.fromScale(0.56, 0.68),
 		parent = gui,
 		accentColor = UITheme.Colors.Positive,
@@ -242,12 +242,24 @@ function FriendsScreen.init()
 	layout.Padding = UDim.new(0, 12)
 	layout.Parent = body
 
-	buildSection("inServer", "IN THIS SERVER", "No friends in this server yet", 1, body)
-	buildSection("online", "ONLINE ELSEWHERE", "No friends online right now", 2, body)
+	buildSection(
+		"inServer",
+		"НА ЭТОМ СЕРВЕРЕ",
+		"Друзей на этом сервере пока нет",
+		1,
+		body
+	)
+	buildSection(
+		"online",
+		"В СЕТИ, НО В ДРУГОМ МЕСТЕ",
+		"Сейчас никого из друзей нет в сети",
+		2,
+		body
+	)
 
 	refreshButton = Button.create({
 		name = "Refresh",
-		text = "REFRESH",
+		text = "ОБНОВИТЬ",
 		size = UDim2.fromOffset(104, 30),
 		position = UDim2.new(1, -56, 0, 13),
 		anchorPoint = Vector2.new(1, 0),

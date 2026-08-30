@@ -223,13 +223,13 @@ local function show(killerUserId: number?, respawnSeconds: number)
 	endsAt = os.clock() + totalSeconds
 
 	if killer and killer ~= Players.LocalPlayer then
-		eyebrowLabel.Text = "ELIMINATED BY"
+		eyebrowLabel.Text = "ВАС УБИЛ"
 		killerLabel.Text = string.upper(killer.DisplayName)
 		killerLabel.TextColor3 = UITheme.teamColor(killer:GetAttribute("TeamId"))
 	else
 		-- No attribution: fall damage, the kill plane, or a killer who left.
-		eyebrowLabel.Text = "ELIMINATED"
-		killerLabel.Text = "OUT OF PLAY"
+		eyebrowLabel.Text = "ВЫ УБИТЫ"
+		killerLabel.Text = "ВНЕ ИГРЫ"
 		killerLabel.TextColor3 = UITheme.Colors.TextDim
 	end
 

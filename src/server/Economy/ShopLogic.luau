@@ -30,14 +30,14 @@ local ShopLogic = {}
 	without the UI having to re-derive either.
 ]]
 ShopLogic.Errors = {
-	CatalogUnavailable = "The shop is unavailable right now",
-	NoProfile = "Your data is still loading",
-	UnknownSkin = "That skin does not exist",
-	NotPurchasable = "That skin is not for sale",
-	AlreadyOwned = "You already own that skin",
-	InsufficientCoins = "Not enough coins",
-	UnknownWeapon = "That weapon does not exist",
-	NotOwned = "You do not own that skin",
+	CatalogUnavailable = "Магазин сейчас недоступен",
+	NoProfile = "Ваши данные ещё загружаются",
+	UnknownSkin = "Такого скина не существует",
+	NotPurchasable = "Этот скин не продаётся",
+	AlreadyOwned = "Этот скин у вас уже есть",
+	InsufficientCoins = "Не хватает монет",
+	UnknownWeapon = "Такого оружия не существует",
+	NotOwned = "У вас нет этого скина",
 }
 
 local Errors = ShopLogic.Errors

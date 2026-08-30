@@ -461,6 +461,54 @@ check(
 	"the camera stays first person throughout"
 )
 
+-- The equip panel lays its weapons out side by side, and the width of a column
+-- was a constant rather than a fraction of however many weapons exist. Adding
+-- the third left it off the right edge of the panel, unreachable, with nothing
+-- anywhere failing. Adding a fourth would do it again.
+heading("Equip columns")
+
+local equipGui = UIControllerModule.getScreen("EquipMenu")
+local columnsHolder = nil
+if equipGui then
+	for _, descendant in equipGui:GetDescendants() do
+		if descendant.Name == "Columns" then
+			columnsHolder = descendant
+			break
+		end
+	end
+end
+
+check(columnsHolder ~= nil, "the equip panel has a column holder")
+if columnsHolder then
+	local widthScale, widthOffset, found = 0, 0, 0
+	for _, weaponId in WeaponConfig.Order do
+		local column = columnsHolder:FindFirstChild(weaponId)
+		check(column ~= nil, `the equip panel has a column for {weaponId}`)
+		if column then
+			found += 1
+			widthScale += column.Size.X.Scale
+			widthOffset += column.Size.X.Offset
+		end
+	end
+
+	local layout = columnsHolder:FindFirstChildOfClass("UIListLayout")
+	local padding = if layout then layout.Padding.Offset * (found - 1) else 0
+
+	-- Scale is the part that can silently overflow: the offsets only ever pull
+	-- columns narrower to pay for the padding between them.
+	check(
+		widthScale <= 1.0001,
+		string.format("the columns fit across the panel (%.3f of its width for %d weapons)", widthScale, found)
+	)
+	check(
+		widthOffset + padding >= -1 and widthOffset + padding <= 1,
+		string.format(
+			"the gaps between columns are paid for out of their width (%d px left over)",
+			widthOffset + padding
+		)
+	)
+end
+
 -- The wheel is the one widget whose correctness is geometric: it has to paint
 -- each segment across its true share of the circle. Nothing else checks that,
 -- and a wheel that draws a 30% prize across 43 degrees looks like a bug in the

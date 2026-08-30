@@ -502,7 +502,7 @@ function MatchRuntime:_stepIdle()
 			Remotes.fireClient(
 				RemoteNames.Notice,
 				player,
-				`Move or fire within {seconds}s or you will be returned to the hub`,
+				`Двигайтесь или стреляйте — иначе через {seconds} с вернём в хаб`,
 				"warning"
 			)
 		elseif action.action == IdleTracker.Actions.Remove then
@@ -530,7 +530,7 @@ function MatchRuntime:_removeIdle(player: Player)
 		Remotes.fireClient(
 			RemoteNames.Notice,
 			player,
-			"Returned to the hub — you were not moving. Step on a pad to play again.",
+			"Возвращены в хаб — вы не двигались. Встаньте на площадку, чтобы играть снова.",
 			"error"
 		)
 		task.spawn(PlayerService.spawnInHub, player)

@@ -104,11 +104,11 @@ local function refresh()
 		if not skin then
 			continue
 		elseif owned then
-			card.button:setText("OWNED")
+			card.button:setText("КУПЛЕНО")
 			card.button:setColor(UITheme.Colors.PanelLight)
 			card.button:setEnabled(false)
 		else
-			card.button:setText(`BUY  {CurrencyLabel.format(skin.price)}`)
+			card.button:setText(`КУПИТЬ  {CurrencyLabel.format(skin.price)}`)
 			card.button:setColor(UITheme.Colors.Coin)
 			card.button:setEnabled(affordable and not pending)
 		end
@@ -136,7 +136,7 @@ local function buy(skinId: string)
 		pending = false
 
 		if type(result) ~= "table" then
-			toast("Purchase failed — try again", true)
+			toast("Покупка не прошла — попробуйте ещё раз", true)
 		elseif result.ok then
 			-- Adopting the server's reply, not computing our own balance.
 			if type(result.coins) == "number" then
@@ -147,7 +147,7 @@ local function buy(skinId: string)
 			local skin = SkinCatalog.get(skinId)
 			toast(`{skin and skin.displayName or skinId} unlocked`, false)
 		else
-			toast(result.err or "Purchase refused", true)
+			toast(result.err or "Сервер отклонил покупку", true)
 		end
 
 		refresh()
@@ -215,7 +215,7 @@ local function buildCard(skinId: string, index: number, parent: Instance)
 
 	local button = Button.create({
 		name = "Buy",
-		text = "OWNED",
+		text = "КУПЛЕНО",
 		size = UDim2.new(1, -20, 0, 34),
 		position = UDim2.new(0.5, 0, 1, -12),
 		anchorPoint = Vector2.new(0.5, 1),
@@ -259,8 +259,8 @@ function ShopScreen.init()
 	end
 
 	panel = Panel.create({
-		title = "SHOP",
-		subtitle = "Cosmetic only — a skin never changes damage or accuracy",
+		title = "МАГАЗИН",
+		subtitle = "Только внешний вид — скин не меняет урон и точность",
 		size = UDim2.fromScale(0.66, 0.72),
 		parent = gui,
 		accentColor = UITheme.Colors.Coin,

@@ -14,7 +14,7 @@ local WeaponConfig = {}
 WeaponConfig.Weapons = {
 	Rifle = {
 		id = "Rifle",
-		displayName = "PULSE RIFLE",
+		displayName = "ИМПУЛЬСНАЯ ВИНТОВКА",
 		slot = 1,
 		automatic = true,
 
@@ -48,7 +48,7 @@ WeaponConfig.Weapons = {
 
 	Pistol = {
 		id = "Pistol",
-		displayName = "ION PISTOL",
+		displayName = "ИОННЫЙ ПИСТОЛЕТ",
 		slot = 2,
 		automatic = false,
 
@@ -83,7 +83,7 @@ WeaponConfig.Weapons = {
 
 	Lance = {
 		id = "Lance",
-		displayName = "ARC LANCE",
+		displayName = "ДУГОВАЯ ПИКА",
 		slot = 3,
 		automatic = false,
 

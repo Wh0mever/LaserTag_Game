@@ -694,7 +694,7 @@ function Builders.portal(ctx, element)
 		Size = UDim2.new(1, 0, 0.4, 0),
 		BackgroundTransparency = 1,
 		Font = Enum.Font.GothamMedium,
-		Text = "Stand on the pad to queue",
+		Text = "Встань на площадку",
 		TextColor3 = Color3.fromRGB(226, 230, 240),
 		TextScaled = true,
 	})
@@ -757,7 +757,7 @@ function Builders.board(ctx, element)
 		Size = UDim2.new(1, 0, 0, 56),
 		BackgroundTransparency = 1,
 		Font = Enum.Font.GothamBlack,
-		Text = element.title or "TOP KILLS",
+		Text = element.title or "ЛУЧШИЕ СТРЕЛКИ",
 		TextColor3 = resolveColor(ctx, "Neon"),
 		TextScaled = true,
 	})

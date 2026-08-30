@@ -28,7 +28,7 @@ SpinLogic.RewardKinds = {
 
 local Kinds = SpinLogic.RewardKinds
 
-local NOTHING_LABEL = "Nothing"
+local NOTHING_LABEL = "Пусто"
 
 local spinConfig: any = nil
 local catalog: any = nil

@@ -91,7 +91,7 @@ local function refreshClock()
 	-- same countdown as everyone else.
 	local remaining = (ClientState.spin.nextFreeAt or 0) - workspace:GetServerTimeNow()
 	local text = if remaining <= 0
-		then "FREE SPIN READY"
+		then "БЕСПЛАТНОЕ ВРАЩЕНИЕ ГОТОВО"
 		else `Free spin in {formatWait(remaining)}  ·  or {SpinConfig.EXTRA_SPIN_COST} coins now`
 
 	if text ~= lastClockText then
@@ -112,8 +112,8 @@ local function refreshPity()
 
 	pityFill.Size = UDim2.fromScale(MathUtil.clamp(pity / threshold, 0, 1), 1)
 	pityLabel.Text = if remaining <= 0
-		then "Next spin is a guaranteed skin"
-		else `Guaranteed skin in {remaining} more spin{remaining == 1 and "" or "s"}`
+		then "Следующее вращение — гарантированный скин"
+		else `Гарантированный скин через {remaining} вращени{remaining == 1 and "е" or "й"}`
 end
 
 --------------------------------------------------------------------------------
@@ -143,7 +143,10 @@ local function finish(result)
 		spinButton:setEnabled(true)
 	end
 
-	setStatus(result.rewardLabel and `WON: {result.rewardLabel}` or "WON!", UITheme.Colors.Positive)
+	setStatus(
+		result.rewardLabel and `ВЫИГРЫШ: {result.rewardLabel}` or "ВЫИГРЫШ!",
+		UITheme.Colors.Positive
+	)
 	refreshPity()
 	refreshClock()
 end
@@ -157,7 +160,7 @@ local function spin()
 	if spinButton then
 		spinButton:setEnabled(false)
 	end
-	setStatus("Spinning…", UITheme.Colors.TextDim)
+	setStatus("Крутим…", UITheme.Colors.TextDim)
 
 	task.spawn(function()
 		local remote = ClientState.getRemote(RemoteNames.SpinRequest)
@@ -174,7 +177,8 @@ local function spin()
 			if spinButton then
 				spinButton:setEnabled(true)
 			end
-			local reason = type(result) == "table" and result.err or "Spin failed — try again"
+			local reason = type(result) == "table" and result.err
+				or "Вращение не прошло — попробуйте ещё раз"
 			setStatus(reason, UITheme.Colors.Negative)
 			return
 		end
@@ -244,7 +248,7 @@ local function buildWheelColumn(parent: Instance)
 
 	spinButton = Button.create({
 		name = "Spin",
-		text = "SPIN",
+		text = "КРУТИТЬ",
 		size = UDim2.new(0.8, 0, 0, 38),
 		position = UDim2.new(0.5, 0, 1, -2),
 		anchorPoint = Vector2.new(0.5, 1),
@@ -268,7 +272,12 @@ local function buildOddsColumn(parent: Instance)
 	column.ZIndex = 3
 	column.Parent = parent
 
-	local header = UITheme.label("DROP CHANCES", UITheme.TextSizes.Small, UITheme.Colors.TextDim, UITheme.Fonts.Bold)
+	local header = UITheme.label(
+		"ШАНСЫ ВЫПАДЕНИЯ",
+		UITheme.TextSizes.Small,
+		UITheme.Colors.TextDim,
+		UITheme.Fonts.Bold
+	)
 	header.Name = "Header"
 	header.Size = UDim2.new(1, 0, 0, 20)
 	header.ZIndex = 3
@@ -355,7 +364,7 @@ function SpinScreen.init()
 	end
 
 	panel = Panel.create({
-		title = "REWARD WHEEL",
+		title = "КОЛЕСО НАГРАД",
 		subtitle = `Free spin every {math.floor(SpinConfig.FREE_SPIN_INTERVAL / SECONDS_PER_HOUR)}h — all odds shown`,
 		size = UDim2.fromScale(0.7, 0.76),
 		parent = gui,

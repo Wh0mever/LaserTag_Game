@@ -41,18 +41,18 @@ SettingsScreen.Priority = 34
 -- Reading order for the key list, so it does not come out in whatever order
 -- pairs() happens to walk the table.
 local KEY_ROWS = {
-	{ action = "Move", keys = "W A S D" },
-	{ action = "Jump", keys = "Space" },
-	{ action = "Fire", keys = "Left mouse" },
-	{ action = "Reload", keys = Constants.KEYBINDS.Reload },
-	{ action = "Weapon slots", keys = "1 2 3" },
-	{ action = "Equip", keys = Constants.KEYBINDS.Equip },
-	{ action = "Shop", keys = Constants.KEYBINDS.Shop },
-	{ action = "Friends", keys = Constants.KEYBINDS.Friends },
-	{ action = "Spin", keys = Constants.KEYBINDS.Spin },
-	{ action = "Settings", keys = Constants.KEYBINDS.Settings },
-	{ action = "Scoreboard", keys = "Tab" },
-	{ action = "Free the cursor", keys = "Right Ctrl" },
+	{ action = "Движение", keys = "W A S D" },
+	{ action = "Прыжок", keys = "Space" },
+	{ action = "Огонь", keys = "Левая кнопка мыши" },
+	{ action = "Перезарядка", keys = Constants.KEYBINDS.Reload },
+	{ action = "Слоты оружия", keys = "1 2 3" },
+	{ action = "Скины", keys = Constants.KEYBINDS.Equip },
+	{ action = "Магазин", keys = Constants.KEYBINDS.Shop },
+	{ action = "Друзья", keys = Constants.KEYBINDS.Friends },
+	{ action = "Колесо", keys = Constants.KEYBINDS.Spin },
+	{ action = "Настройки", keys = Constants.KEYBINDS.Settings },
+	{ action = "Таблица счёта", keys = "Tab" },
+	{ action = "Освободить курсор", keys = "Right Ctrl" },
 }
 
 local trove = Trove.new()
@@ -74,7 +74,8 @@ local function buildKeyList(parent: Instance, order: number)
 	root.ZIndex = 3
 	root.Parent = parent
 
-	local header = UITheme.label("CONTROLS", UITheme.TextSizes.Small, UITheme.Colors.TextDim, UITheme.Fonts.Bold)
+	local header =
+		UITheme.label("УПРАВЛЕНИЕ", UITheme.TextSizes.Small, UITheme.Colors.TextDim, UITheme.Fonts.Bold)
 	header.Name = "Header"
 	header.Size = UDim2.new(1, 0, 0, 16)
 	header.ZIndex = 3
@@ -115,8 +116,8 @@ function SettingsScreen.init()
 	end
 
 	panel = Panel.create({
-		title = "SETTINGS",
-		subtitle = "Applied as you drag, and remembered for next time",
+		title = "НАСТРОЙКИ",
+		subtitle = "Применяется сразу и запоминается до следующего входа",
 		size = UDim2.fromScale(0.48, 0.72),
 		parent = gui,
 		accentColor = UITheme.Colors.Accent,
@@ -174,7 +175,7 @@ function SettingsScreen.init()
 	-- forming a require cycle through their module bodies.
 	local howTo = Button.create({
 		name = "HowToPlay",
-		text = "HOW TO PLAY",
+		text = "КАК ИГРАТЬ",
 		size = UDim2.fromOffset(126, 30),
 		position = UDim2.new(1, -232, 0, 13),
 		anchorPoint = Vector2.new(1, 0),
@@ -194,7 +195,7 @@ function SettingsScreen.init()
 
 	local reset = Button.create({
 		name = "Reset",
-		text = "RESET TO DEFAULTS",
+		text = "СБРОСИТЬ НАСТРОЙКИ",
 		size = UDim2.fromOffset(168, 30),
 		position = UDim2.new(1, -56, 0, 13),
 		anchorPoint = Vector2.new(1, 0),

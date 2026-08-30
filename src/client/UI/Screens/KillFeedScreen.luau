@@ -135,7 +135,7 @@ local function push(entry)
 
 	local row = acquire()
 	local killerName = entry.killerName
-	row.killer.Text = killerName or "World"
+	row.killer.Text = killerName or "Мир"
 	row.killer.TextColor3 = if killerName then UITheme.teamColor(entry.killerTeam) else UITheme.Colors.TextDim
 	row.arrow.Text = ARROW
 	row.headshot.Visible = entry.isHeadshot == true

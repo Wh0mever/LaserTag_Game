@@ -48,7 +48,7 @@ SkinCatalog.PriceBands = {
 SkinCatalog.Skins = {
 	default = {
 		id = "default",
-		displayName = "Standard",
+		displayName = "Стандарт",
 		price = 0,
 		rarity = "Common",
 		color = { r = 0, g = 229, b = 255 },
@@ -57,7 +57,7 @@ SkinCatalog.Skins = {
 	},
 	crimson = {
 		id = "crimson",
-		displayName = "Crimson",
+		displayName = "Багровый",
 		price = 1200,
 		rarity = "Common",
 		color = { r = 255, g = 60, b = 60 },
@@ -66,7 +66,7 @@ SkinCatalog.Skins = {
 	},
 	gold = {
 		id = "gold",
-		displayName = "Gold Rush",
+		displayName = "Золотая лихорадка",
 		price = 3500,
 		rarity = "Rare",
 		color = { r = 255, g = 200, b = 40 },
@@ -75,7 +75,7 @@ SkinCatalog.Skins = {
 	},
 	cyan = {
 		id = "cyan",
-		displayName = "Deep Cyan",
+		displayName = "Глубокий циан",
 		price = 3500,
 		rarity = "Rare",
 		color = { r = 40, g = 220, b = 255 },
@@ -84,7 +84,7 @@ SkinCatalog.Skins = {
 	},
 	toxic = {
 		id = "toxic",
-		displayName = "Toxic",
+		displayName = "Токсичный",
 		price = 4000,
 		rarity = "Rare",
 		color = { r = 130, g = 255, b = 60 },
@@ -93,7 +93,7 @@ SkinCatalog.Skins = {
 	},
 	magenta = {
 		id = "magenta",
-		displayName = "Magenta Pulse",
+		displayName = "Пурпурный импульс",
 		price = 10000,
 		rarity = "Epic",
 		color = { r = 255, g = 60, b = 200 },
@@ -103,7 +103,7 @@ SkinCatalog.Skins = {
 	},
 	galaxy = {
 		id = "galaxy",
-		displayName = "Galaxy",
+		displayName = "Галактика",
 		price = 12500,
 		rarity = "Epic",
 		color = { r = 150, g = 90, b = 255 },
@@ -113,7 +113,7 @@ SkinCatalog.Skins = {
 	},
 	dragon = {
 		id = "dragon",
-		displayName = "Dragonfire",
+		displayName = "Драконье пламя",
 		price = 36000,
 		rarity = "Legendary",
 		color = { r = 255, g = 120, b = 20 },
@@ -123,7 +123,7 @@ SkinCatalog.Skins = {
 	},
 	arctic = {
 		id = "arctic",
-		displayName = "Arctic",
+		displayName = "Арктика",
 		price = 1400,
 		rarity = "Common",
 		color = { r = 176, g = 232, b = 255 },
@@ -132,7 +132,7 @@ SkinCatalog.Skins = {
 	},
 	ember = {
 		id = "ember",
-		displayName = "Ember",
+		displayName = "Уголёк",
 		price = 4500,
 		rarity = "Rare",
 		color = { r = 255, g = 122, b = 26 },
@@ -141,7 +141,7 @@ SkinCatalog.Skins = {
 	},
 	voidwalker = {
 		id = "voidwalker",
-		displayName = "Voidwalker",
+		displayName = "Странник пустоты",
 		price = 11000,
 		rarity = "Epic",
 		color = { r = 122, g = 62, b = 255 },
@@ -151,7 +151,7 @@ SkinCatalog.Skins = {
 	},
 	prism = {
 		id = "prism",
-		displayName = "Prism",
+		displayName = "Призма",
 		price = 14000,
 		rarity = "Epic",
 		color = { r = 255, g = 128, b = 220 },
@@ -161,7 +161,7 @@ SkinCatalog.Skins = {
 	},
 	eclipse = {
 		id = "eclipse",
-		displayName = "Eclipse",
+		displayName = "Затмение",
 		price = 48000,
 		rarity = "Legendary",
 		color = { r = 255, g = 236, b = 168 },

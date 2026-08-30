@@ -23,9 +23,14 @@ Constants.HEAD_OFFSET_Y = 1.5 -- eye height above HumanoidRootPart
 
 -- Teams. Team A is green, Team B is magenta/pink (matches the HUD score chips).
 Constants.TEAMS = {
-	A = { id = "A", name = "Alpha", color = { r = 45, g = 216, b = 129 }, brickColor = "Bright green" },
-	B = { id = "B", name = "Bravo", color = { r = 235, g = 87, b = 158 }, brickColor = "Hot pink" },
-	LOBBY = { id = "LOBBY", name = "Lobby", color = { r = 160, g = 160, b = 170 }, brickColor = "Medium stone grey" },
+	A = { id = "A", name = "Альфа", color = { r = 45, g = 216, b = 129 }, brickColor = "Bright green" },
+	B = { id = "B", name = "Браво", color = { r = 235, g = 87, b = 158 }, brickColor = "Hot pink" },
+	LOBBY = {
+		id = "LOBBY",
+		name = "Лобби",
+		color = { r = 160, g = 160, b = 170 },
+		brickColor = "Medium stone grey",
+	},
 }
 
 Constants.TEAM_IDS = { "A", "B" }
