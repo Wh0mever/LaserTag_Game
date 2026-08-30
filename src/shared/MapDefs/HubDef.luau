@@ -224,16 +224,21 @@ local HubDef = {
 	origin = { x = 0, y = 0, z = 0 },
 	killY = -60,
 
+	-- No ordinary surface may outrank the dimmest Neon one, and the bright end
+	-- of the palette belongs to trim rather than to the plaza floor. The first
+	-- version broke both — a near-white 200x200 ground under a near-white trim —
+	-- and the hub rendered as a single white sheet. tests/harness/lighting.luau
+	-- measures it.
 	palette = {
-		Ground = { r = 198, g = 204, b = 214 },
-		GroundAlt = { r = 168, g = 176, b = 190 },
+		Ground = { r = 146, g = 154, b = 168 },
+		GroundAlt = { r = 124, g = 132, b = 148 },
 		Wall = { r = 58, g = 96, b = 176 },
-		Trim = { r = 246, g = 248, b = 252 },
+		Trim = { r = 176, g = 182, b = 194 },
 		Neon = { r = 88, g = 214, b = 255 },
-		Accent = { r = 235, g = 87, b = 158 },
-		Planter = { r = 224, g = 98, b = 70 },
+		Accent = { r = 196, g = 74, b = 132 },
+		Planter = { r = 186, g = 82, b = 58 },
 		Hedge = { r = 74, g = 178, b = 90 },
-		Canopy = { r = 240, g = 196, b = 66 },
+		Canopy = { r = 198, g = 162, b = 56 },
 		Board = { r = 26, g = 30, b = 42 },
 		PortalDust = { r = 240, g = 186, b = 92 },
 		PortalMirage = { r = 168, g = 112, b = 246 },
