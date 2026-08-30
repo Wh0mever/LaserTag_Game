@@ -143,6 +143,65 @@ local function isAlive(): boolean
 end
 
 --[[
+	Where the server believes this player's eyes are.
+
+	Not the camera. The server accepts a shot only if the claimed origin is
+	within WeaponConfig.MAX_ORIGIN_DEVIATION of its own idea of the player's eye
+	position, and a third-person camera sits a dozen studs behind the head — so
+	sending the camera position, which is what this used to do and what a
+	first-person client gets away with, would have every shot in third person
+	rejected as origin spoofing.
+]]
+local function eyePosition(): Vector3?
+	local character = player.Character
+	local head = character and character:FindFirstChild("Head")
+	if head and head:IsA("BasePart") then
+		return head.Position
+	end
+
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if root and root:IsA("BasePart") then
+		return root.Position + Vector3.new(0, 1.5, 0)
+	end
+
+	return nil
+end
+
+--[[
+	The direction from `origin` to whatever the crosshair is over.
+
+	The crosshair is at the centre of the screen and the camera is what decides
+	what sits under it, but the shot leaves the player's head. Those are the same
+	ray in first person and visibly different ones in third, where firing along
+	the head's own facing would put every shot beside the thing being aimed at.
+
+	So: trace from the camera to find the aim point, then aim the shot at it.
+	Nothing is hit inside `range` — open sky — and the point is taken at full
+	range along the camera, which keeps the direction stable instead of
+	snapping as the trace catches and loses distant geometry.
+]]
+local function aimDirection(cameraCF: CFrame, origin: Vector3, range: number): Vector3
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	-- The player's own body is between the camera and the world in third person;
+	-- without this every shot would aim at the back of their own head.
+	params.FilterDescendantsInstances = { player.Character }
+	params.IgnoreWater = true
+
+	local reach = cameraCF.LookVector * range
+	local hit = workspace:Raycast(cameraCF.Position, reach, params)
+	local target = if hit then hit.Position else cameraCF.Position + reach
+
+	local offset = target - origin
+	if offset.Magnitude < 1e-3 then
+		-- Standing inside the aim point. Any unit vector is as good as another
+		-- here, and the camera's is the one the player is looking along.
+		return cameraCF.LookVector
+	end
+	return offset.Unit
+end
+
+--[[
 	Whether the weapon may be used at all: alive, in a match, no menu on screen.
 	MouseLockController already suppresses fire input while a menu is open, but
 	it is disabled entirely on touch-only devices, so the menu test is repeated
@@ -222,8 +281,8 @@ local function tryFire(now: number)
 	end
 
 	local cameraCF = camera.CFrame
-	local origin = cameraCF.Position
-	local direction = cameraCF.LookVector
+	local origin = eyePosition() or cameraCF.Position
+	local direction = aimDirection(cameraCF, origin, weapon.range)
 
 	seq += 1
 	state.mag -= 1

@@ -109,6 +109,7 @@ local function controlLines(): { { action: string, keys: string } }
 			{ action = "Огонь", keys = "Кнопка огня" },
 			{ action = "Перезарядка и смена", keys = "Кнопки рядом с огнём" },
 			{ action = "Меню", keys = "Кнопки слева" },
+			{ action = "Вид", keys = "Кнопка ВИД" },
 		}
 	end
 
@@ -117,6 +118,7 @@ local function controlLines(): { { action: string, keys: string } }
 		{ action = "Огонь", keys = "Левая кнопка мыши" },
 		{ action = "Перезарядка", keys = Constants.KEYBINDS.Reload },
 		{ action = "Смена оружия", keys = "1  2  3" },
+		{ action = "Сменить вид", keys = Constants.KEYBINDS.Perspective },
 		{ action = "Таблица счёта", keys = "Tab (удерживать)" },
 		{ action = "Настройки", keys = Constants.KEYBINDS.Settings },
 	}

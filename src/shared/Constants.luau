@@ -61,6 +61,9 @@ Constants.KEYBINDS = {
 	-- O for options. Escape is not available: Roblox reserves it for its own
 	-- menu and a game cannot take it.
 	Settings = "O",
+	-- V for view. Also reachable from the settings panel; a shooter's camera is
+	-- something players flip mid-fight, not something they open a menu for.
+	Perspective = "V",
 	MouseUnlock = "RightControl",
 	Scoreboard = "Tab",
 }

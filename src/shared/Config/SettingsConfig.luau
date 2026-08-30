@@ -19,16 +19,38 @@
 local SettingsConfig = {}
 
 --[[
-	Each entry:
+	Two kinds of setting.
+
+	  kind = "number" (the default) — a slider:
+	    min/max   inclusive bounds, enforced server-side
+	    step      slider granularity; also what the value is rounded to
+	    format    how the number is rendered next to the slider
+
+	  kind = "choice" — a row of buttons, one per option:
+	    options   { { id, label }, ... }; the stored value is an option's id
+
+	Both kinds share:
 	  id        key in the stored table and in the profile
 	  label     what the player reads
 	  hint      one line under the label; why they would touch it
-	  min/max   inclusive bounds, enforced server-side
 	  default   value for a profile that has never set it
-	  step      slider granularity; also what the value is rounded to
-	  format    how the number is rendered next to the slider
+
+	A choice stores a string rather than a number, which is why `clamp` returns
+	`any`: the alternative was encoding first/third person as 0 and 1 and having
+	every reader remember which was which.
 ]]
 SettingsConfig.Definitions = {
+	{
+		id = "Perspective",
+		kind = "choice",
+		label = "ВИД",
+		hint = "От третьего лица видно себя и углы; от первого — точнее прицел",
+		default = "Third",
+		options = {
+			{ id = "Third", label = "ОТ ТРЕТЬЕГО ЛИЦА" },
+			{ id = "First", label = "ОТ ПЕРВОГО ЛИЦА" },
+		},
+	},
 	{
 		id = "Sensitivity",
 		label = "ЧУВСТВИТЕЛЬНОСТЬ МЫШИ",
@@ -79,21 +101,49 @@ function SettingsConfig.get(id: any)
 	return if type(id) == "string" then byId[id] else nil
 end
 
+function SettingsConfig.isChoice(id: any): boolean
+	local definition = SettingsConfig.get(id)
+	return definition ~= nil and definition.kind == "choice"
+end
+
 --[[
-	Snap `value` to the setting's step and clamp it into range.
-
-	Rounding to the step matters beyond tidiness: it is what stops a client
-	storing 0.7311827956989247 and the label rendering something the slider can
-	never return to.
-
-	Anything that is not a finite number resolves to the default rather than to a
-	bound — a mangled value means "no opinion", and the default is the honest
-	answer to that, where clamping would silently pick an extreme.
+	The option table for a choice setting, or nil for a slider.
 ]]
-function SettingsConfig.clamp(id: any, value: any): number?
+function SettingsConfig.optionsFor(id: any)
+	local definition = SettingsConfig.get(id)
+	return if definition and definition.kind == "choice" then definition.options else nil
+end
+
+--[[
+	Resolve `value` to something this setting may legally hold.
+
+	For a slider: snapped to the step and clamped into range. Rounding to the
+	step matters beyond tidiness — it is what stops a client storing
+	0.7311827956989247 and the label rendering something the slider can never
+	return to.
+
+	Anything unrecognised resolves to the default rather than to a bound: a
+	mangled value means "no opinion", and the default is the honest answer to
+	that, where clamping would silently pick an extreme.
+]]
+function SettingsConfig.clamp(id: any, value: any): any
 	local definition = SettingsConfig.get(id)
 	if not definition then
 		return nil
+	end
+
+	-- A choice has no bounds to clamp into: the value is either one of the
+	-- options or it is not, and anything else is the default. Same rule as a
+	-- mangled number — an unrecognised value means "no opinion".
+	if definition.kind == "choice" then
+		if type(value) == "string" then
+			for _, option in definition.options do
+				if option.id == value then
+					return value
+				end
+			end
+		end
+		return definition.default
 	end
 
 	if not isFiniteNumber(value) then
@@ -113,7 +163,7 @@ end
 	A complete table of defaults. Fresh each call: handing out a shared table
 	would let one caller's edit become every future profile's starting point.
 ]]
-function SettingsConfig.defaults(): { [string]: number }
+function SettingsConfig.defaults(): { [string]: any }
 	local out = {}
 	for _, definition in SettingsConfig.Definitions do
 		out[definition.id] = definition.default
@@ -128,7 +178,7 @@ end
 	persisted structure, and letting a client write arbitrary keys into it is how
 	a cosmetic remote turns into free storage.
 ]]
-function SettingsConfig.sanitize(input: any): { [string]: number }
+function SettingsConfig.sanitize(input: any): { [string]: any }
 	local out = SettingsConfig.defaults()
 	if type(input) ~= "table" then
 		return out
@@ -137,7 +187,7 @@ function SettingsConfig.sanitize(input: any): { [string]: number }
 	for _, definition in SettingsConfig.Definitions do
 		local raw = input[definition.id]
 		if raw ~= nil then
-			out[definition.id] = SettingsConfig.clamp(definition.id, raw) :: number
+			out[definition.id] = SettingsConfig.clamp(definition.id, raw)
 		end
 	end
 
@@ -153,8 +203,18 @@ function SettingsConfig.display(id: any, value: any): string
 		return ""
 	end
 
-	local resolved = SettingsConfig.clamp(id, value) :: number
-	return string.format(definition.format, resolved * (definition.displayScale or 1))
+	local resolved = SettingsConfig.clamp(id, value)
+
+	if definition.kind == "choice" then
+		for _, option in definition.options do
+			if option.id == resolved then
+				return option.label
+			end
+		end
+		return ""
+	end
+
+	return string.format(definition.format, (resolved :: number) * (definition.displayScale or 1))
 end
 
 --[[
@@ -164,6 +224,12 @@ end
 function SettingsConfig.toFraction(id: any, value: any): number
 	local definition = SettingsConfig.get(id)
 	if not definition then
+		return 0
+	end
+
+	-- A choice does not sit anywhere on a line, so it has no fill fraction. It is
+	-- rendered as buttons and never reaches a slider.
+	if definition.kind == "choice" then
 		return 0
 	end
 
@@ -182,6 +248,12 @@ end
 function SettingsConfig.fromFraction(id: any, fraction: any): number?
 	local definition = SettingsConfig.get(id)
 	if not definition then
+		return nil
+	end
+
+	-- Same reason as toFraction: a choice is not a position on a line, and
+	-- answering with one of its options here would hand a slider a string.
+	if definition.kind == "choice" then
 		return nil
 	end
 

@@ -26,6 +26,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
 assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.json")
 
 local Button = require(script.Parent.Parent.Components.Button)
+local ChoiceRow = require(script.Parent.Parent.Components.ChoiceRow)
 local ClientState = require(script.Parent.Parent.Parent.ClientState)
 local Constants = require(Shared.Constants)
 local Panel = require(script.Parent.Parent.Components.Panel)
@@ -51,6 +52,7 @@ local KEY_ROWS = {
 	{ action = "Друзья", keys = Constants.KEYBINDS.Friends },
 	{ action = "Колесо", keys = Constants.KEYBINDS.Spin },
 	{ action = "Настройки", keys = Constants.KEYBINDS.Settings },
+	{ action = "Сменить вид", keys = Constants.KEYBINDS.Perspective },
 	{ action = "Таблица счёта", keys = "Tab" },
 	{ action = "Освободить курсор", keys = "Right Ctrl" },
 }
@@ -59,9 +61,14 @@ local trove = Trove.new()
 local panel: any = nil
 local sliders: { [string]: any } = {}
 
-local function pushSliderValues()
-	for id, slider in sliders do
-		slider:setValue(ClientState.settings[id])
+--[[
+	Put every control back in step with the stored value. Both kinds of control
+	expose setValue, and neither fires its change callback from it, so this is
+	safe to call after a profile arrives or a reset.
+]]
+local function pushControlValues()
+	for id, control in sliders do
+		control:setValue(ClientState.settings[id])
 	end
 end
 
@@ -145,27 +152,48 @@ function SettingsScreen.init()
 	layout.Padding = UDim.new(0, 10)
 	layout.Parent = body
 
+	-- The control follows from the setting's kind, so adding a setting to
+	-- SettingsConfig is the whole of adding it to this panel.
 	for index, definition in SettingsConfig.Definitions do
-		local slider = Slider.create({
-			settingId = definition.id,
-			value = ClientState.settings[definition.id],
-			parent = body,
-			layoutOrder = index,
-			-- Applied on every step, so the change is felt under the hand...
-			onChanged = function(value: number)
-				ClientState.applySetting(definition.id, value)
-			end,
-			-- ...and written once on release. A drag produces dozens of steps;
-			-- saving each would spend the remote's rate budget on one gesture.
-			onCommitted = function(value: number)
-				ClientState.applySetting(definition.id, value)
-				ClientState.saveSettings()
-			end,
-		})
-		sliders[definition.id] = slider
-		trove:Add(function()
-			slider:destroy()
-		end)
+		local control
+		if definition.kind == "choice" then
+			control = ChoiceRow.create({
+				settingId = definition.id,
+				value = ClientState.settings[definition.id],
+				parent = body,
+				layoutOrder = index,
+				-- A press is both the change and the commit: there is no drag to
+				-- coalesce, and the value is one of two, so the save is cheap.
+				onChanged = function(value: string)
+					ClientState.applySetting(definition.id, value)
+					ClientState.saveSettings()
+				end,
+			})
+		else
+			control = Slider.create({
+				settingId = definition.id,
+				value = ClientState.settings[definition.id],
+				parent = body,
+				layoutOrder = index,
+				-- Applied on every step, so the change is felt under the hand...
+				onChanged = function(value: number)
+					ClientState.applySetting(definition.id, value)
+				end,
+				-- ...and written once on release. A drag produces dozens of steps;
+				-- saving each would spend the remote's rate budget on one gesture.
+				onCommitted = function(value: number)
+					ClientState.applySetting(definition.id, value)
+					ClientState.saveSettings()
+				end,
+			})
+		end
+
+		if control then
+			sliders[definition.id] = control
+			trove:Add(function()
+				control:destroy()
+			end)
+		end
 	end
 
 	buildKeyList(body, #SettingsConfig.Definitions + 1)
@@ -205,7 +233,7 @@ function SettingsScreen.init()
 				ClientState.applySetting(id, value)
 			end
 			ClientState.saveSettings()
-			pushSliderValues()
+			pushControlValues()
 		end,
 	})
 	reset.instance.ZIndex = 4
@@ -230,7 +258,7 @@ function SettingsScreen.init()
 
 	-- The profile lands after this screen is built, so the sliders start on
 	-- defaults and are corrected when the real values arrive.
-	trove:Add(ClientState.SettingsChanged:Connect(pushSliderValues))
+	trove:Add(ClientState.SettingsChanged:Connect(pushControlValues))
 end
 
 function SettingsScreen.stop()

@@ -1,9 +1,11 @@
 --!nonstrict
 --[[
 	SettingsController.luau
-	Turns the three stored settings into the properties that actually do
-	something, and keeps them applied.
+	Turns the stored settings into the things that actually do something, and
+	keeps them applied.
 
+		Perspective   -> PerspectiveController, which moves the camera, the body,
+		                 the viewmodel and where a shot is fired from
 		Sensitivity   -> UserInputService.MouseDeltaSensitivity
 		Volume        -> the LaserTagSFX SoundGroup
 		FieldOfView   -> CameraController.setFieldOfView
@@ -32,6 +34,7 @@ assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.js
 
 local CameraController = require(script.Parent.CameraController)
 local ClientState = require(script.Parent.Parent.ClientState)
+local PerspectiveController = require(script.Parent.PerspectiveController)
 local SettingsConfig = require(Shared.Config.SettingsConfig)
 local Trove = require(Shared.Util.Trove)
 local VFXSound = require(script.Parent.VFX.VFXSound)
@@ -71,6 +74,7 @@ function SettingsController.apply(settings: any)
 
 	UserInputService.MouseDeltaSensitivity = resolved.Sensitivity
 	CameraController.setFieldOfView(resolved.FieldOfView)
+	PerspectiveController.set(resolved.Perspective)
 
 	if applyVolume(resolved.Volume) then
 		soundGroupResolved = true

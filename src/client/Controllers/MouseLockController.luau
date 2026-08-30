@@ -35,8 +35,16 @@
 	    under LockFirstPerson, and buttons near the bottom edge), and being
 	    unable to click anything is too total a failure to leave on one mechanism.
 
-	CameraMode is left on LockFirstPerson throughout. Writing it achieved nothing
-	except a deferred round trip through the module on every menu toggle.
+	CameraMode is written once per perspective change and never as part of
+	freeing the cursor. Flipping it to Classic to release the cursor — which is
+	what this file used to do — achieved nothing but a deferred round trip
+	through the camera module on every menu toggle.
+
+	In third person the PlayerModule stops forcing LockCenter of its own accord,
+	because it no longer believes the camera is first person. That is the same
+	property in reverse: the cursor must then be locked here, or the view stops
+	turning with the mouse. `writeCursor` does it in both modes, so the two
+	perspectives take the same path.
 ]]
 
 local Players = game:GetService("Players")
@@ -50,15 +58,16 @@ assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.js
 local ClientState = require(script.Parent.Parent.ClientState)
 local Constants = require(Shared.Constants)
 local InputController = require(script.Parent.InputController)
+local PerspectiveController = require(script.Parent.PerspectiveController)
 local Trove = require(Shared.Util.Trove)
 local UIController = require(script.Parent.Parent.UI.UIController)
 
 local MouseLockController = {}
 MouseLockController.Priority = 5
 
--- StarterPlayer already pins these; re-asserting on the Player instance keeps
--- the view first person even if a future Studio session edits StarterPlayer.
-local FIRST_PERSON_ZOOM = 0.5
+-- Both zoom distances are pinned to the same value, so the view sits exactly
+-- where the perspective says and the scroll wheel cannot move it. PerspectiveController
+-- owns which value that is.
 
 -- One above Enum.RenderPriority.Camera, so this runs immediately after
 -- CameraModule:Update has written its LockCenter for the frame.
@@ -158,6 +167,31 @@ local function setGuard(active: boolean)
 	end
 end
 
+--[[
+	Camera mode and zoom for the current perspective.
+
+	Both zoom distances are pinned to the same number so the scroll wheel cannot
+	move the view: how far a player can see round a corner is a balance
+	property, not a preference to be discovered accidentally.
+]]
+local function applyPerspective()
+	if not enabled then
+		return
+	end
+
+	local zoom = PerspectiveController.zoom()
+	player.CameraMinZoomDistance = zoom
+	player.CameraMaxZoomDistance = zoom
+	player.CameraMode = if PerspectiveController.isFirstPerson()
+		then Enum.CameraMode.LockFirstPerson
+		else Enum.CameraMode.Classic
+
+	-- The cursor has to be re-asserted after the change: leaving first person
+	-- makes the camera module stop writing LockCenter, and nothing else would
+	-- put it back for a player who is mid-match rather than mid-menu.
+	writeCursor()
+end
+
 local function apply()
 	if not enabled then
 		return
@@ -208,12 +242,9 @@ function MouseLockController.init()
 		return
 	end
 
-	player.CameraMaxZoomDistance = FIRST_PERSON_ZOOM
-	player.CameraMinZoomDistance = FIRST_PERSON_ZOOM
-	-- Set once and never touched again. Flipping it was the old, ineffective
-	-- attempt at freeing the cursor; the camera stays first person throughout
-	-- and Modal is what suspends the mouse-look, exactly as Roblox documents.
-	player.CameraMode = Enum.CameraMode.LockFirstPerson
+	applyPerspective()
+
+	trove:Add(PerspectiveController.Changed:Connect(applyPerspective))
 
 	trove:Add(InputController.MouseUnlockToggled:Connect(function(unlocked: boolean)
 		toggleUnlocked = unlocked

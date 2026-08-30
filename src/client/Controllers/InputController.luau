@@ -12,6 +12,7 @@
 	  SlotPressed        (slot: number)
 	  MenuToggled        (name: "Equip" | "Shop" | "Friends" | "Spin" | "Settings")
 	  MouseUnlockToggled (unlocked: boolean)
+	  PerspectiveToggled ()
 	  ScoreboardHeld     (isHeld: boolean)
 
 	Mobile buttons are deliberately not bound here — the touch HUD publishes the
@@ -52,6 +53,7 @@ InputController.ReloadPressed = Signal.new()
 InputController.SlotPressed = Signal.new()
 InputController.MenuToggled = Signal.new()
 InputController.MouseUnlockToggled = Signal.new()
+InputController.PerspectiveToggled = Signal.new()
 InputController.ScoreboardHeld = Signal.new()
 
 --[[
@@ -227,6 +229,10 @@ function InputController.init()
 			InputController.MenuToggled:Fire(menuName)
 		end)
 	end
+
+	bind("Perspective", function()
+		InputController.PerspectiveToggled:Fire()
+	end)
 
 	bind("MouseUnlock", function()
 		InputController.setMouseUnlocked(not mouseUnlocked)
