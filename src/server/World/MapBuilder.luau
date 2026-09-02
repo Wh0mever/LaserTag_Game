@@ -702,6 +702,120 @@ function Builders.portal(ctx, element)
 	table.insert(ctx.portals, { mapId = element.mapId, padPart = pad, gui = surface })
 end
 
+--[[
+	A lit name sign on two posts — the arena's front door.
+
+	Text is rendered on BOTH faces. A gateway sign is walked under, and the half
+	of the plaza that has already passed it would otherwise be looking at a blank
+	slab. `board` gets away with one face because it is flat against a wall.
+
+	`element.lines` is a list, not one string: a name reads as a logo when it is
+	stacked, and TextScaled on a single 19-character line would shrink the letters
+	to fit the width and leave the board mostly empty. The first line is drawn in
+	trim, the rest in neon.
+
+	`postHeight` is optional. Omitted, the board is mounted with nothing under it,
+	which is what a sign flat against a wall wants.
+]]
+function Builders.sign(ctx, element)
+	local facing = SIDE_NORMALS[element.facing or "+z"]
+	local pos = worldVec(ctx, element.pos.x, element.pos.y, element.pos.z)
+	local base = CFrame.lookAt(pos, pos + Vector3.new(facing.x, 0, facing.z))
+	local size = element.size
+	local neon = resolveColor(ctx, "Neon")
+
+	local board = makePart(ctx, {
+		name = "SignBoard",
+		size = Vector3.new(size.x, size.y, size.z),
+		cframe = base,
+		color = resolveColor(ctx, "Board"),
+		-- Overhead and never walked into, so it neither collides nor blocks a
+		-- shot: a sign that eats bullets fired across the plaza is a bug players
+		-- would report as the gun not working.
+		canCollide = false,
+	})
+	board.CanQuery = false
+
+	-- The border is four edge bars rather than the larger slab behind the screen
+	-- that `board` uses. A slab would be flush against the back face, which here
+	-- carries the second copy of the text.
+	for _, side in { -1, 1 } do
+		makePart(ctx, {
+			name = "SignGlow",
+			size = Vector3.new(size.x + 3, 0.9, size.z + 0.4),
+			cframe = base * CFrame.new(0, side * (size.y * 0.5 + 0.45), 0),
+			color = neon,
+			material = Enum.Material.Neon,
+			canCollide = false,
+			castShadow = false,
+		})
+		makePart(ctx, {
+			name = "SignEdge",
+			size = Vector3.new(1.5, size.y + 1.8, size.z + 0.4),
+			cframe = base * CFrame.new(side * (size.x * 0.5 + 0.75), 0, 0),
+			color = resolveColor(ctx, "Trim"),
+			canCollide = false,
+		})
+	end
+
+	if element.postHeight then
+		local postOffsetY = -(size.y * 0.5 + element.postHeight * 0.5)
+		for _, side in { -1, 1 } do
+			makePart(ctx, {
+				name = "SignPost",
+				size = Vector3.new(2.4, element.postHeight, 2.4),
+				cframe = base * CFrame.new(side * (size.x * 0.5 - 1.2), postOffsetY, 0),
+				color = resolveColor(ctx, "Trim"),
+			})
+		end
+	end
+
+	for _, face in { Enum.NormalId.Front, Enum.NormalId.Back } do
+		local surface = newGui("SurfaceGui", board, {
+			Name = `SignGui{face.Name}`,
+			Face = face,
+			SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud,
+			PixelsPerStud = 32,
+			LightInfluence = 0,
+			-- Further than the board's 500: this is the thing that tells a player
+			-- which game they are in, and the plaza is 200 studs across.
+			MaxDistance = 700,
+		})
+		local root = newGui("Frame", surface, {
+			Name = "Root",
+			Size = UDim2.fromScale(1, 1),
+			BackgroundColor3 = Color3.fromRGB(14, 16, 24),
+			BorderSizePixel = 0,
+		})
+		newGui("UIPadding", root, {
+			PaddingTop = UDim.new(0, 10),
+			PaddingBottom = UDim.new(0, 10),
+			PaddingLeft = UDim.new(0, 18),
+			PaddingRight = UDim.new(0, 18),
+		})
+		newGui("UIListLayout", root, {
+			FillDirection = Enum.FillDirection.Vertical,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		})
+
+		local share = 1 / math.max(1, #element.lines)
+		for index, line in element.lines do
+			newGui("TextLabel", root, {
+				Name = `Line{index}`,
+				LayoutOrder = index,
+				Size = UDim2.new(1, 0, share, 0),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBlack,
+				Text = line,
+				TextColor3 = if index == 1 then resolveColor(ctx, "Trim") else neon,
+				TextScaled = true,
+			})
+		end
+	end
+end
+
 function Builders.board(ctx, element)
 	local facing = SIDE_NORMALS[element.facing or "+z"]
 	local pos = worldVec(ctx, element.pos.x, element.pos.y, element.pos.z)

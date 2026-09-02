@@ -243,7 +243,11 @@ function WelcomeScreen.init()
 
 	panel = Panel.create({
 		title = "КАК ИГРАТЬ",
-		subtitle = "Тридцать секунд на чтение — и в бой",
+		-- The name goes in the subtitle rather than the title: a Panel title
+		-- truncates at the end instead of shrinking, and on a phone this one is
+		-- already close to its box. Replacing the old line keeps the length the
+		-- same as what shipped, so nothing new can clip.
+		subtitle = `{Constants.GAME_NAME} · за 30 секунд`,
 		size = UDim2.fromScale(0.56, 0.78),
 		parent = gui,
 		accentColor = UITheme.Colors.Accent,
