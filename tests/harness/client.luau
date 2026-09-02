@@ -410,7 +410,18 @@ end)
 check(MouseLock.isEnabled(), "the cursor manager runs on a mouse-and-keyboard client")
 check(not MouseLock.isUnlocked(), "the cursor starts captured, with no menu open")
 
-Env.stepRender()
+-- A render binding that errors stops running for the rest of the session on a
+-- real client, and there is no warning anywhere. Every step below is checked
+-- for that, starting with this one.
+local function stepFrame(what: string)
+	local broken = Env.stepRender()
+	for _, failure in broken do
+		check(false, `{failure.name} errored during {what}: {failure.err}`)
+	end
+	check(#broken == 0, `no render binding errored during {what}`)
+end
+
+stepFrame("play")
 check(
 	UserInputServiceStub.MouseBehavior == roblox.Enum.MouseBehavior.LockCenter,
 	"during play the cursor stays captured across a frame"
@@ -427,7 +438,7 @@ for _, name in { "Shop", "Spin", "Equip", "Settings", "Friends" } do
 	)
 
 	-- THE CHECK THAT MATTERS. Everything above passed while the bug was live.
-	Env.stepRender()
+	stepFrame(`{name} open`)
 	check(
 		UserInputServiceStub.MouseBehavior == roblox.Enum.MouseBehavior.Default,
 		`{name} keeps the cursor free after the camera module has run (got {UserInputServiceStub.MouseBehavior})`
@@ -437,7 +448,7 @@ for _, name in { "Shop", "Spin", "Equip", "Settings", "Friends" } do
 	UIControllerModule.closeMenu(name)
 	check(not MouseLock.isUnlocked(), `closing {name} recaptures the cursor`)
 
-	Env.stepRender()
+	stepFrame(`{name} closed`)
 	check(
 		UserInputServiceStub.MouseBehavior == roblox.Enum.MouseBehavior.LockCenter,
 		`closing {name} leaves the cursor captured across a frame`
@@ -451,7 +462,7 @@ UIControllerModule.openMenu("Spin")
 check(UIControllerModule.isMenuOpen("Spin"), "opening a second panel switches to it")
 check(not UIControllerModule.isMenuOpen("Shop"), "opening a second panel closes the first")
 check(MouseLock.isUnlocked(), "switching panels never recaptures the cursor")
-Env.stepRender()
+stepFrame("a panel switch")
 check(
 	UserInputServiceStub.MouseBehavior == roblox.Enum.MouseBehavior.Default,
 	"the cursor survives a panel switch and a frame"
@@ -538,6 +549,45 @@ do
 		`{case.mode} pins the zoom to one distance`
 	)
 	check(localPlayer.CameraMinZoomDistance == Perspective.zoom(), `{case.mode} uses its own zoom distance`)
+end
+
+-- The shoulder offset. Roblox's Classic camera sits dead centre behind the
+-- character, which puts the player's own head under the crosshair — reported in
+-- a playtest as "the head is in the way wherever I look". CameraController
+-- slides the camera sideways every frame to clear it.
+--
+-- Measured in the camera's OWN space, so it is exact and does not care that this
+-- sandbox has no camera module putting the CFrame back each frame.
+local harnessCamera = Env.service("Workspace").CurrentCamera
+check(harnessCamera ~= nil, "the sandbox has a camera to move")
+
+if harnessCamera then
+	for _, case in
+		{
+			{ mode = Perspective.THIRD, shifted = true },
+			{ mode = Perspective.FIRST, shifted = false },
+		}
+	do
+		SettingsController.apply({ Perspective = case.mode })
+
+		local before = harnessCamera.CFrame
+		stepFrame(`a frame in {case.mode} person`)
+		local moved = before:PointToObjectSpace(harnessCamera.CFrame.Position)
+
+		if case.shifted then
+			-- Right and up, and not forward or back: moving the camera along its
+			-- own look vector would change how far it sees, which is a balance
+			-- property rather than a framing one.
+			check(moved.X > 0.5, `third person slides the camera off the spine (moved {moved.X} right)`)
+			check(moved.Y > 0, `third person raises the camera a little (moved {moved.Y} up)`)
+			check(math.abs(moved.Z) < 0.001, `third person does not change the camera's distance (moved {moved.Z})`)
+		else
+			check(
+				moved.Magnitude < 0.001,
+				`first person leaves the camera exactly where the engine put it (moved {moved.Magnitude})`
+			)
+		end
+	end
 end
 
 -- An unrecognised value is not "leave it alone": it resolves to the default, so

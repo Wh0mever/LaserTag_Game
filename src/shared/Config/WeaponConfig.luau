@@ -38,7 +38,9 @@ WeaponConfig.Weapons = {
 		-- Nexus both contain and Mirage deliberately does not.
 		falloff = { start = 70, finish = 200, minFactor = 0.45 },
 
-		baseSpreadDeg = 0.15,
+		-- Halved alongside the spray table, so the crosshair's resting size still
+		-- sits below the first tier of the cone rather than overstating it.
+		baseSpreadDeg = 0.075,
 		sprayResetTime = 0.3,
 		recoilRecovery = 10,
 

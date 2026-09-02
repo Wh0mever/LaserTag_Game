@@ -61,9 +61,9 @@ return function(t)
 		t.expect(spread >= previousSpread, `rifle spread never shrinks at index {index}`)
 		previousSpread = spread
 	end
-	t.equal(SprayPatterns.getServerSpreadDeg("Rifle", 1), 0.2, "first rifle shot is accurate")
-	t.equal(SprayPatterns.getServerSpreadDeg("Rifle", 30), 2.2, "deep spray is inaccurate")
-	t.equal(SprayPatterns.getServerSpreadDeg("Rifle", 999), 2.2, "spread caps at the last tier")
+	t.equal(SprayPatterns.getServerSpreadDeg("Rifle", 1), 0.1, "first rifle shot is accurate")
+	t.equal(SprayPatterns.getServerSpreadDeg("Rifle", 30), 1.1, "deep spray is inaccurate")
+	t.equal(SprayPatterns.getServerSpreadDeg("Rifle", 999), 1.1, "spread caps at the last tier")
 	t.equal(SprayPatterns.getServerSpreadDeg("Unknown", 1), 0, "an unknown weapon has no spread table")
 
 	-- The first pistol shot must be more accurate than a deep rifle spray;
