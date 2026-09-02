@@ -11,6 +11,20 @@
 
 local Constants = {}
 
+--[[
+	The name players see. Deliberately NOT the same string as anything stored:
+	GameConfig.PROFILE_STORE_NAME, the DataStore key and the internal instance
+	names all keep "LaserTag" for good, because renaming a DataStore key does not
+	move the data — it points every player at an empty store, which reads as
+	every coin and skin in the game vanishing at once.
+
+	The Roblox experience title is set on the Creator Hub and cannot be written
+	from a place file, so this constant does not control it; the two are kept in
+	step by hand. It drives what is rendered inside the game — today the hub
+	gateway sign, which is the only place a player is shown the name at all.
+]]
+Constants.GAME_NAME = "SKILLANDIA LASERTAG"
+
 Constants.VERSION = "v1.0"
 
 -- Character / combat baseline

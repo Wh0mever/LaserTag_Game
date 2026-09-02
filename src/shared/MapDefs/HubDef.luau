@@ -70,6 +70,26 @@ for index, from in corners do
 	})
 end
 
+-- Gateway -----------------------------------------------------------------
+-- The name, over the walkway between the two decorative walls at z = -20.
+-- Placed here rather than on a wall because this is the one line every player
+-- crosses: they land at z = +62 and walk north to the portals, so the sign is
+-- ahead of them from the moment they spawn and behind them for the rest of the
+-- match. Nothing else in the game shows what the game is called.
+--
+-- The text must stay in step with Constants.GAME_NAME. MapDefs deliberately
+-- require nothing (the off-Roblox spec runner loads them bare), so the two are
+-- tied by an assertion in tests/MapDefs.spec.luau rather than by a require.
+add({
+	kind = "sign",
+	pos = { x = 0, y = 17.5, z = -20 },
+	size = { x = 36, y = 9, z = 1.2 },
+	facing = "+z",
+	-- Posts reach the ground: 17.5 - 4.5 - 13 = 0.
+	postHeight = 13,
+	lines = { "SKILLANDIA", "LASERTAG" },
+})
+
 -- Portals -----------------------------------------------------------------
 -- One per playable map, spread evenly across the plaza so no pad is the
 -- obvious default. QueueService reads padPart from the BuildResult and writes

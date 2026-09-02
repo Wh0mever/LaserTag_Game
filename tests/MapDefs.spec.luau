@@ -19,6 +19,7 @@ local ALLOWED_KINDS = {
 	spawnRoom = true,
 	portal = true,
 	board = true,
+	sign = true,
 	lobbySpawn = true,
 }
 
@@ -160,6 +161,39 @@ return function(t)
 	-- playable, and adding a map should fail here if its portal was forgotten.
 	for _, mapId in Constants.MAPS do
 		t.equal(portalMaps[mapId], 1, `the hub has exactly one {mapId} portal`)
+	end
+
+	-- The name on the gateway sign ----------------------------------------
+	--
+	-- The hub sign is the only place inside the game a player is shown what the
+	-- game is called, and HubDef spells the words out because MapDefs require
+	-- nothing. So a rename that touches Constants and forgets the sign — or the
+	-- reverse — leaves the arena advertising the old name to every player who
+	-- walks under it, with nothing else in the build to notice. This is the
+	-- notice.
+	local signs = elementsOfKind(HubDef, "sign")
+	t.equal(#signs, 1, "the hub carries exactly one name sign")
+
+	local nameSign = signs[1]
+	if nameSign then
+		t.expect(type(nameSign.lines) == "table" and #nameSign.lines > 0, "the hub sign has at least one line of text")
+		t.equal(
+			table.concat(nameSign.lines or {}, " "),
+			Constants.GAME_NAME,
+			"the hub sign spells out Constants.GAME_NAME"
+		)
+		t.equal(
+			string.upper(Constants.GAME_NAME),
+			Constants.GAME_NAME,
+			"GAME_NAME is upper case, which is how the sign renders it"
+		)
+		-- Posts have to reach the ground: a sign hanging in mid-air over the
+		-- walkway is a modelling mistake that only a screenshot would catch.
+		t.equal(
+			nameSign.pos.y - nameSign.size.y * 0.5 - (nameSign.postHeight or 0),
+			0,
+			"the hub sign's posts stand on the plaza floor"
+		)
 	end
 
 	local lobbySpawns = elementsOfKind(HubDef, "lobbySpawn")

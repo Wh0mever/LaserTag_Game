@@ -140,6 +140,56 @@ for _, entry in MAPS do
 		)
 		check(built.boards ~= nil and built.boards.TopKills ~= nil, "hub has the TopKills board")
 
+		----------------------------------------------------------------------
+		-- The name on the gateway sign
+		--
+		-- MapDefs.spec asserts the def carries the right words. That says
+		-- nothing about whether they reach a screen: the sign is the first
+		-- element kind in this game that draws a SurfaceGui on two faces, and
+		-- a Face enum set wrong, a label parented outside the layout, or a
+		-- board built with no GUI at all all leave the def perfectly correct
+		-- and the arena unbranded. So the text is read back off the built
+		-- instances, per face, exactly as a player reads it.
+		----------------------------------------------------------------------
+		local signBoards = {}
+		for _, node in built.model:GetDescendants() do
+			if node:IsA("BasePart") and node.Name == "SignBoard" then
+				table.insert(signBoards, node)
+			end
+		end
+		check(#signBoards == 1, `hub has one name sign board (got {#signBoards})`)
+
+		local facesShowingTheName = 0
+		for _, board in signBoards do
+			for _, gui in board:GetChildren() do
+				if not gui:IsA("SurfaceGui") then
+					continue
+				end
+				local lines = {}
+				for _, node in gui:GetDescendants() do
+					if node:IsA("TextLabel") then
+						table.insert(lines, { order = node.LayoutOrder, text = node.Text })
+					end
+				end
+				table.sort(lines, function(a, b)
+					return a.order < b.order
+				end)
+
+				local words = {}
+				for _, line in lines do
+					table.insert(words, line.text)
+				end
+				if table.concat(words, " ") == Constants.GAME_NAME then
+					facesShowingTheName += 1
+				end
+			end
+		end
+		-- Both faces: the sign is walked under, so half the plaza sees its back.
+		check(
+			facesShowingTheName == 2,
+			`the name reads "{Constants.GAME_NAME}" on both faces of the sign (got {facesShowingTheName})`
+		)
+
 		for _, portal in built.portals do
 			check(portal.padPart ~= nil, `portal {portal.mapId} has a pad part`)
 			check(PLAYABLE_MAPS[portal.mapId] == true, `portal targets a real map ({portal.mapId})`)
