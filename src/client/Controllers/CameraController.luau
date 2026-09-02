@@ -34,6 +34,7 @@ assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.js
 local ClientState = require(script.Parent.Parent.ClientState)
 local Constants = require(Shared.Constants)
 local MathUtil = require(Shared.Util.MathUtil)
+local PerspectiveController = require(script.Parent.PerspectiveController)
 local Trove = require(Shared.Util.Trove)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
 
@@ -49,6 +50,19 @@ local DEFAULT_RECOIL_RECOVERY = (rifle and rifle.recoilRecovery) or 10
 -- A kick larger than this is a bug in a spray pattern, not a design choice;
 -- clamping keeps a bad value from throwing the view at the sky.
 local MAX_RECOIL_DEG = 20
+
+-- Over-the-shoulder offset for third person, in camera space: right and up.
+--
+-- Roblox's Classic camera sits dead centre behind the character, which puts the
+-- player's own head permanently under the crosshair — reported in a playtest as
+-- "the head is in the way wherever I look". Shifting the camera sideways moves
+-- the body off the centre of the screen without turning the view, so the
+-- crosshair looks at the world instead of at hair.
+local SHOULDER_RIGHT = 2.4
+local SHOULDER_UP = 0.7
+-- Keep the camera off the wall it would otherwise poke through when the player
+-- hugs cover on their right.
+local SHOULDER_MARGIN = 0.85
 
 -- Death camera framing, in the killer's local space: behind and above the
 -- shoulder, looking at their chest.
@@ -68,6 +82,11 @@ local recoveryRate = DEFAULT_RECOIL_RECOVERY
 -- Roblox's own default; replaced by the player's setting once the profile
 -- arrives, and re-applied whenever the engine hands out a new Camera.
 local fieldOfView = 70
+
+-- Rebuilt only when the character changes: assigning FilterDescendantsInstances
+-- allocates, and this runs every frame.
+local shoulderParams: RaycastParams? = nil
+local shoulderFilterFor: Model? = nil
 
 local deathCamActive = false
 local deathTargetPart: BasePart? = nil
@@ -262,6 +281,46 @@ end
 -- Per-frame
 --------------------------------------------------------------------------------
 
+--[[
+	Slides the third-person camera off the character's spine.
+
+	The offset is a translation in camera space, so the direction the camera
+	looks is unchanged — only where it looks *from*. That is what keeps the
+	crosshair meaningful: WeaponClient traces from the camera through the screen
+	centre to find the aim point, and then fires from the head at it, so the
+	parallax the offset introduces is already accounted for.
+]]
+local function applyShoulderOffset(cam: Camera)
+	if PerspectiveController.isFirstPerson() then
+		return
+	end
+
+	local character = player.Character
+	if shoulderFilterFor ~= character then
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = { character }
+		params.IgnoreWater = true
+		shoulderParams = params
+		shoulderFilterFor = character
+	end
+
+	local base = cam.CFrame
+	local wanted = Vector3.new(SHOULDER_RIGHT, SHOULDER_UP, 0)
+	local scale = 1
+
+	local hit = workspace:Raycast(base.Position, base:VectorToWorldSpace(wanted), shoulderParams)
+	if hit then
+		-- Pull in to just short of the surface rather than dropping the offset
+		-- entirely: a camera that snaps to centre every time a shoulder brushes
+		-- a wall is worse than one that eases in.
+		local reach = (hit.Position - base.Position).Magnitude
+		scale = math.clamp(reach / wanted.Magnitude * SHOULDER_MARGIN, 0, 1)
+	end
+
+	cam.CFrame = base * CFrame.new(wanted * scale)
+end
+
 local function onRender(deltaTime: number)
 	local cam = CameraController.getCamera()
 	if not cam then
@@ -272,6 +331,10 @@ local function onRender(deltaTime: number)
 		updateDeathCam(cam, deltaTime)
 		return
 	end
+
+	-- Before the recoil kick, so the kick rotates the camera about where it
+	-- actually sits rather than about the character's spine.
+	applyShoulderOffset(cam)
 
 	if recoilPitch == 0 and recoilYaw == 0 then
 		return

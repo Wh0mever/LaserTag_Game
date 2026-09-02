@@ -54,8 +54,13 @@ end
 	orders them. Nothing here renders — the point is the ordering, which is the
 	whole mechanism behind bindings that exist to overwrite what an engine
 	binding at a lower priority just wrote.
+
+	Returns the bindings that threw, as { name, err }. A binding that errors on
+	a real client stops running for the rest of the session, so swallowing that
+	here would be the exact "green test over broken code" this harness exists to
+	prevent — the caller is expected to assert the list is empty.
 ]]
-function Env.stepRender()
+function Env.stepRender(): { { name: string, err: string } }
 	local ordered = {}
 	for name, binding in Env.renderBindings do
 		table.insert(ordered, { name = name, priority = binding.priority, callback = binding.callback })
@@ -67,11 +72,16 @@ function Env.stepRender()
 		return a.name < b.name
 	end)
 
+	local failures = {}
 	for _, entry in ordered do
 		if type(entry.callback) == "function" then
-			pcall(entry.callback, 1 / 60)
+			local ok, err = pcall(entry.callback, 1 / 60)
+			if not ok then
+				table.insert(failures, { name = entry.name, err = tostring(err) })
+			end
 		end
 	end
+	return failures
 end
 
 --------------------------------------------------------------------------------

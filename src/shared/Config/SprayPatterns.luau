@@ -99,11 +99,17 @@ SprayPatterns.Kick = {
 -- Server-side inaccuracy cone in degrees, keyed by how deep into the spray we
 -- are. Each entry is { upToIndex, degrees } and the table is read in order.
 SprayPatterns.Spread = {
+	-- Halved after a playtest: at 2.2 degrees a held trigger put shots roughly a
+	-- body's width apart at mid range, so the back half of every magazine was
+	-- spent on nothing and the weapon read as broken rather than as demanding.
+	-- The shape is unchanged — four tiers, opening as the spray goes on — and
+	-- the rifle's range still ends where its damage falloff ends, not where its
+	-- cone does.
 	Rifle = {
-		{ upTo = 3, degrees = 0.2 },
-		{ upTo = 8, degrees = 0.5 },
-		{ upTo = 15, degrees = 1.2 },
-		{ upTo = math.huge, degrees = 2.2 },
+		{ upTo = 3, degrees = 0.1 },
+		{ upTo = 8, degrees = 0.25 },
+		{ upTo = 15, degrees = 0.6 },
+		{ upTo = math.huge, degrees = 1.1 },
 	},
 	Pistol = {
 		{ upTo = 1, degrees = 0.3 },
