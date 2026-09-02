@@ -13,6 +13,16 @@
 	icons. The trigger is UIController.ScaleChanged, which already fires on the
 	Constants.SMALL_SCREEN_WIDTH crossing — a second viewport watcher here could
 	only disagree with it.
+
+	THE STACK FOLDS AWAY. Five buttons down the left edge is a reasonable amount
+	of chrome on a monitor and half the screen on a phone, where it sat over the
+	view the whole match. They now live behind a single toggle, collapsed by
+	default on touch and expanded on desktop — the device that has the room and
+	the hotkeys keeps the stack, the device that has neither does not.
+
+	The hotkeys are unaffected either way: E/Q/F/P/O go through
+	InputController.MenuToggled and never touch these buttons, so a folded menu
+	costs a keyboard player nothing.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -37,6 +47,14 @@ local BUTTON_WIDTH = 150
 local COMPACT_WIDTH = 52
 local BUTTON_GAP = 10
 
+-- The toggle's three bars, drawn as Frames rather than written as a glyph.
+-- This project ships no image assets and the palette of glyphs that renders in
+-- Gotham everywhere is small; the one button a player has to be able to find is
+-- not the place to gamble on a font carrying U+2630.
+local BAR_WIDTH = 18
+local BAR_HEIGHT = 2
+local BAR_STEP = 6
+
 -- Geometric glyphs only: this project ships no image assets, and these render
 -- in the Gotham family on every platform.
 local MENUS = {
@@ -48,8 +66,13 @@ local MENUS = {
 }
 
 local trove = Trove.new()
+local panel: Frame? = nil
 local stack: Frame? = nil
+local toggle: any = nil
 local buttons: { any } = {}
+-- Touch devices start folded: on a phone the stack covers the arena. A mouse
+-- and keyboard has both the room and the hotkeys, so it starts open.
+local expanded = true
 local coins: any = nil
 local mouseHint: TextLabel? = nil
 -- nil until the first pass so the initial call always applies, including the
@@ -60,6 +83,24 @@ local compact: boolean? = nil
 -- Layout
 --------------------------------------------------------------------------------
 
+--[[
+	Shows or hides the stack. The panel sizes itself from its children, so a
+	hidden stack shrinks the whole thing to the toggle — the point of the
+	exercise is the space, not the visibility.
+]]
+local function setExpanded(value: boolean)
+	expanded = value
+
+	if stack then
+		stack.Visible = value
+	end
+	if toggle then
+		-- The open stack is its own feedback, so the label only has to say what
+		-- the press will do next. On a compact button there is no room for it.
+		toggle:setText(if compact then "" elseif value then "СКРЫТЬ" else "МЕНЮ")
+	end
+end
+
 local function applyCompact(isCompact: boolean)
 	if isCompact == compact then
 		return
@@ -67,8 +108,15 @@ local function applyCompact(isCompact: boolean)
 	compact = isCompact
 	local width = isCompact and COMPACT_WIDTH or BUTTON_WIDTH
 
+	if panel then
+		panel.Size = UDim2.fromOffset(width, 0)
+	end
 	if stack then
 		stack.Size = UDim2.fromOffset(width, #MENUS * BUTTON_HEIGHT + (#MENUS - 1) * BUTTON_GAP)
+	end
+	if toggle then
+		toggle.instance.Size = UDim2.fromOffset(width, BUTTON_HEIGHT)
+		toggle:setText(if isCompact then "" elseif expanded then "СКРЫТЬ" else "МЕНЮ")
 	end
 
 	for index, entry in MENUS do
@@ -101,22 +149,79 @@ end
 -- Construction
 --------------------------------------------------------------------------------
 
+--[[
+	Three bars inside the toggle's icon slot, which the Button component already
+	lays out and which is 20x20 whatever the button's width.
+]]
+local function buildBars(slot: TextLabel)
+	slot.Text = ""
+	slot.Visible = true
+
+	for index = 1, 3 do
+		local bar = Instance.new("Frame")
+		bar.Name = `Bar{index}`
+		bar.AnchorPoint = Vector2.new(0.5, 0.5)
+		bar.Position = UDim2.new(0.5, 0, 0.5, (index - 2) * BAR_STEP)
+		bar.Size = UDim2.fromOffset(BAR_WIDTH, BAR_HEIGHT)
+		bar.BackgroundColor3 = UITheme.Colors.Text
+		bar.BorderSizePixel = 0
+		bar.ZIndex = 3
+		bar.Parent = slot
+	end
+end
+
 local function buildStack(parent: Instance)
+	-- The panel sizes itself from whatever is visible inside it, so folding the
+	-- stack away actually reclaims the space rather than leaving a hole.
 	local holder = Instance.new("Frame")
-	holder.Name = "Buttons"
+	holder.Name = "Menu"
 	holder.AnchorPoint = Vector2.new(0, 0.5)
 	holder.Position = UDim2.new(0, 16, 0.5, 0)
-	holder.Size = UDim2.fromOffset(BUTTON_WIDTH, #MENUS * BUTTON_HEIGHT + (#MENUS - 1) * BUTTON_GAP)
+	holder.Size = UDim2.fromOffset(BUTTON_WIDTH, 0)
+	holder.AutomaticSize = Enum.AutomaticSize.Y
 	holder.BackgroundTransparency = 1
 	holder.Parent = parent
-	stack = holder
+	panel = holder
+
+	local panelLayout = Instance.new("UIListLayout")
+	panelLayout.FillDirection = Enum.FillDirection.Vertical
+	panelLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	panelLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	panelLayout.Padding = UDim.new(0, BUTTON_GAP)
+	panelLayout.Parent = holder
+
+	toggle = Button.create({
+		name = "MenuToggle",
+		text = "СКРЫТЬ",
+		-- Created with an icon so the Button lays out the slot; the glyph itself
+		-- is replaced by drawn bars immediately below.
+		icon = " ",
+		size = UDim2.fromOffset(BUTTON_WIDTH, BUTTON_HEIGHT),
+		layoutOrder = 0,
+		parent = holder,
+		onActivated = function()
+			setExpanded(not expanded)
+		end,
+	})
+	buildBars(toggle.icon)
+	trove:Add(function()
+		toggle:destroy()
+	end)
+
+	local list = Instance.new("Frame")
+	list.Name = "Buttons"
+	list.LayoutOrder = 1
+	list.Size = UDim2.fromOffset(BUTTON_WIDTH, #MENUS * BUTTON_HEIGHT + (#MENUS - 1) * BUTTON_GAP)
+	list.BackgroundTransparency = 1
+	list.Parent = holder
+	stack = list
 
 	local layout = Instance.new("UIListLayout")
 	layout.FillDirection = Enum.FillDirection.Vertical
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Padding = UDim.new(0, BUTTON_GAP)
-	layout.Parent = holder
+	layout.Parent = list
 
 	for index, entry in MENUS do
 		local button = Button.create({
@@ -126,7 +231,7 @@ local function buildStack(parent: Instance)
 			keyHint = entry.key,
 			size = UDim2.fromOffset(BUTTON_WIDTH, BUTTON_HEIGHT),
 			layoutOrder = index,
-			parent = holder,
+			parent = list,
 			onActivated = function()
 				UIController.toggleMenu(entry.name)
 			end,
@@ -210,11 +315,27 @@ function SideButtonsScreen.init()
 
 	refreshMouseHint(InputController.isMouseUnlocked())
 	applyCompact(UIController.scale < 1)
+	setExpanded(not ClientState.isTouch)
+end
+
+--[[
+	Whether the stack is on screen. Exposed for the harness, which has no way to
+	see a Frame's visibility through the layout otherwise.
+]]
+function SideButtonsScreen.isExpanded(): boolean
+	return expanded
+end
+
+function SideButtonsScreen.setExpanded(value: boolean)
+	setExpanded(value == true)
 end
 
 function SideButtonsScreen.stop()
 	trove:Clean()
 	table.clear(buttons)
+	expanded = true
+	panel = nil
+	toggle = nil
 	stack = nil
 	coins = nil
 	mouseHint = nil
