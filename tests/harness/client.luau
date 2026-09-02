@@ -653,6 +653,80 @@ check(
 -- state rather than whatever the last case in the loop set.
 SettingsController.apply(ClientStateModule.settings)
 
+--------------------------------------------------------------------------------
+-- The side menu folds away
+--
+-- Five buttons down the left edge is reasonable chrome on a monitor and half the
+-- screen on a phone, where they sat over the arena for the whole match. They now
+-- live behind one toggle.
+--------------------------------------------------------------------------------
+
+heading("Side menu")
+
+local SideButtons = Env.load("src/client/UI/Screens/SideButtonsScreen")
+local sideGui = UIControllerModule.getScreen("SideButtons")
+local menuPanel = nil
+if sideGui then
+	for _, descendant in sideGui:GetDescendants() do
+		if descendant.Name == "Menu" then
+			menuPanel = descendant
+			break
+		end
+	end
+end
+
+check(menuPanel ~= nil, "the side menu has a panel")
+if menuPanel then
+	local toggleButton = menuPanel:FindFirstChild("MenuToggle")
+	local list = menuPanel:FindFirstChild("Buttons")
+
+	check(toggleButton ~= nil, "the panel has a toggle")
+	check(list ~= nil, "the panel has the button stack")
+
+	-- Drawn bars rather than a glyph. This project ships no image assets and the
+	-- set of glyphs that renders in Gotham on every platform is small; the one
+	-- button a player must be able to find is not the place to gamble on a font
+	-- carrying U+2630, and a missing glyph leaves a blank button with no error.
+	if toggleButton then
+		local bars = 0
+		for _, descendant in toggleButton:GetDescendants() do
+			if descendant:IsA("Frame") and descendant.Name:match("^Bar%d$") then
+				bars += 1
+			end
+		end
+		check(bars == 3, `the toggle draws its three bars rather than typing a glyph (found {bars})`)
+	end
+
+	-- This client is not a touch device, so the stack starts open: a mouse and
+	-- keyboard has both the room for it and the hotkeys without it.
+	check(not ClientStateModule.isTouch, "the sandbox client is not a touch device")
+	check(SideButtons.isExpanded(), "on a desktop client the stack starts open")
+	check(list ~= nil and list.Visible, "the stack is on screen when expanded")
+
+	SideButtons.setExpanded(false)
+	check(not SideButtons.isExpanded(), "the toggle folds the stack away")
+	check(list ~= nil and not list.Visible, "a folded stack is off screen")
+
+	-- THE PROPERTY THAT MAKES FOLDING SAFE. The buttons are one way in; the
+	-- hotkeys are another, and they do not go through these buttons at all. If
+	-- folding could take the menus with it, a player who collapsed the stack
+	-- would have locked themselves out of the shop.
+	UIControllerModule.openMenu("Shop")
+	check(UIControllerModule.isMenuOpen("Shop"), "a menu still opens while the stack is folded")
+	UIControllerModule.closeMenu("Shop")
+
+	SideButtons.setExpanded(true)
+	check(SideButtons.isExpanded(), "the toggle brings the stack back")
+	check(list ~= nil and list.Visible, "an unfolded stack is on screen again")
+
+	-- Every menu the stack offers must still have its button, folded or not.
+	if list then
+		for _, name in { "Equip", "Shop", "Friends", "Spin", "Settings" } do
+			check(list:FindFirstChild(name) ~= nil, `the stack still carries the {name} button`)
+		end
+	end
+end
+
 -- The equip panel lays its weapons out side by side, and the width of a column
 -- was a constant rather than a fraction of however many weapons exist. Adding
 -- the third left it off the right edge of the panel, unreachable, with nothing
