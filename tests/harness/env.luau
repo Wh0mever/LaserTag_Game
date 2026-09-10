@@ -565,6 +565,75 @@ local function buildServices()
 end
 
 --------------------------------------------------------------------------------
+-- CFrame.lookAt, corrected
+--
+-- Lune's CFrame.lookAt does not agree with Roblox's, and not uniformly: it is
+-- right for a target along +/-X and inverted for one along +/-Z.
+--
+--   lookAt(origin, +X)  Lune Look = (1,0,0)   Roblox (1,0,0)    agree
+--   lookAt(origin, +Z)  Lune Look = (0,0,-1)  Roblox (0,0,1)    opposite
+--
+-- Roblox defines it as: the CFrame sits at `at` with .LookVector pointing toward
+-- `target`, and .LookVector is the NEGATIVE local Z axis. So the local +Z column
+-- is -forward, and NormalId.Front — the local -Z face — is the face that looks
+-- at the target.
+--
+-- Under Lune's version every part built with a +/-Z lookAt comes out yawed 180
+-- degrees, which turns a one-sided sign to face the wall. Nothing in the harness
+-- caught it because nothing asserted a facing; that is now what
+-- tests/harness/world.luau checks, and it needs this to be true first.
+--
+-- Rebuilt from the definition rather than by patching the result, so it is right
+-- for every direction and not just the two that were checked by hand.
+--------------------------------------------------------------------------------
+
+local DEFAULT_UP = roblox.Vector3.new(0, 1, 0)
+local FALLBACK_UP = roblox.Vector3.new(0, 0, 1)
+
+local function correctedLookAt(at, target, up)
+	up = up or DEFAULT_UP
+
+	local forward = (target - at).Unit
+	local back = -forward
+
+	-- A forward parallel to the up hint leaves the cross product at zero and no
+	-- rotation defined; Roblox picks another axis rather than returning NaN.
+	local right = up:Cross(back)
+	if right.Magnitude < 1e-6 then
+		right = FALLBACK_UP:Cross(back)
+	end
+	right = right.Unit
+
+	local realUp = back:Cross(right)
+
+	return roblox.CFrame.new(
+		at.X,
+		at.Y,
+		at.Z,
+		right.X,
+		realUp.X,
+		back.X,
+		right.Y,
+		realUp.Y,
+		back.Y,
+		right.Z,
+		realUp.Z,
+		back.Z
+	)
+end
+
+--[[
+	`roblox.CFrame` with lookAt replaced. Everything else forwards to the real
+	implementation, including the callable `CFrame.new`, so modules see a normal
+	CFrame library.
+]]
+local CFrameShim = setmetatable({
+	lookAt = correctedLookAt,
+}, {
+	__index = roblox.CFrame,
+})
+
+--------------------------------------------------------------------------------
 -- Globals
 --------------------------------------------------------------------------------
 
@@ -589,7 +658,7 @@ local function buildEnvironment(scriptHandle: any)
 		Instance = roblox.Instance,
 		Vector3 = roblox.Vector3,
 		Vector2 = roblox.Vector2,
-		CFrame = roblox.CFrame,
+		CFrame = CFrameShim,
 		Color3 = roblox.Color3,
 		UDim = roblox.UDim,
 		UDim2 = roblox.UDim2,

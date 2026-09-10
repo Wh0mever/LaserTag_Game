@@ -190,6 +190,61 @@ for _, entry in MAPS do
 			`the name reads "{Constants.GAME_NAME}" on both faces of the sign (got {facesShowingTheName})`
 		)
 
+		----------------------------------------------------------------------
+		-- Which way the lettering faces
+		--
+		-- A sign is a one-sided object dressed as geometry: the SurfaceGui sits
+		-- on NormalId.Front, and Front is the local -Z face, which is exactly
+		-- where CFrame.LookVector points. Build it yawed 180 degrees and every
+		-- assertion above still passes — the part exists, is anchored, is in
+		-- the right place, carries the right words — while players read a blank
+		-- slab and the text faces a wall.
+		--
+		-- This is not hypothetical. Lune's CFrame.lookAt disagrees with
+		-- Roblox's for a target along +/-Z and hands back exactly that 180
+		-- degree error; tests/harness/env.luau now corrects it. Nothing here
+		-- noticed, because nothing here looked at a facing. This does.
+		--
+		-- Phrased as "points at the people who need to read it" rather than as
+		-- a compass direction, so moving the hub around cannot quietly make it
+		-- vacuous.
+		--
+		-- Read through CFrame.Position, not BasePart.Position: Lune does not
+		-- derive the latter from the former and raises on it.
+		----------------------------------------------------------------------
+		local function averagePosition(cframes)
+			local sum = roblox.Vector3.new(0, 0, 0)
+			for _, cf in cframes do
+				sum += cf.Position
+			end
+			return sum / math.max(1, #cframes)
+		end
+
+		local lobbyAt = averagePosition(built.spawns.Lobby)
+		local plazaAt = roblox.Vector3.new(built.origin.X, 0, built.origin.Z)
+
+		for _, node in built.model:GetDescendants() do
+			if not node:IsA("BasePart") then
+				continue
+			end
+
+			if node.Name == "SignBoard" then
+				local toPlayers = (lobbyAt - node.CFrame.Position).Unit
+				check(
+					node.CFrame.LookVector:Dot(toPlayers) > 0.5,
+					`the gateway sign's lettering faces the lobby spawn `
+						.. `(dot {string.format("%.2f", node.CFrame.LookVector:Dot(toPlayers))})`
+				)
+			elseif node.Name == "PortalSign" then
+				local toPlaza = (plazaAt - node.CFrame.Position).Unit
+				check(
+					node.CFrame.LookVector:Dot(toPlaza) > 0.4,
+					`a portal sign faces the plaza rather than the wall behind it `
+						.. `(dot {string.format("%.2f", node.CFrame.LookVector:Dot(toPlaza))})`
+				)
+			end
+		end
+
 		for _, portal in built.portals do
 			check(portal.padPart ~= nil, `portal {portal.mapId} has a pad part`)
 			check(PLAYABLE_MAPS[portal.mapId] == true, `portal targets a real map ({portal.mapId})`)
