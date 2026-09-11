@@ -87,6 +87,9 @@ Constants.DISPLAY_ORDER = {
 	Background = 1,
 	HUD = 10,
 	KillFeed = 12,
+	-- Above the HUD so a thumb never lands on a readout, below the menus so an
+	-- open panel covers the controls rather than being shot through.
+	TouchControls = 14,
 	SideButtons = 15,
 	Toast = 50,
 	Menu = 80,
