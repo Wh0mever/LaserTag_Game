@@ -54,6 +54,19 @@ local SWITCH_POSITION = UDim2.new(0.02, 0, 0.74, 0)
 -- a panicking thumb lands on.
 local VIEW_POSITION = UDim2.new(0.54, 0, 0.46, 0)
 
+--[[
+	Button sizes.
+
+	ContextActionService makes every touch button the same ~70 pixels. That is a
+	reasonable default for "interact" and a poor one for a trigger a nine year
+	old holds down through a firefight while their other thumb is on the
+	movement stick: the thumb covers the button, so it has to be big enough to
+	stay pressed when the hand shifts. Fire gets half again as much, and the
+	three deliberate actions stay small so they cannot be hit by accident.
+]]
+local FIRE_SIZE = UDim2.fromOffset(104, 104)
+local ACTION_SIZE = UDim2.fromOffset(68, 68)
+
 local trove = Trove.new()
 local enabled = false
 local bound = false
@@ -111,6 +124,30 @@ local function titleForOtherSlot(): string
 	return weapon and string.match(weapon.displayName, "^%S+") or tostring(weaponId)
 end
 
+--[[
+	Resizes the touch buttons away from the engine's uniform default.
+
+	GetButton returns nil until the engine has actually built the button, which
+	is not guaranteed to have happened by the time BindAction returns, so a nil
+	is normal rather than an error — the button simply keeps the default size,
+	which is usable. Nothing here is load-bearing for being able to play.
+]]
+local function resizeButtons()
+	local sizes = {
+		[FIRE_ACTION] = FIRE_SIZE,
+		[RELOAD_ACTION] = ACTION_SIZE,
+		[SWITCH_ACTION] = ACTION_SIZE,
+		[VIEW_ACTION] = ACTION_SIZE,
+	}
+
+	for action, size in sizes do
+		local button = ContextActionService:GetButton(action)
+		if button then
+			button.Size = size
+		end
+	end
+end
+
 local function bindAll()
 	if bound then
 		return
@@ -134,6 +171,8 @@ local function bindAll()
 	ContextActionService:BindAction(VIEW_ACTION, onView, true)
 	ContextActionService:SetTitle(VIEW_ACTION, "ВИД")
 	ContextActionService:SetPosition(VIEW_ACTION, VIEW_POSITION)
+
+	resizeButtons()
 end
 
 local function unbindAll()

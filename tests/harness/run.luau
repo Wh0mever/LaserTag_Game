@@ -18,6 +18,7 @@ local SCENARIOS = {
 	{ name = "models", what = "every weapon builds in every skin" },
 	{ name = "lighting", what = "the rig and the palettes agree on what may glow" },
 	{ name = "client", what = "every client module loads and boots" },
+	{ name = "mobile", what = "a phone can aim, shoot, reload and switch view" },
 }
 
 local failed = {}

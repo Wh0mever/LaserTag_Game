@@ -41,6 +41,10 @@ Env.collisionGroups = {}
 Env.collisionRules = {}
 Env.renderBindings = {}
 
+-- Desktop unless a scenario says otherwise; see Env.setDevice.
+Env.device = { TouchEnabled = false, KeyboardEnabled = true, MouseEnabled = true }
+Env.boundActions = {}
+
 local function record(what: string)
 	recorded[what] = (recorded[what] or 0) + 1
 end
@@ -141,6 +145,82 @@ end
 Env.inertSignal = inertSignal
 
 --[[
+	A signal that actually fires.
+
+	Everything else in this sandbox hands out inertSignal, which remembers the
+	handler and never calls it. That is fine for a module that merely has to
+	survive connecting to something, and useless for testing anything that
+	reacts to a change — which on a phone is most of what matters, because the
+	touch buttons appear and disappear with the match state.
+]]
+local function liveSignal()
+	local handlers = {}
+	local sig
+	sig = {
+		Connect = function(_self, fn)
+			record("event:Connect")
+			local conn = { Connected = true, fn = fn }
+			conn.Disconnect = function()
+				conn.Connected = false
+			end
+			table.insert(handlers, conn)
+			return conn
+		end,
+		Once = function(_self, fn)
+			local conn
+			conn = sig:Connect(function(...)
+				conn:Disconnect()
+				fn(...)
+			end)
+			return conn
+		end,
+		Wait = function()
+			error("[harness] Wait() would block forever; drive the signal instead", 2)
+		end,
+		Fire = function(_self, ...)
+			-- Copied first: a handler that disconnects itself would otherwise
+			-- reshape the list mid-iteration.
+			local snapshot = table.clone(handlers)
+			for _, conn in snapshot do
+				if conn.Connected then
+					conn.fn(...)
+				end
+			end
+		end,
+	}
+	return sig
+end
+
+Env.liveSignal = liveSignal
+
+-- Attribute-changed signals, per instance and per attribute name. Keyed weakly
+-- so a discarded character does not pin its signals for the run.
+local attributeSignals = setmetatable({}, { __mode = "k" })
+
+local function attributeSignal(instance: any, name: string)
+	local perInstance = attributeSignals[instance]
+	if not perInstance then
+		perInstance = {}
+		attributeSignals[instance] = perInstance
+	end
+	if not perInstance[name] then
+		perInstance[name] = liveSignal()
+	end
+	return perInstance[name]
+end
+
+--[[
+	Sets an attribute AND fires the listeners, which raw SetAttribute cannot do
+	here: Lune has no attribute change events, so a test that writes the
+	attribute directly leaves every controller watching it none the wiser.
+	Scenarios should always go through this.
+]]
+function Env.setAttribute(instance: any, name: string, value: any)
+	instance:SetAttribute(name, value)
+	attributeSignal(instance, name):Fire(value)
+end
+
+--[[
 	Roblox's typeof(), which Lune does not provide.
 
 	Every Lune Roblox value is plain `userdata`, with nothing on the metatable to
@@ -199,8 +279,8 @@ roblox.implementMethod("Instance", "GetPropertyChangedSignal", function()
 	return inertSignal()
 end)
 
-roblox.implementMethod("Instance", "GetAttributeChangedSignal", function()
-	return inertSignal()
+roblox.implementMethod("Instance", "GetAttributeChangedSignal", function(self, name: string)
+	return attributeSignal(self, name)
 end)
 
 -- Events are read as properties (`button.Activated:Connect(...)`), so they need
@@ -472,6 +552,22 @@ local function buildServices()
 	local playerGui = roblox.Instance.new("Folder")
 	playerGui.Name = "PlayerGui"
 
+	--[[
+		Attributes on the local player are real state, not stubs.
+
+		They used to be a black hole: GetAttribute always nil, SetAttribute a
+		no-op, GetAttributeChangedSignal a fresh inert signal on every call — so
+		connecting to one was not merely useless, it was a different dead signal
+		each time. Every client check therefore ran against a player who was
+		permanently not loaded, on no team, and never in a match. That is a large
+		part of the game whose behaviour could not be observed at all, and it is
+		why the touch controls — which appear only during a match — were never
+		once exercised.
+
+		SetAttribute fires the change signal, as Roblox's does.
+	]]
+	local attributes = {}
+
 	local localPlayer = {
 		Name = "HarnessPlayer",
 		DisplayName = "HarnessPlayer",
@@ -480,12 +576,18 @@ local function buildServices()
 		PlayerGui = playerGui,
 		CharacterAdded = signal(),
 		CharacterRemoving = signal(),
-		GetAttribute = function()
-			return nil
+		GetAttribute = function(_self, name: string)
+			return attributes[name]
 		end,
-		SetAttribute = function() end,
-		GetAttributeChangedSignal = function()
-			return signal()
+		SetAttribute = function(self, name: string, value: any)
+			if attributes[name] == value then
+				return
+			end
+			attributes[name] = value
+			attributeSignal(self, name):Fire(value)
+		end,
+		GetAttributeChangedSignal = function(self, name: string)
+			return attributeSignal(self, name)
 		end,
 		FindFirstChild = function(_self, name: string)
 			if name == "PlayerGui" then
@@ -507,9 +609,9 @@ local function buildServices()
 
 	services.UserInputService = {
 		Name = "UserInputService",
-		TouchEnabled = false,
-		KeyboardEnabled = true,
-		MouseEnabled = true,
+		TouchEnabled = Env.device.TouchEnabled,
+		KeyboardEnabled = Env.device.KeyboardEnabled,
+		MouseEnabled = Env.device.MouseEnabled,
 		GamepadEnabled = false,
 		InputBegan = signal(),
 		InputEnded = signal(),
@@ -520,15 +622,75 @@ local function buildServices()
 		end,
 	}
 
+	--[[
+		ContextActionService that remembers.
+
+		The previous stub counted BindAction and threw everything else away,
+		which made every touch button in the game untestable: a button bound
+		with no title, positioned off screen, or never bound at all looked
+		exactly like a working one. On a phone those buttons ARE the controls,
+		so the thing worth asserting is what the player can reach — and that
+		needs the bindings kept.
+
+		Env.boundActions is the touch control surface as the engine would build
+		it. Env.pressAction drives a handler the way a thumb would.
+	]]
+	Env.boundActions = {}
+
 	services.ContextActionService = {
 		Name = "ContextActionService",
-		BindAction = function()
+		BindAction = function(_self, name: string, handler, createTouchButton: boolean, ...)
 			record("ContextActionService:BindAction")
+			Env.boundActions[name] = {
+				name = name,
+				handler = handler,
+				touchButton = createTouchButton == true,
+				keys = { ... },
+				title = nil,
+				position = nil,
+				image = nil,
+			}
 		end,
-		UnbindAction = function() end,
-		SetPosition = function() end,
-		SetTitle = function() end,
-		SetImage = function() end,
+		UnbindAction = function(_self, name: string)
+			Env.boundActions[name] = nil
+		end,
+		SetPosition = function(_self, name: string, position)
+			local action = Env.boundActions[name]
+			if action then
+				action.position = position
+			end
+		end,
+		SetTitle = function(_self, name: string, title)
+			local action = Env.boundActions[name]
+			if action then
+				action.title = title
+			end
+		end,
+		SetImage = function(_self, name: string, image)
+			local action = Env.boundActions[name]
+			if action then
+				action.image = image
+			end
+		end,
+		--[[
+			A real ImageButton, so anything the game writes to it is validated
+			against Roblox's class database the way every other Instance in this
+			sandbox is. Returns nil for an unbound action, as the engine does —
+			callers have to cope with that, because the button does not exist
+			until the touch frame has been built.
+		]]
+		GetButton = function(_self, name: string)
+			local action = Env.boundActions[name]
+			if not action or not action.touchButton then
+				return nil
+			end
+			if not action.button then
+				local button = roblox.Instance.new("ImageButton")
+				button.Name = name
+				action.button = button
+			end
+			return action.button
+		end,
 	}
 
 	services.TweenService = {
@@ -565,6 +727,75 @@ local function buildServices()
 end
 
 --------------------------------------------------------------------------------
+-- CFrame.lookAt, corrected
+--
+-- Lune's CFrame.lookAt does not agree with Roblox's, and not uniformly: it is
+-- right for a target along +/-X and inverted for one along +/-Z.
+--
+--   lookAt(origin, +X)  Lune Look = (1,0,0)   Roblox (1,0,0)    agree
+--   lookAt(origin, +Z)  Lune Look = (0,0,-1)  Roblox (0,0,1)    opposite
+--
+-- Roblox defines it as: the CFrame sits at `at` with .LookVector pointing toward
+-- `target`, and .LookVector is the NEGATIVE local Z axis. So the local +Z column
+-- is -forward, and NormalId.Front — the local -Z face — is the face that looks
+-- at the target.
+--
+-- Under Lune's version every part built with a +/-Z lookAt comes out yawed 180
+-- degrees, which turns a one-sided sign to face the wall. Nothing in the harness
+-- caught it because nothing asserted a facing; that is now what
+-- tests/harness/world.luau checks, and it needs this to be true first.
+--
+-- Rebuilt from the definition rather than by patching the result, so it is right
+-- for every direction and not just the two that were checked by hand.
+--------------------------------------------------------------------------------
+
+local DEFAULT_UP = roblox.Vector3.new(0, 1, 0)
+local FALLBACK_UP = roblox.Vector3.new(0, 0, 1)
+
+local function correctedLookAt(at, target, up)
+	up = up or DEFAULT_UP
+
+	local forward = (target - at).Unit
+	local back = -forward
+
+	-- A forward parallel to the up hint leaves the cross product at zero and no
+	-- rotation defined; Roblox picks another axis rather than returning NaN.
+	local right = up:Cross(back)
+	if right.Magnitude < 1e-6 then
+		right = FALLBACK_UP:Cross(back)
+	end
+	right = right.Unit
+
+	local realUp = back:Cross(right)
+
+	return roblox.CFrame.new(
+		at.X,
+		at.Y,
+		at.Z,
+		right.X,
+		realUp.X,
+		back.X,
+		right.Y,
+		realUp.Y,
+		back.Y,
+		right.Z,
+		realUp.Z,
+		back.Z
+	)
+end
+
+--[[
+	`roblox.CFrame` with lookAt replaced. Everything else forwards to the real
+	implementation, including the callable `CFrame.new`, so modules see a normal
+	CFrame library.
+]]
+local CFrameShim = setmetatable({
+	lookAt = correctedLookAt,
+}, {
+	__index = roblox.CFrame,
+})
+
+--------------------------------------------------------------------------------
 -- Globals
 --------------------------------------------------------------------------------
 
@@ -589,7 +820,7 @@ local function buildEnvironment(scriptHandle: any)
 		Instance = roblox.Instance,
 		Vector3 = roblox.Vector3,
 		Vector2 = roblox.Vector2,
-		CFrame = roblox.CFrame,
+		CFrame = CFrameShim,
 		Color3 = roblox.Color3,
 		UDim = roblox.UDim,
 		UDim2 = roblox.UDim2,
@@ -807,6 +1038,12 @@ end
 	answer the runtime questions. Everything the UI actually creates is still a
 	real Instance, so a bad property in a Frame or TextLabel still fails.
 ]]
+-- implementMethod patches the class globally and refuses to do it twice, so the
+-- method stubs below are installed once per process while everything else here
+-- is rebuilt on each call. Without this, a scenario that boots a second device
+-- to check it behaves differently dies on the second boot.
+local clientMethodsInstalled = false
+
 function Env.enableClientRuntime()
 	local signal = inertSignal
 
@@ -824,16 +1061,20 @@ function Env.enableClientRuntime()
 	-- No physics engine here. Raycast answering "nothing was hit" is honest:
 	-- what a ray would have struck is decided by the pure damage and spread
 	-- maths the unit tests already cover.
-	roblox.implementMethod("Workspace", "Raycast", function()
-		record("workspace:Raycast")
-		return nil
-	end)
-	roblox.implementMethod("Workspace", "GetPartBoundsInBox", function()
-		return {}
-	end)
-	roblox.implementMethod("Workspace", "GetServerTimeNow", function()
-		return os.clock()
-	end)
+	if not clientMethodsInstalled then
+		clientMethodsInstalled = true
+
+		roblox.implementMethod("Workspace", "Raycast", function()
+			record("workspace:Raycast")
+			return nil
+		end)
+		roblox.implementMethod("Workspace", "GetPartBoundsInBox", function()
+			return {}
+		end)
+		roblox.implementMethod("Workspace", "GetServerTimeNow", function()
+			return os.clock()
+		end)
+	end
 
 	-- The server creates ReplicatedStorage.Remotes at boot, so on a real client
 	-- it always exists by the time anything waits for it. Here nothing has
@@ -902,6 +1143,61 @@ end
 
 function Env.service(name: string)
 	return services[name]
+end
+
+--[[
+	Which device the sandbox pretends to be. Desktop by default, so every
+	scenario written before this existed keeps the machine it was written for.
+
+	Call before Env.enableClientRuntime(): the flags are read when the services
+	are built, and a controller that has already decided it is on a PC does not
+	revisit that.
+]]
+function Env.setDevice(profile: string)
+	if profile == "phone" then
+		-- A phone: touch and nothing else. This is the combination
+		-- MouseLockController calls isTouchOnly, and the one every mobile bug
+		-- in this game has hidden behind.
+		Env.device = { TouchEnabled = true, KeyboardEnabled = false, MouseEnabled = false }
+	elseif profile == "desktop" then
+		Env.device = { TouchEnabled = false, KeyboardEnabled = true, MouseEnabled = true }
+	elseif profile == "touchLaptop" then
+		-- Touch AND a mouse. Must keep desktop behaviour: treating this as a
+		-- phone would take the cursor away from someone who has one.
+		Env.device = { TouchEnabled = true, KeyboardEnabled = true, MouseEnabled = true }
+	else
+		error(`[harness] unknown device profile "{profile}"`, 2)
+	end
+	buildServices()
+end
+
+--[[
+	Presses a touch button the way a thumb does: Begin, then End.
+
+	`hold` leaves the finger down, which is how the fire button is tested —
+	an automatic weapon that only fires on release would pass a Begin-then-End
+	check and be useless in a fight.
+]]
+function Env.pressAction(name: string, hold: boolean?): boolean
+	local action = Env.boundActions[name]
+	if not action then
+		return false
+	end
+
+	action.handler(name, roblox.Enum.UserInputState.Begin, nil)
+	if not hold then
+		action.handler(name, roblox.Enum.UserInputState.End, nil)
+	end
+	return true
+end
+
+function Env.releaseAction(name: string): boolean
+	local action = Env.boundActions[name]
+	if not action then
+		return false
+	end
+	action.handler(name, roblox.Enum.UserInputState.End, nil)
+	return true
 end
 
 function Env.reset()
