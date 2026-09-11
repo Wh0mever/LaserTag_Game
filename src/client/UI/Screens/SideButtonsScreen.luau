@@ -25,6 +25,7 @@
 	costs a keyboard player nothing.
 ]]
 
+local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
@@ -170,13 +171,33 @@ local function buildBars(slot: TextLabel)
 	end
 end
 
+--[[
+	Where the column sits.
+
+	On a desktop it is centred down the left edge, which is where a five-button
+	stack belongs. On a phone the stack is folded to a single hamburger, and a
+	lone button floating in the vertical middle of the screen reads as a stray
+	object rather than a menu — no other game puts it there. So touch pins it to
+	the top left instead, under Roblox's own bar.
+
+	`under Roblox's own bar` is the part that has to be computed rather than
+	guessed: every screen here sets IgnoreGuiInset = true, so y = 0 is the very
+	top of the display and Roblox's top bar is drawn over the first ~36 pixels
+	of it. Anything placed at a small y is not merely cramped, it is invisible —
+	which is exactly what happened to the coin counter.
+]]
+local function topLeftBelowRobloxBar(extraY: number): UDim2
+	local inset = GuiService:GetGuiInset()
+	return UDim2.new(0, 16, 0, inset.Y + extraY)
+end
+
 local function buildStack(parent: Instance)
 	-- The panel sizes itself from whatever is visible inside it, so folding the
 	-- stack away actually reclaims the space rather than leaving a hole.
 	local holder = Instance.new("Frame")
 	holder.Name = "Menu"
-	holder.AnchorPoint = Vector2.new(0, 0.5)
-	holder.Position = UDim2.new(0, 16, 0.5, 0)
+	holder.AnchorPoint = if ClientState.isTouch then Vector2.new(0, 0) else Vector2.new(0, 0.5)
+	holder.Position = if ClientState.isTouch then topLeftBelowRobloxBar(56) else UDim2.new(0, 16, 0.5, 0)
 	holder.Size = UDim2.fromOffset(BUTTON_WIDTH, 0)
 	holder.AutomaticSize = Enum.AutomaticSize.Y
 	holder.BackgroundTransparency = 1
@@ -285,10 +306,13 @@ function SideButtonsScreen.init()
 	root.Parent = gui
 	trove:Add(root)
 
+	-- Below Roblox's bar, not at a flat y = 16: on a phone that put the coin
+	-- counter underneath the Roblox logo and chat buttons, where the player
+	-- never saw their own money.
 	coins = CurrencyLabel.create({
 		name = "Coins",
 		parent = root,
-		position = UDim2.new(0, 16, 0, 16),
+		position = topLeftBelowRobloxBar(8),
 		anchorPoint = Vector2.new(0, 0),
 		value = ClientState.coins,
 	})

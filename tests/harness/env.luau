@@ -283,9 +283,34 @@ roblox.implementMethod("Instance", "GetAttributeChangedSignal", function(self, n
 	return attributeSignal(self, name)
 end)
 
--- Events are read as properties (`button.Activated:Connect(...)`), so they need
--- implementProperty rather than implementMethod. Declared on the base classes so
--- every button, frame and label inherits them.
+--[[
+	Events are read as properties (`button.Activated:Connect(...)`), so they need
+	implementProperty rather than implementMethod. Declared on the base classes so
+	every button, frame and label inherits them.
+
+	Each is a live signal, cached per instance and per event name. Both halves of
+	that matter and neither used to hold: the old version handed back a fresh
+	inertSignal on every access, so a handler connected to button.Activated went
+	onto a signal nobody kept and nothing could ever fire. Connecting to a button
+	was a no-op that looked exactly like a working one, which is why no UI
+	interaction in this game had ever actually been exercised.
+]]
+local instanceEventSignals = setmetatable({}, { __mode = "k" })
+
+local function instanceEvent(instance: any, eventName: string)
+	local perInstance = instanceEventSignals[instance]
+	if not perInstance then
+		perInstance = {}
+		instanceEventSignals[instance] = perInstance
+	end
+	if not perInstance[eventName] then
+		perInstance[eventName] = liveSignal()
+	end
+	return perInstance[eventName]
+end
+
+Env.instanceEvent = instanceEvent
+
 for _, entry in
 	{
 		{ class = "GuiButton", events = { "Activated", "MouseButton1Click", "MouseButton1Down", "MouseButton1Up" } },
@@ -294,8 +319,8 @@ for _, entry in
 	}
 do
 	for _, eventName in entry.events do
-		roblox.implementProperty(entry.class, eventName, function()
-			return inertSignal()
+		roblox.implementProperty(entry.class, eventName, function(self)
+			return instanceEvent(self, eventName)
 		end)
 	end
 end
@@ -613,9 +638,11 @@ local function buildServices()
 		KeyboardEnabled = Env.device.KeyboardEnabled,
 		MouseEnabled = Env.device.MouseEnabled,
 		GamepadEnabled = false,
-		InputBegan = signal(),
-		InputEnded = signal(),
-		InputChanged = signal(),
+		-- Live, not inert: the touch controls are driven entirely through these,
+		-- and a scenario has to be able to put a finger on the glass.
+		InputBegan = liveSignal(),
+		InputEnded = liveSignal(),
+		InputChanged = liveSignal(),
 		WindowFocusReleased = signal(),
 		GetMouseDelta = function()
 			return roblox.Vector2.new(0, 0)
@@ -704,7 +731,20 @@ local function buildServices()
 		end,
 	}
 
-	services.GuiService = { Name = "GuiService", Select = function() end }
+	--[[
+		GetGuiInset reports the strip Roblox's own top bar occupies. Every screen
+		in this game sets IgnoreGuiInset = true, so our GUI starts at y = 0 and
+		anything placed near the top would otherwise sit UNDER the Roblox bar and
+		be invisible. The numbers are a phone's: 36 tall on the top edge, nothing
+		on the bottom.
+	]]
+	services.GuiService = {
+		Name = "GuiService",
+		Select = function() end,
+		GetGuiInset = function()
+			return roblox.Vector2.new(0, 36), roblox.Vector2.new(0, 0)
+		end,
+	}
 	services.Debris = { Name = "Debris", AddItem = function() end }
 	services.TeleportService = { Name = "TeleportService" }
 	services.HttpService = {
@@ -1189,6 +1229,44 @@ function Env.pressAction(name: string, hold: boolean?): boolean
 		action.handler(name, roblox.Enum.UserInputState.End, nil)
 	end
 	return true
+end
+
+--[[
+	A finger on the glass.
+
+	Returns the InputObject stand-in so a scenario can move and lift the SAME
+	touch — which matters, because the fire control identifies its trigger by
+	the input object and must ignore a second finger elsewhere.
+
+	`gameProcessed` mirrors what the engine reports: true when a GuiButton has
+	already consumed the touch. The touch controls read it, so a test that
+	always passed false would be testing a kinder engine than the real one.
+]]
+function Env.touchBegan(x: number, y: number, gameProcessed: boolean?): any
+	local input = {
+		UserInputType = roblox.Enum.UserInputType.Touch,
+		UserInputState = roblox.Enum.UserInputState.Begin,
+		Position = roblox.Vector3.new(x, y, 0),
+	}
+	services.UserInputService.InputBegan:Fire(input, gameProcessed == true)
+	return input
+end
+
+function Env.touchEnded(input: any)
+	input.UserInputState = roblox.Enum.UserInputState.End
+	services.UserInputService.InputEnded:Fire(input, false)
+end
+
+--[[
+	Lays out a GuiObject the way Roblox would.
+
+	Lune has no layout engine, so AbsolutePosition and AbsoluteSize have no
+	value at all until something writes one — reading them raises. Scenarios
+	that hit-test against a control have to place it first.
+]]
+function Env.placeGui(gui: any, x: number, y: number, width: number, height: number)
+	gui.AbsolutePosition = roblox.Vector2.new(x, y)
+	gui.AbsoluteSize = roblox.Vector2.new(width, height)
 end
 
 function Env.releaseAction(name: string): boolean
