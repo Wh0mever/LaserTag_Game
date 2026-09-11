@@ -66,26 +66,38 @@ local MobileControlsController = {}
 MobileControlsController.Priority = 11
 
 --[[
-	The cluster, as offsets from the bottom-right corner.
+	The cluster, in fractions of the viewport HEIGHT, measured from the
+	bottom-right corner to each control's centre.
 
-	Roblox draws its own jump button in that corner — roughly 95 pixels across,
-	centred about 180 from the right edge and 80 from the bottom — and it is not
-	ours to move. Everything here therefore sits further left and higher, and
-	tests/harness/mobile.luau asserts the rectangles neither overlap each other
-	nor leave the screen on a phone-sized viewport.
+	EVERYTHING HERE IS RELATIVE ON PURPOSE. The first version used flat pixel
+	offsets taken off a phone screenshot, and they were wrong by exactly the
+	device's pixel ratio: that screenshot was 1280 wide while Roblox's viewport
+	on the same phone is about 640. A "128 pixel" button was a fifth of the
+	screen, and a "276 pixel" inset from the right edge landed in the middle of
+	it. The controls were enormous and sat over the crosshair.
 
-	Fire is much the largest. It is held down through a whole firefight by a
-	thumb that is also dragging to aim, so it has to stay under the thumb while
-	the hand moves; the other three must not be hittable by accident.
+	Height rather than width, because a phone held sideways is short before it is
+	narrow, and the thumb's reach is what actually has to fit.
+
+	Roblox draws its own jump button in that corner and it is not ours to move.
+	Measured off a real phone it is about 0.16 of the viewport height across,
+	centred 0.31 from the right edge and 0.14 up from the bottom, so it occupies
+	roughly x 0.22..0.39 and y 0.05..0.22 in these units. Everything below stays
+	clear of that box, and tests/harness/mobile.luau asserts it rather than
+	trusting the arithmetic.
+
+	Fire is the largest: it is held down through a whole firefight by a thumb
+	that is also dragging to aim, so it must stay under the thumb while the hand
+	moves. The other three are deliberately smaller — they must not be hittable
+	by accident.
 ]]
-local FIRE_SIZE = 128
-local ACTION_SIZE = 76
-
 local LAYOUT = {
-	{ id = "Fire", size = FIRE_SIZE, x = -276, y = -40, label = "ОГОНЬ" },
-	{ id = "Reload", size = ACTION_SIZE, x = -292, y = -192, label = "ПЕРЕЗАР." },
-	{ id = "Switch", size = ACTION_SIZE, x = -430, y = -78, label = "" },
-	{ id = "View", size = ACTION_SIZE, x = -430, y = -198, label = "ВИД" },
+	{ id = "Fire", diameter = 0.185, right = 0.54, bottom = 0.21, label = "ОГОНЬ", text = 0.050 },
+	-- Shortened from ПЕРЕЗАР.: at this size the full word does not fit, and a
+	-- label clipped by the circle is worse than a shorter one.
+	{ id = "Reload", diameter = 0.15, right = 0.54, bottom = 0.44, label = "ПЕРЕЗ.", text = 0.034 },
+	{ id = "Switch", diameter = 0.15, right = 0.80, bottom = 0.24, label = "", text = 0.034 },
+	{ id = "View", diameter = 0.15, right = 0.80, bottom = 0.47, label = "ВИД", text = 0.038 },
 }
 
 local BACKGROUND = Color3.fromRGB(18, 22, 32)
@@ -144,14 +156,52 @@ end
 -- Building
 --------------------------------------------------------------------------------
 
+--[[
+	The viewport height every size here is a fraction of, with a floor so a
+	camera that has not reported a size yet cannot collapse the controls to
+	nothing.
+]]
+local function unit(): number
+	local camera = workspace.CurrentCamera
+	local height = if camera then camera.ViewportSize.Y else 0
+	-- The fallback applies only when the camera has reported nothing at all. It
+	-- was written as math.max(height, 320) first, which silently clamped a real
+	-- 294-tall phone UP to 320 and made every control 9% too big — a floor meant
+	-- for a missing value must not outvote a present one.
+	return if height > 0 then height else 320
+end
+
+--[[
+	Re-derives every control's size and position from the current viewport.
+	Called whenever the controls are shown and whenever the UI scale changes,
+	which is what a rotation or a window resize comes through as.
+]]
+local function layout()
+	local u = unit()
+
+	for _, entry in LAYOUT do
+		local node = controls[entry.id]
+		if node then
+			local diameter = math.round(entry.diameter * u)
+			node.Size = UDim2.fromOffset(diameter, diameter)
+			node.Position = UDim2.new(1, -math.round(entry.right * u), 1, -math.round(entry.bottom * u))
+
+			local label = node:FindFirstChild("Label")
+			if label and label:IsA("TextLabel") then
+				label.TextSize = math.max(9, math.round(entry.text * u))
+			end
+		end
+	end
+end
+
 local function circle(parent: Instance, entry, interactive: boolean): GuiObject
 	-- A TextButton for the taps, a plain Frame for fire. The class IS the
 	-- decision: a button consumes the touch, a Frame lets it reach the camera.
 	local node: any = if interactive then Instance.new("TextButton") else Instance.new("Frame")
 	node.Name = entry.id
-	node.AnchorPoint = Vector2.new(1, 1)
-	node.Position = UDim2.new(1, entry.x, 1, entry.y)
-	node.Size = UDim2.fromOffset(entry.size, entry.size)
+	-- Centred on its own coordinates, so the layout numbers describe where the
+	-- thumb lands rather than where a corner happens to fall.
+	node.AnchorPoint = Vector2.new(0.5, 0.5)
 	node.BackgroundColor3 = if interactive then BACKGROUND else FIRE_TINT
 	node.BackgroundTransparency = if interactive then 0.28 else 0.18
 	node.BorderSizePixel = 0
@@ -179,7 +229,6 @@ local function circle(parent: Instance, entry, interactive: boolean): GuiObject
 	label.Font = Enum.Font.GothamBold
 	label.Text = entry.label
 	label.TextColor3 = TEXT
-	label.TextSize = if entry.size >= FIRE_SIZE then 20 else 13
 	label.TextWrapped = true
 	label.Parent = node
 
@@ -238,6 +287,8 @@ local function build()
 	if switchLabel then
 		switchLabel.Text = titleForOtherSlot()
 	end
+
+	layout()
 end
 
 --------------------------------------------------------------------------------
@@ -257,6 +308,9 @@ local function setShown(value: boolean)
 
 	if value then
 		build()
+		-- Re-derived on every show: the phone may have been rotated while the
+		-- shop was open.
+		layout()
 	end
 
 	if root then
@@ -363,6 +417,10 @@ function MobileControlsController.init()
 	end))
 
 	trove:Add(UIController.MenuVisibilityChanged:Connect(refresh))
+
+	-- A rotation or a resize reaches the UI as a scale change; the cluster is
+	-- sized off the viewport, so it has to be re-derived when that moves.
+	trove:Add(UIController.ScaleChanged:Connect(layout))
 
 	-- A respawn does not rebuild the GUI, but it does end the life during which
 	-- the trigger was held.

@@ -44,6 +44,10 @@ local PUNCH_DECAY = 11
 -- ~1.5 degree peak so a full-auto burst reads as a visible shudder rather than
 -- the gun leaving the screen.
 local PUNCH_PER_DEGREE = 0.055
+
+-- How much of the camera kick a touch device gets. See onShot for why, and why
+-- it is the camera only and not the spread.
+local TOUCH_RECOIL_SCALE = 0.7
 -- Hard ceiling on the accumulated punch. A held rifle burst settles near 0.13
 -- (one shot's 0.088 against an exp(-11 * 0.1) decay per shot); the ceiling only
 -- exists so a hypothetical faster weapon cannot walk the gun off screen.
@@ -100,7 +104,27 @@ function RecoilController.onShot(weaponId: string, now: number?): number
 	entry.lastShotAt = at
 
 	local kick = SprayPatterns.getKick(weaponId, index)
-	CameraController.addRecoilOffset(kick.pitch, kick.yaw, weapon.recoilRecovery)
+
+	--[[
+		The camera kick is softened on a phone.
+
+		Recoil is a test of how fast you can pull the view back down, and on a
+		touchscreen that correction is a thumb dragging across glass — far slower
+		and coarser than a wrist on a mouse, and the same thumb is holding the
+		trigger. The identical kick therefore costs a phone player far more
+		accuracy than a desktop one, for no difference in skill.
+
+		This is the camera only. The SPREAD is untouched, so the cone the server
+		re-rolls is identical on every device and a phone is not made more
+		accurate than a PC — it is made equally able to fight its own recoil.
+		Nothing here is sent anywhere; the server never sees it.
+
+		Roblox exposes no sensitivity for the touch camera — Sensitivity in the
+		settings panel drives UserInputService.MouseDeltaSensitivity, which a
+		phone does not have — so this is the lever that exists.
+	]]
+	local scale = if ClientState.isTouch then TOUCH_RECOIL_SCALE else 1
+	CameraController.addRecoilOffset(kick.pitch * scale, kick.yaw * scale, weapon.recoilRecovery)
 
 	-- Accumulate onto whatever is left of the previous shot's punch, not onto the
 	-- raw stored value, or a fast burst would stack decayed kicks as if fresh.

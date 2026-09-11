@@ -60,6 +60,19 @@ heading("Booting a phone")
 Env.setDevice("phone")
 Env.enableClientRuntime()
 
+--[[
+	A phone's actual Roblox viewport, which is NOT its screen in pixels.
+
+	The device that produced the screenshots reports about 640x294 here while its
+	screen is 1280x588 — Roblox halves it for the display's pixel ratio. Sizing
+	the controls in flat pixels taken off a screenshot therefore made everything
+	roughly double: a "128 pixel" button covered a fifth of the view. The default
+	sandbox viewport is a 1920x1080 monitor, which would hide exactly that class
+	of mistake, so this scenario runs on the small one.
+]]
+local camera = Env.service("Workspace").CurrentCamera
+camera.ViewportSize = roblox.Vector2.new(640, 294)
+
 local ClientState = Env.load("src/client/ClientState")
 local InputController = Env.load("src/client/Controllers/InputController")
 local PerspectiveController = Env.load("src/client/Controllers/PerspectiveController")
@@ -176,22 +189,52 @@ for _, id in { "Reload", "Switch", "View" } do
 	end
 end
 
--- Roblox draws its own jump button in the bottom-right corner and it is not
--- ours to move, so the cluster has to sit clear of it and of itself.
-local VIEWPORT = { x = 1280, y = 590 }
+-- Sizes and positions are fractions of the VIEWPORT, not flat pixels. A phone's
+-- Roblox viewport is about half the screen's pixel width, so pixel offsets read
+-- off a screenshot come out roughly double: that is how the controls ended up
+-- enormous and sitting over the crosshair.
+local VIEWPORT = { x = 640, y = 294 }
+local U = VIEWPORT.y
+
 local rects = {}
-for _, entry in { { "Fire", 128 }, { "Reload", 76 }, { "Switch", 76 }, { "View", 76 } } do
-	local node = controls[entry[1]]
+for _, id in { "Fire", "Reload", "Switch", "View" } do
+	local node = controls[id]
 	if node then
-		local size = entry[2]
-		local left = VIEWPORT.x + node.Position.X.Offset - size
-		local top = VIEWPORT.y + node.Position.Y.Offset - size
-		rects[entry[1]] = { left = left, top = top, right = left + size, bottom = top + size }
+		-- AnchorPoint is centred, so the offsets ARE the centre.
+		local cx = VIEWPORT.x + node.Position.X.Offset
+		local cy = VIEWPORT.y + node.Position.Y.Offset
+		local half = node.Size.X.Offset / 2
+		rects[id] = { left = cx - half, top = cy - half, right = cx + half, bottom = cy + half }
 
 		check(
-			left >= 0 and top >= 0 and left + size <= VIEWPORT.x and top + size <= VIEWPORT.y,
-			`{entry[1]} is fully on a {VIEWPORT.x}x{VIEWPORT.y} phone screen `
-				.. `(x {math.floor(left)}..{math.floor(left + size)}, y {math.floor(top)}..{math.floor(top + size)})`
+			node.Size.X.Offset > 0 and node.Size.X.Offset == node.Size.Y.Offset,
+			`{id} is a round control with a real size (got {node.Size.X.Offset})`
+		)
+		check(
+			rects[id].left >= 0
+				and rects[id].top >= 0
+				and rects[id].right <= VIEWPORT.x
+				and rects[id].bottom <= VIEWPORT.y,
+			`{id} is fully on a {VIEWPORT.x}x{VIEWPORT.y} viewport `
+				.. `(x {math.floor(rects[id].left)}..{math.floor(rects[id].right)}, `
+				.. `y {math.floor(rects[id].top)}..{math.floor(rects[id].bottom)})`
+		)
+	end
+end
+
+-- The complaint that started this: they were in the middle of the screen and
+-- huge. Both are now measurable rather than a matter of opinion.
+for _, id in { "Fire", "Reload", "Switch", "View" } do
+	local r = rects[id]
+	if r then
+		check(
+			r.left > VIEWPORT.x * 0.5,
+			`{id} sits in the right half, not across the middle of the view `
+				.. `(left edge at {math.floor(r.left)} of {VIEWPORT.x})`
+		)
+		check(
+			(r.right - r.left) <= U * 0.22,
+			`{id} is not enormous ({math.floor(r.right - r.left)}px on a {U}-tall viewport)`
 		)
 	end
 end
@@ -210,13 +253,14 @@ for i = 1, #names do
 	end
 end
 
--- Roblox's jump button, measured off a real phone screenshot: about 95 across,
--- centred ~180 from the right edge and ~81 from the bottom.
+-- Roblox's own jump button, measured off a real phone and expressed in the same
+-- viewport-relative units: ~0.16u across, centred 0.31u from the right edge and
+-- 0.14u up from the bottom. It is not ours to move, so we keep out of its way.
 local JUMP = {
-	left = VIEWPORT.x - 228,
-	right = VIEWPORT.x - 133,
-	top = VIEWPORT.y - 129,
-	bottom = VIEWPORT.y - 34,
+	left = VIEWPORT.x - 0.39 * U,
+	right = VIEWPORT.x - 0.22 * U,
+	top = VIEWPORT.y - 0.22 * U,
+	bottom = VIEWPORT.y - 0.05 * U,
 }
 for _, id in names do
 	if rects[id] then
@@ -224,12 +268,9 @@ for _, id in names do
 	end
 end
 
-if fire and rects.Fire then
-	check(
-		rects.Fire.right - rects.Fire.left >= 100,
-		`the fire control is big enough for a child's thumb ` .. `({math.floor(rects.Fire.right - rects.Fire.left)}px)`
-	)
-end
+local fireSize = rects.Fire and (rects.Fire.right - rects.Fire.left) or 0
+local viewSize = rects.View and (rects.View.right - rects.View.left) or 0
+check(fireSize > viewSize, `fire is the biggest control (fire {math.floor(fireSize)}, view {math.floor(viewSize)})`)
 
 --------------------------------------------------------------------------------
 -- The buttons do what they are labelled
@@ -316,6 +357,45 @@ check(
 	player.CameraMode == beforeMode and player.CameraMaxZoomDistance == beforeZoom,
 	`switching back restores the camera exactly ({cameraState()})`
 )
+
+--------------------------------------------------------------------------------
+-- Recoil
+--
+-- Roblox exposes no sensitivity for the touch camera, so the only lever that
+-- makes a phone easier to aim is the kick itself. Correcting recoil with a
+-- thumb dragging across glass is far slower than with a wrist on a mouse, and
+-- it is the same thumb holding the trigger.
+--------------------------------------------------------------------------------
+
+heading("Recoil")
+
+local RecoilController = Env.load("src/client/Controllers/RecoilController")
+local CameraController = Env.load("src/client/Controllers/CameraController")
+local SprayPatterns = Env.load("src/shared/Config/SprayPatterns")
+
+local recoilOk = pcall(function()
+	CameraController.init()
+	RecoilController.init()
+end)
+check(recoilOk, "the recoil and camera controllers initialise on a phone")
+
+if recoilOk then
+	local weaponId = "Rifle"
+	local index = RecoilController.onShot(weaponId, 1000)
+	local raw = SprayPatterns.getKick(weaponId, index)
+	local pitch = select(1, CameraController.getRecoilOffset())
+
+	check(
+		math.abs(pitch) < math.abs(raw.pitch),
+		`a phone gets less camera kick than the raw pattern `
+			.. `(applied {string.format("%.3f", pitch)}, pattern {string.format("%.3f", raw.pitch)})`
+	)
+	-- Softened, not removed: recoil is still the thing you fight.
+	check(
+		math.abs(pitch) > math.abs(raw.pitch) * 0.4,
+		`the kick is softened, not deleted (kept {string.format("%.0f", math.abs(pitch) / math.abs(raw.pitch) * 100)}%)`
+	)
+end
 
 --------------------------------------------------------------------------------
 -- Controls get out of the way
