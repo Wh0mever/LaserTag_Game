@@ -86,18 +86,27 @@ MobileControlsController.Priority = 11
 	clear of that box, and tests/harness/mobile.luau asserts it rather than
 	trusting the arithmetic.
 
+	AVOIDED BY GOING AROUND IT, NOT BY BACKING AWAY FROM IT. The first attempt
+	put the whole cluster to the LEFT of the jump button, which cleared it and
+	left a 355-pixel strip of empty screen down the right-hand edge — so the
+	controls read as sitting in the middle of the view even though each one was
+	individually the right size. They now arc around the corner: fire low and
+	inboard where the thumb rests, the taps fanned above and outboard of it, the
+	whole group finishing within about 0.07 of the viewport width of the right
+	edge. The proportions are taken off a mobile shooter that does this well.
+
 	Fire is the largest: it is held down through a whole firefight by a thumb
 	that is also dragging to aim, so it must stay under the thumb while the hand
 	moves. The other three are deliberately smaller — they must not be hittable
 	by accident.
 ]]
 local LAYOUT = {
-	{ id = "Fire", diameter = 0.185, right = 0.54, bottom = 0.21, label = "ОГОНЬ", text = 0.050 },
+	{ id = "Fire", diameter = 0.175, right = 0.42, bottom = 0.35, label = "ОГОНЬ", text = 0.048 },
 	-- Shortened from ПЕРЕЗАР.: at this size the full word does not fit, and a
 	-- label clipped by the circle is worse than a shorter one.
-	{ id = "Reload", diameter = 0.15, right = 0.54, bottom = 0.44, label = "ПЕРЕЗ.", text = 0.034 },
-	{ id = "Switch", diameter = 0.15, right = 0.80, bottom = 0.24, label = "", text = 0.034 },
-	{ id = "View", diameter = 0.15, right = 0.80, bottom = 0.47, label = "ВИД", text = 0.038 },
+	{ id = "Reload", diameter = 0.14, right = 0.62, bottom = 0.25, label = "ПЕРЕЗ.", text = 0.032 },
+	{ id = "Switch", diameter = 0.14, right = 0.55, bottom = 0.53, label = "", text = 0.032 },
+	{ id = "View", diameter = 0.14, right = 0.23, bottom = 0.52, label = "ВИД", text = 0.036 },
 }
 
 local BACKGROUND = Color3.fromRGB(18, 22, 32)

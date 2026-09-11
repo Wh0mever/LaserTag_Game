@@ -222,14 +222,14 @@ for _, id in { "Fire", "Reload", "Switch", "View" } do
 	end
 end
 
--- The complaint that started this: they were in the middle of the screen and
--- huge. Both are now measurable rather than a matter of opinion.
+-- The complaint that started this: the controls were in the middle of the
+-- screen and huge. Both are now measurable rather than a matter of opinion.
 for _, id in { "Fire", "Reload", "Switch", "View" } do
 	local r = rects[id]
 	if r then
 		check(
-			r.left > VIEWPORT.x * 0.5,
-			`{id} sits in the right half, not across the middle of the view `
+			r.left > VIEWPORT.x * 0.6,
+			`{id} sits well into the right-hand side, not across the middle `
 				.. `(left edge at {math.floor(r.left)} of {VIEWPORT.x})`
 		)
 		check(
@@ -238,6 +238,27 @@ for _, id in { "Fire", "Reload", "Switch", "View" } do
 		)
 	end
 end
+
+--[[
+	And it has to REACH the right edge, not merely start right of centre.
+
+	The version before this cleared Roblox's jump button by putting everything to
+	the left of it. Every control passed "in the right half" and the cluster still
+	looked centred, because it stopped 355 screen pixels short of the edge and the
+	empty strip was what the eye read. Clearing an obstacle by backing away from it
+	is not the same as going around it, so the gap itself is now the assertion.
+]]
+local rightmost = 0
+for _, id in { "Fire", "Reload", "Switch", "View" } do
+	if rects[id] then
+		rightmost = math.max(rightmost, rects[id].right)
+	end
+end
+check(
+	VIEWPORT.x - rightmost <= VIEWPORT.x * 0.15,
+	`the cluster reaches the right edge rather than stopping short of it `
+		.. `(gap {math.floor(VIEWPORT.x - rightmost)} of {VIEWPORT.x})`
+)
 
 local function overlaps(a, b): boolean
 	return a.left < b.right and b.left < a.right and a.top < b.bottom and b.top < a.bottom
