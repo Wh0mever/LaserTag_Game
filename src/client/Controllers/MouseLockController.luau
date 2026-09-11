@@ -76,7 +76,19 @@ local GUARD_BINDING = "LaserTagCursorGuard"
 
 local player = Players.LocalPlayer
 local trove = Trove.new()
-local enabled = true
+--[[
+	Whether there is a cursor to manage. False on a phone.
+
+	NOT whether this controller does anything: the perspective — camera mode and
+	zoom — is applied on every device, and used not to be. A phone took the early
+	return before applyPerspective ran and before Changed was connected, so it
+	kept StarterPlayer's LockFirstPerson and its 0.5 zoom for the whole session.
+	Third person did not exist on mobile, and the touch VIEW button flipped the
+	stored setting and saved it while the camera never moved — which is worse
+	than an inert button, because the preference then disagreed with the screen
+	and followed the player to their desktop.
+]]
+local cursorEnabled = true
 local toggleUnlocked = false
 local effectiveUnlocked = false
 local modalButton: TextButton? = nil
@@ -96,8 +108,12 @@ function MouseLockController.isUnlocked(): boolean
 	return effectiveUnlocked
 end
 
+--[[
+	Whether this client manages a cursor. False on a phone, which has none —
+	it says nothing about whether the camera is managed, which it always is.
+]]
 function MouseLockController.isEnabled(): boolean
-	return enabled
+	return cursorEnabled
 end
 
 --[[
@@ -141,6 +157,10 @@ end
 	lower render priority on every one of those frames.
 ]]
 local function writeCursor()
+	if not cursorEnabled then
+		return
+	end
+
 	if effectiveUnlocked then
 		if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
 			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
@@ -175,10 +195,6 @@ end
 	property, not a preference to be discovered accidentally.
 ]]
 local function applyPerspective()
-	if not enabled then
-		return
-	end
-
 	local zoom = PerspectiveController.zoom()
 	player.CameraMinZoomDistance = zoom
 	player.CameraMaxZoomDistance = zoom
@@ -193,7 +209,7 @@ local function applyPerspective()
 end
 
 local function apply()
-	if not enabled then
+	if not cursorEnabled then
 		return
 	end
 
@@ -234,17 +250,21 @@ end
 
 function MouseLockController.init()
 	ClientState.init()
-	enabled = not isTouchOnly()
+	cursorEnabled = not isTouchOnly()
 
-	if not enabled then
-		-- Touch devices get first person with no cursor management at all.
-		player.CameraMode = Enum.CameraMode.LockFirstPerson
+	-- Before the touch early return, and deliberately so. The camera belongs to
+	-- every device; only the cursor work below is desktop-only. StarterPlayer
+	-- ships LockFirstPerson with both zoom distances at 0.5, so a client that
+	-- never reaches this line is welded into first person for the session — which
+	-- is exactly what phones used to get.
+	applyPerspective()
+	trove:Add(PerspectiveController.Changed:Connect(applyPerspective))
+
+	if not cursorEnabled then
+		-- A phone has no cursor to free and no Right Ctrl to free it with. The
+		-- touch buttons are bound by MobileControlsController instead.
 		return
 	end
-
-	applyPerspective()
-
-	trove:Add(PerspectiveController.Changed:Connect(applyPerspective))
 
 	trove:Add(InputController.MouseUnlockToggled:Connect(function(unlocked: boolean)
 		toggleUnlocked = unlocked
@@ -264,7 +284,7 @@ function MouseLockController.init()
 end
 
 function MouseLockController.start()
-	if enabled then
+	if cursorEnabled then
 		apply()
 	end
 end
