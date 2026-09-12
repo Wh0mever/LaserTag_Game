@@ -447,6 +447,44 @@ if recoilOk then
 end
 
 --------------------------------------------------------------------------------
+-- Picking a side
+--
+-- The question has to actually arrive. A screen that is built correctly and
+-- never opened is the same to the player as one that does not exist, and that
+-- is the failure this whole scenario keeps being written to catch.
+--------------------------------------------------------------------------------
+
+heading("Pick a side")
+
+local SideScreen = Env.load("src/client/UI/Screens/SideScreen")
+local sideOk, sideErr = pcall(SideScreen.init)
+check(sideOk, `the side picker initialises: {tostring(sideErr)}`)
+
+if sideOk then
+	local sides = SideScreen.buttons()
+	for _, teamId in { "A", "B" } do
+		check(sides[teamId] ~= nil, `the picker offers team {teamId}`)
+	end
+
+	-- It was already in a match before this screen existed, so re-enter to
+	-- produce the transition the screen listens for.
+	player:SetAttribute("InMatch", "")
+	player:SetAttribute("InMatch", "Dust")
+	check(SideScreen.isOpen(), "entering a match asks which side to play")
+
+	-- And the touch controls must not sit on top of the question.
+	check(not MobileControls.areButtonsBound(), "the fire control is hidden while the side question is on screen")
+
+	player:SetAttribute("InMatch", "")
+	check(not SideScreen.isOpen(), "leaving the match takes the question away")
+
+	-- Back into a match, and past the question, for the sections below.
+	player:SetAttribute("InMatch", "Dust")
+	UIController.closeMenu("Side")
+	check(MobileControls.areButtonsBound(), "closing the question hands the controls back")
+end
+
+--------------------------------------------------------------------------------
 -- Controls get out of the way
 --------------------------------------------------------------------------------
 

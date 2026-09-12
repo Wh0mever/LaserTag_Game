@@ -28,6 +28,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
 assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.json")
 
 local AnalyticsService = require(script.Parent.Parent.Services.AnalyticsService)
+local Constants = require(Shared.Constants)
 local DataService = require(script.Parent.Parent.Services.DataService)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
 local GameConfig = require(Shared.Config.GameConfig)
@@ -37,6 +38,7 @@ local MatchStateMachine = require(script.Parent.MatchStateMachine)
 local PlayerService = require(script.Parent.Parent.Services.PlayerService)
 local RemoteNames = require(Shared.RemoteNames)
 local Remotes = require(script.Parent.Parent.Net.Remotes)
+local SideAssignment = require(script.Parent.SideAssignment)
 local TeamService = require(script.Parent.Parent.Services.TeamService)
 
 local MatchRuntime = {}
@@ -231,6 +233,37 @@ function MatchRuntime:_place(player: Player, teamId: string)
 	-- sighting.
 	IdleTracker.reset(self.idle, player, workspace:GetServerTimeNow())
 	task.spawn(PlayerService.spawnInMatch, player, self.mapId, teamId)
+end
+
+--[[
+	Move a player to the side they asked for.
+
+	Returns (moved, reason); the reason is a SideAssignment constant either way,
+	so the client can say WHY a refusal happened instead of showing a button that
+	does nothing.
+
+	Deliberately not _place: that one sets the InMatch attribute, resets the idle
+	clock and tells analytics a match started. None of those is true of changing
+	sides, and the analytics call in particular would count one match twice.
+]]
+function MatchRuntime:switchSide(player: Player, teamId: string): (boolean, string)
+	local from = self.roster[player]
+	local counts = SideAssignment.countTeams(self.roster, Constants.TEAM_IDS)
+
+	local allowed, reason = SideAssignment.evaluate(counts, from, teamId, Constants.TEAM_IDS)
+	if not allowed then
+		return false, reason
+	end
+
+	self.roster[player] = teamId
+	TeamService.assignToTeam(player, teamId)
+
+	-- Respawned rather than teleported: they are standing in what is now the
+	-- enemy half, holding whatever health the old side left them with.
+	task.spawn(PlayerService.spawnInMatch, player, self.mapId, teamId)
+
+	self:_syncRoster()
+	return true, reason
 end
 
 function MatchRuntime:_startMatch()
