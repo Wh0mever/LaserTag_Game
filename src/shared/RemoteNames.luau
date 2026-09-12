@@ -22,6 +22,7 @@ RemoteNames.EquipSkinRequest = "EquipSkinRequest"
 RemoteNames.SpinRequest = "SpinRequest"
 RemoteNames.GetFriendsRequest = "GetFriendsRequest"
 RemoteNames.SaveSettingsRequest = "SaveSettingsRequest"
+RemoteNames.ChooseSideRequest = "ChooseSideRequest"
 
 -- Server -> Client
 RemoteNames.ProfileLoaded = "ProfileLoaded"
@@ -49,6 +50,9 @@ RemoteNames.MANIFEST = {
 	-- An Event rather than a Function: the client applies a setting the moment
 	-- it is dragged and never waits on the server, so there is nothing to return.
 	{ name = RemoteNames.SaveSettingsRequest, kind = "Event" },
+	-- A Function, not an Event: the player has to be told whether the side they
+	-- picked was allowed, and why not if it was refused.
+	{ name = RemoteNames.ChooseSideRequest, kind = "Function" },
 
 	{ name = RemoteNames.ProfileLoaded, kind = "Event" },
 	{ name = RemoteNames.CoinsChanged, kind = "Event" },

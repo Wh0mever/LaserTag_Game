@@ -164,6 +164,34 @@ for _, id in { "Fire", "Reload", "Switch", "View" } do
 	check(controls[id] ~= nil, `a phone gets a {id} control`)
 end
 
+--[[
+	The controls are drawn, not written.
+
+	Roblox has no vector format, and this game ships no image assets on purpose,
+	so an icon here is geometry: a handful of Frames. Asserting the pieces exist
+	matters because the failure mode of "replace the label with an icon" is a
+	circle with nothing in it at all — which looks identical to a button whose
+	text was deleted and never replaced.
+]]
+for _, id in { "Fire", "Reload", "Switch", "View" } do
+	local node = controls[id]
+	if node then
+		local icon = node:FindFirstChild("Icon")
+		check(icon ~= nil, `{id} has an icon`)
+		if icon then
+			check(#icon:GetChildren() >= 2, `{id}'s icon is actually drawn ({#icon:GetChildren()} pieces)`)
+		end
+
+		local words = nil
+		for _, descendant in node:GetDescendants() do
+			if descendant:IsA("TextLabel") and descendant.Text ~= "" then
+				words = descendant.Text
+			end
+		end
+		check(words == nil, `{id} carries no text (found {tostring(words)})`)
+	end
+end
+
 --------------------------------------------------------------------------------
 -- The aiming rule
 --
@@ -416,6 +444,44 @@ if recoilOk then
 		math.abs(pitch) > math.abs(raw.pitch) * 0.4,
 		`the kick is softened, not deleted (kept {string.format("%.0f", math.abs(pitch) / math.abs(raw.pitch) * 100)}%)`
 	)
+end
+
+--------------------------------------------------------------------------------
+-- Picking a side
+--
+-- The question has to actually arrive. A screen that is built correctly and
+-- never opened is the same to the player as one that does not exist, and that
+-- is the failure this whole scenario keeps being written to catch.
+--------------------------------------------------------------------------------
+
+heading("Pick a side")
+
+local SideScreen = Env.load("src/client/UI/Screens/SideScreen")
+local sideOk, sideErr = pcall(SideScreen.init)
+check(sideOk, `the side picker initialises: {tostring(sideErr)}`)
+
+if sideOk then
+	local sides = SideScreen.buttons()
+	for _, teamId in { "A", "B" } do
+		check(sides[teamId] ~= nil, `the picker offers team {teamId}`)
+	end
+
+	-- It was already in a match before this screen existed, so re-enter to
+	-- produce the transition the screen listens for.
+	player:SetAttribute("InMatch", "")
+	player:SetAttribute("InMatch", "Dust")
+	check(SideScreen.isOpen(), "entering a match asks which side to play")
+
+	-- And the touch controls must not sit on top of the question.
+	check(not MobileControls.areButtonsBound(), "the fire control is hidden while the side question is on screen")
+
+	player:SetAttribute("InMatch", "")
+	check(not SideScreen.isOpen(), "leaving the match takes the question away")
+
+	-- Back into a match, and past the question, for the sections below.
+	player:SetAttribute("InMatch", "Dust")
+	UIController.closeMenu("Side")
+	check(MobileControls.areButtonsBound(), "closing the question hands the controls back")
 end
 
 --------------------------------------------------------------------------------

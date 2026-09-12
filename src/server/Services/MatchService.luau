@@ -27,7 +27,11 @@ local Constants = require(Shared.Constants)
 local GameConfig = require(Shared.Config.GameConfig)
 local MatchRuntime = require(script.Parent.Parent.Match.MatchRuntime)
 local MatchStateMachine = require(script.Parent.Parent.Match.MatchStateMachine)
+local RemoteNames = require(Shared.RemoteNames)
+local Remotes = require(script.Parent.Parent.Net.Remotes)
+local SideAssignment = require(script.Parent.Parent.Match.SideAssignment)
 local Trove = require(Shared.Util.Trove)
+local Validators = require(script.Parent.Parent.Net.Validators)
 
 local MatchService = {}
 MatchService.Priority = 5
@@ -36,10 +40,57 @@ local runtimes: { [string]: any } = {}
 local trove = Trove.new()
 local accumulator = 0
 
+--[[
+	A player picking a side, the way CS2 asks on join.
+
+	The answer is computed and returned in the same call rather than stored as a
+	wish granted later: the player has to learn immediately whether they are on
+	that side, and a refusal has to carry its reason so the screen can say why
+	instead of appearing broken.
+
+	Everything is decided here from the server's own roster. The client sends a
+	team id and nothing else — not its position in the roster, not what it
+	believes the counts are — so a client claiming an empty enemy team cannot
+	talk its way onto a stacked one.
+]]
+local function onChooseSideRequest(player: Player, teamId: string)
+	local mapId = MatchService.getMapFor(player)
+	if not mapId then
+		return { ok = false, reason = SideAssignment.NOT_PLAYING }
+	end
+
+	local runtime = runtimes[mapId]
+	if not runtime then
+		return { ok = false, reason = SideAssignment.NOT_PLAYING }
+	end
+
+	local moved, reason = runtime:switchSide(player, teamId)
+	return { ok = moved, reason = reason, teamId = if moved then teamId else nil }
+end
+
+local function validateChooseSide(_player: Player, ...): (boolean, string?)
+	local ok, err = Validators.checkTypes(table.pack(...), { "string" })
+	if not ok then
+		return false, `bad-args: {err}`
+	end
+	return true
+end
+
 function MatchService.init()
 	for _, mapId in Constants.MAPS do
 		runtimes[mapId] = MatchRuntime.new(mapId)
 	end
+
+	Remotes.register({
+		Name = RemoteNames.ChooseSideRequest,
+		Type = "Function",
+		Handler = onChooseSideRequest,
+		Validator = validateChooseSide,
+		-- Low: this is a deliberate press, not something held down, and a player
+		-- hammering it is either confused or probing.
+		RateLimit = 6,
+		WindowSeconds = 10,
+	})
 end
 
 function MatchService.start()
