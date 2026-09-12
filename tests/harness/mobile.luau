@@ -164,6 +164,34 @@ for _, id in { "Fire", "Reload", "Switch", "View" } do
 	check(controls[id] ~= nil, `a phone gets a {id} control`)
 end
 
+--[[
+	The controls are drawn, not written.
+
+	Roblox has no vector format, and this game ships no image assets on purpose,
+	so an icon here is geometry: a handful of Frames. Asserting the pieces exist
+	matters because the failure mode of "replace the label with an icon" is a
+	circle with nothing in it at all — which looks identical to a button whose
+	text was deleted and never replaced.
+]]
+for _, id in { "Fire", "Reload", "Switch", "View" } do
+	local node = controls[id]
+	if node then
+		local icon = node:FindFirstChild("Icon")
+		check(icon ~= nil, `{id} has an icon`)
+		if icon then
+			check(#icon:GetChildren() >= 2, `{id}'s icon is actually drawn ({#icon:GetChildren()} pieces)`)
+		end
+
+		local words = nil
+		for _, descendant in node:GetDescendants() do
+			if descendant:IsA("TextLabel") and descendant.Text ~= "" then
+				words = descendant.Text
+			end
+		end
+		check(words == nil, `{id} carries no text (found {tostring(words)})`)
+	end
+end
+
 --------------------------------------------------------------------------------
 -- The aiming rule
 --

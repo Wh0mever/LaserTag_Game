@@ -56,10 +56,10 @@ assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.js
 
 local ClientState = require(script.Parent.Parent.ClientState)
 local Constants = require(Shared.Constants)
+local Icon = require(script.Parent.Parent.UI.Components.Icon)
 local InputController = require(script.Parent.InputController)
 local Trove = require(Shared.Util.Trove)
 local UIController = require(script.Parent.Parent.UI.UIController)
-local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local MobileControlsController = {}
 -- After WeaponClient (9), whose signals these controls feed.
@@ -101,12 +101,10 @@ MobileControlsController.Priority = 11
 	by accident.
 ]]
 local LAYOUT = {
-	{ id = "Fire", diameter = 0.175, right = 0.42, bottom = 0.35, label = "ОГОНЬ", text = 0.048 },
-	-- Shortened from ПЕРЕЗАР.: at this size the full word does not fit, and a
-	-- label clipped by the circle is worse than a shorter one.
-	{ id = "Reload", diameter = 0.14, right = 0.62, bottom = 0.25, label = "ПЕРЕЗ.", text = 0.032 },
-	{ id = "Switch", diameter = 0.14, right = 0.55, bottom = 0.53, label = "", text = 0.032 },
-	{ id = "View", diameter = 0.14, right = 0.23, bottom = 0.52, label = "ВИД", text = 0.036 },
+	{ id = "Fire", diameter = 0.175, right = 0.42, bottom = 0.35, icon = "crosshair" },
+	{ id = "Reload", diameter = 0.14, right = 0.62, bottom = 0.25, icon = "reload" },
+	{ id = "Switch", diameter = 0.14, right = 0.55, bottom = 0.53, icon = "swap" },
+	{ id = "View", diameter = 0.14, right = 0.23, bottom = 0.52, icon = "eye" },
 }
 
 local BACKGROUND = Color3.fromRGB(18, 22, 32)
@@ -119,7 +117,6 @@ local enabled = false
 local shown = false
 local root: Frame? = nil
 local controls: { [string]: GuiObject } = {}
-local switchLabel: TextLabel? = nil
 
 -- The touch currently holding the trigger. Held as the InputObject rather than
 -- a boolean so a second finger elsewhere on the screen cannot release it.
@@ -132,13 +129,6 @@ local fireTouch: InputObject? = nil
 local function nextSlot(): number
 	local slots = #Constants.SLOTS
 	return slots > 0 and (ClientState.currentSlot % slots) + 1 or Constants.DEFAULT_SLOT
-end
-
-local function titleForOtherSlot(): string
-	local weaponId = Constants.SLOTS[nextSlot()]
-	local weapon = WeaponConfig.get(weaponId)
-	-- The first word of the display name is all a round button has room for.
-	return weapon and string.match(weapon.displayName, "^%S+") or tostring(weaponId)
 end
 
 --[[
@@ -195,9 +185,16 @@ local function layout()
 			node.Size = UDim2.fromOffset(diameter, diameter)
 			node.Position = UDim2.new(1, -math.round(entry.right * u), 1, -math.round(entry.bottom * u))
 
-			local label = node:FindFirstChild("Label")
-			if label and label:IsA("TextLabel") then
-				label.TextSize = math.max(9, math.round(entry.text * u))
+			-- The icon is sized in scale, so it follows the circle on its own;
+			-- only the outline thickness is in pixels and has to be re-derived.
+			local icon = node:FindFirstChild("Icon")
+			if icon then
+				for _, piece in icon:GetChildren() do
+					local stroke = piece:FindFirstChildOfClass("UIStroke")
+					if stroke then
+						stroke.Thickness = math.max(1.5, diameter * 0.055)
+					end
+				end
 			end
 		end
 	end
@@ -231,15 +228,10 @@ local function circle(parent: Instance, entry, interactive: boolean): GuiObject
 	stroke.Transparency = 0.45
 	stroke.Parent = node
 
-	local label = Instance.new("TextLabel")
-	label.Name = "Label"
-	label.BackgroundTransparency = 1
-	label.Size = UDim2.fromScale(1, 1)
-	label.Font = Enum.Font.GothamBold
-	label.Text = entry.label
-	label.TextColor3 = TEXT
-	label.TextWrapped = true
-	label.Parent = node
+	-- Drawn, not written. A word inside a 40-pixel circle is either unreadable
+	-- or larger than the circle, and it has to be translated for every language
+	-- the game is ever played in; a crosshair does not.
+	Icon.draw(node, entry.icon, TEXT)
 
 	node.Parent = parent
 	return node
@@ -272,10 +264,6 @@ local function build()
 		local interactive = entry.id ~= "Fire"
 		local node = circle(holder, entry, interactive)
 		controls[entry.id] = node
-
-		if entry.id == "Switch" then
-			switchLabel = node:FindFirstChild("Label") :: TextLabel
-		end
 	end
 
 	local reload = controls.Reload :: TextButton
@@ -292,10 +280,6 @@ local function build()
 	trove:Connect(view.Activated, function()
 		InputController.PerspectiveToggled:Fire()
 	end)
-
-	if switchLabel then
-		switchLabel.Text = titleForOtherSlot()
-	end
 
 	layout()
 end
@@ -419,12 +403,6 @@ function MobileControlsController.init()
 		end
 	end))
 
-	trove:Add(ClientState.SlotChanged:Connect(function()
-		if switchLabel then
-			switchLabel.Text = titleForOtherSlot()
-		end
-	end))
-
 	trove:Add(UIController.MenuVisibilityChanged:Connect(refresh))
 
 	-- A rotation or a resize reaches the UI as a scale change; the cluster is
@@ -446,7 +424,6 @@ function MobileControlsController.stop()
 	shown = false
 	root = nil
 	controls = {}
-	switchLabel = nil
 	fireTouch = nil
 end
 
