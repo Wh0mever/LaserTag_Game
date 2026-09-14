@@ -246,6 +246,17 @@ end
 	clock and tells analytics a match started. None of those is true of changing
 	sides, and the analytics call in particular would count one match twice.
 ]]
+--[[
+	How many players are on each side right now, as {[teamId] = n}.
+
+	Read off the roster rather than counted from Teams: the roster is what
+	switchSide checks against, so a number shown to a player and the number the
+	rule uses can never disagree.
+]]
+function MatchRuntime:getCounts(): { [string]: number }
+	return SideAssignment.countTeams(self.roster, Constants.TEAM_IDS)
+end
+
 function MatchRuntime:switchSide(player: Player, teamId: string): (boolean, string)
 	local from = self.roster[player]
 	local counts = SideAssignment.countTeams(self.roster, Constants.TEAM_IDS)

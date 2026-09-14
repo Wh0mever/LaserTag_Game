@@ -21,8 +21,28 @@ local function toColor3(rgb: { r: number, g: number, b: number }): Color3
 	return Color3.fromRGB(rgb.r, rgb.g, rgb.b)
 end
 
-local BODY_COLOR = Color3.fromRGB(38, 40, 48)
-local DETAIL_COLOR = Color3.fromRGB(22, 23, 28)
+--[[
+	The gun's colours, derived from the equipped skin.
+
+	They used to be two module-level constants — a near-black body and a darker
+	detail — with the skin colour reaching only the two neon strips. So every
+	weapon in the game was the same dark grey object whatever you had equipped,
+	and a Legendary gold skin was a black gun with a gold stripe. That is not a
+	skin, it is a sticker, and it is why the guns looked drab.
+
+	Derived rather than listed per skin so all thirteen, and every future one,
+	get it for free: the body is the skin colour taken most of the way to black,
+	the detail further still. That keeps the hue — a gold gun is gold, a cyan gun
+	is cyan — while staying dark enough to read as a machined object rather than
+	a toy brick, and dark enough for the neon strips to stay the brightest thing
+	on it.
+]]
+local BODY_DARKEN = 0.58
+local DETAIL_DARKEN = 0.78
+
+local function darken(color: Color3, amount: number): Color3
+	return color:Lerp(Color3.new(0, 0, 0), amount)
+end
 
 --[[
 	Create one welded piece of the gun. Every part is massless and non-collidable
@@ -38,12 +58,18 @@ local function addPart(
 		color: Color3,
 		material: Enum.Material?,
 		transparency: number?,
+		-- Which of the skin's three tones this piece takes. Recorded on the part
+		-- so applySkin can recolour a built gun without knowing how it was laid
+		-- out; without it, only the neon showed the new skin and the body kept
+		-- the old one's colour.
+		tone: string?,
 	}
 ): BasePart
 	local part = Instance.new("Part")
 	part.Name = config.name
 	part.Size = config.size
 	part.Color = config.color
+	part:SetAttribute("Tone", config.tone or "accent")
 	part.Material = config.material or Enum.Material.SmoothPlastic
 	part.Transparency = config.transparency or 0
 	part.Anchored = false
@@ -103,38 +129,43 @@ local function addStuds(
 	end
 end
 
-local function buildRifle(model: Model, handle: BasePart, accent: Color3)
+local function buildRifle(model: Model, handle: BasePart, accent: Color3, body: Color3, detail: Color3)
 	handle.Size = Vector3.new(0.5, 0.55, 3.2)
 
 	addPart(model, handle, {
 		name = "Barrel",
 		size = Vector3.new(0.32, 0.32, 1.6),
 		offset = Vector3.new(0, 0.06, -2.1),
-		color = DETAIL_COLOR,
+		color = detail,
+		tone = "detail",
 	})
 	addPart(model, handle, {
 		name = "Grip",
 		size = Vector3.new(0.36, 0.9, 0.5),
 		offset = Vector3.new(0, -0.66, 0.5),
-		color = BODY_COLOR,
+		color = body,
+		tone = "body",
 	})
 	addPart(model, handle, {
 		name = "Magazine",
 		size = Vector3.new(0.34, 0.9, 0.45),
 		offset = Vector3.new(0, -0.62, -0.45),
-		color = DETAIL_COLOR,
+		color = detail,
+		tone = "detail",
 	})
 	addPart(model, handle, {
 		name = "Stock",
 		size = Vector3.new(0.4, 0.55, 0.9),
 		offset = Vector3.new(0, -0.08, 1.85),
-		color = BODY_COLOR,
+		color = body,
+		tone = "body",
 	})
 	addPart(model, handle, {
 		name = "Sight",
 		size = Vector3.new(0.16, 0.24, 0.7),
 		offset = Vector3.new(0, 0.4, -0.3),
-		color = DETAIL_COLOR,
+		color = detail,
+		tone = "detail",
 	})
 	-- The neon chevron stripe: this is what carries the equipped skin colour.
 	addPart(model, handle, {
@@ -142,6 +173,7 @@ local function buildRifle(model: Model, handle: BasePart, accent: Color3)
 		size = Vector3.new(0.53, 0.16, 2.2),
 		offset = Vector3.new(0, 0.18, -0.2),
 		color = accent,
+		tone = "accent",
 		material = Enum.Material.Neon,
 	})
 	addPart(model, handle, {
@@ -149,38 +181,43 @@ local function buildRifle(model: Model, handle: BasePart, accent: Color3)
 		size = Vector3.new(0.4, 0.3, 0.4),
 		offset = Vector3.new(0, 0.05, 1.15),
 		color = accent,
+		tone = "accent",
 		material = Enum.Material.Neon,
 	})
 
-	addStuds(model, handle, { count = 4, spacing = 0.5, startZ = -1.1, y = 0.34, color = BODY_COLOR })
+	addStuds(model, handle, { count = 4, spacing = 0.5, startZ = -1.1, y = 0.34, color = body })
 end
 
-local function buildPistol(model: Model, handle: BasePart, accent: Color3)
+local function buildPistol(model: Model, handle: BasePart, accent: Color3, body: Color3, detail: Color3)
 	handle.Size = Vector3.new(0.4, 0.5, 1.7)
 
 	addPart(model, handle, {
 		name = "Barrel",
 		size = Vector3.new(0.26, 0.26, 0.8),
 		offset = Vector3.new(0, 0.05, -1.15),
-		color = DETAIL_COLOR,
+		color = detail,
+		tone = "detail",
 	})
 	addPart(model, handle, {
 		name = "Grip",
 		size = Vector3.new(0.32, 0.85, 0.45),
 		offset = Vector3.new(0, -0.6, 0.45),
-		color = BODY_COLOR,
+		color = body,
+		tone = "body",
 	})
 	addPart(model, handle, {
 		name = "Sight",
 		size = Vector3.new(0.14, 0.18, 0.4),
 		offset = Vector3.new(0, 0.34, -0.4),
-		color = DETAIL_COLOR,
+		color = detail,
+		tone = "detail",
 	})
 	addPart(model, handle, {
 		name = "SkinStripe",
 		size = Vector3.new(0.43, 0.14, 1.1),
 		offset = Vector3.new(0, 0.16, -0.15),
 		color = accent,
+		tone = "accent",
 		material = Enum.Material.Neon,
 	})
 	addPart(model, handle, {
@@ -188,10 +225,11 @@ local function buildPistol(model: Model, handle: BasePart, accent: Color3)
 		size = Vector3.new(0.3, 0.24, 0.3),
 		offset = Vector3.new(0, -0.5, 0.45),
 		color = accent,
+		tone = "accent",
 		material = Enum.Material.Neon,
 	})
 
-	addStuds(model, handle, { count = 2, spacing = 0.45, startZ = -0.5, y = 0.3, color = BODY_COLOR })
+	addStuds(model, handle, { count = 2, spacing = 0.45, startZ = -0.5, y = 0.3, color = body })
 end
 
 --[[
@@ -200,51 +238,58 @@ end
 	decided, so the silhouette is deliberately unlike the other two — a long
 	barrel, a big scope and a charge coil rather than a compact body.
 ]]
-local function buildLance(model: Model, handle: BasePart, accent: Color3)
+local function buildLance(model: Model, handle: BasePart, accent: Color3, body: Color3, detail: Color3)
 	handle.Size = Vector3.new(0.46, 0.62, 4.4)
 
 	addPart(model, handle, {
 		name = "Barrel",
 		size = Vector3.new(0.22, 0.22, 2.6),
 		offset = Vector3.new(0, 0.08, -2.6),
-		color = DETAIL_COLOR,
+		color = detail,
+		tone = "detail",
 	})
 	addPart(model, handle, {
 		name = "Scope",
 		size = Vector3.new(0.3, 0.3, 1.5),
 		offset = Vector3.new(0, 0.5, -0.5),
-		color = DETAIL_COLOR,
+		color = detail,
+		tone = "detail",
 	})
 	addPart(model, handle, {
 		name = "ScopeLens",
 		size = Vector3.new(0.22, 0.22, 0.1),
 		offset = Vector3.new(0, 0.5, -1.28),
 		color = accent,
+		tone = "accent",
 		material = Enum.Material.Neon,
 	})
 	addPart(model, handle, {
 		name = "Grip",
 		size = Vector3.new(0.34, 0.95, 0.5),
 		offset = Vector3.new(0, -0.72, 0.9),
-		color = BODY_COLOR,
+		color = body,
+		tone = "body",
 	})
 	addPart(model, handle, {
 		name = "Stock",
 		size = Vector3.new(0.4, 0.62, 1.1),
 		offset = Vector3.new(0, -0.16, 2.5),
-		color = BODY_COLOR,
+		color = body,
+		tone = "body",
 	})
 	addPart(model, handle, {
 		name = "Bipod",
 		size = Vector3.new(0.9, 0.12, 0.12),
 		offset = Vector3.new(0, -0.34, -1.9),
-		color = DETAIL_COLOR,
+		color = detail,
+		tone = "detail",
 	})
 	addPart(model, handle, {
 		name = "ChargeCoil",
 		size = Vector3.new(0.52, 0.52, 0.5),
 		offset = Vector3.new(0, 0.02, -1.2),
 		color = accent,
+		tone = "accent",
 		material = Enum.Material.Neon,
 	})
 	addPart(model, handle, {
@@ -252,10 +297,11 @@ local function buildLance(model: Model, handle: BasePart, accent: Color3)
 		size = Vector3.new(0.49, 0.16, 2.6),
 		offset = Vector3.new(0, 0.24, 0),
 		color = accent,
+		tone = "accent",
 		material = Enum.Material.Neon,
 	})
 
-	addStuds(model, handle, { count = 4, spacing = 0.62, startZ = -0.4, y = 0.36, color = BODY_COLOR })
+	addStuds(model, handle, { count = 4, spacing = 0.62, startZ = -0.4, y = 0.36, color = body })
 end
 
 --[[
@@ -276,13 +322,16 @@ function GunModelFactory.build(weaponId: string, skinId: string?): Model?
 
 	local skin = SkinCatalog.get(skinId) or SkinCatalog.get(SkinCatalog.DEFAULT_SKIN_ID)
 	local accent = toColor3(skin.color)
+	local body = darken(accent, BODY_DARKEN)
+	local detail = darken(accent, DETAIL_DARKEN)
 
 	local model = Instance.new("Model")
 	model.Name = weaponId
 
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
-	handle.Color = BODY_COLOR
+	handle.Color = body
+	handle:SetAttribute("Tone", "body")
 	handle.Material = Enum.Material.SmoothPlastic
 	handle.Anchored = false
 	handle.CanCollide = false
@@ -296,11 +345,11 @@ function GunModelFactory.build(weaponId: string, skinId: string?): Model?
 	model.PrimaryPart = handle
 
 	if weaponId == "Rifle" then
-		buildRifle(model, handle, accent)
+		buildRifle(model, handle, accent, body, detail)
 	elseif weaponId == "Lance" then
-		buildLance(model, handle, accent)
+		buildLance(model, handle, accent, body, detail)
 	else
-		buildPistol(model, handle, accent)
+		buildPistol(model, handle, accent, body, detail)
 	end
 
 	-- Beams and muzzle flashes attach here.
@@ -322,10 +371,20 @@ end
 function GunModelFactory.applySkin(model: Model, skinId: string)
 	local skin = SkinCatalog.get(skinId) or SkinCatalog.get(SkinCatalog.DEFAULT_SKIN_ID)
 	local accent = toColor3(skin.color)
+	local body = darken(accent, BODY_DARKEN)
+	local detail = darken(accent, DETAIL_DARKEN)
+
+	local byTone = { body = body, detail = detail, accent = accent }
 
 	for _, descendant in model:GetDescendants() do
-		if descendant:IsA("BasePart") and descendant.Material == Enum.Material.Neon then
-			descendant.Color = accent
+		if descendant:IsA("BasePart") then
+			-- Falls back to the material for a part built before tones existed,
+			-- so an old model recolours its neon rather than nothing at all.
+			local tone = descendant:GetAttribute("Tone")
+			local wanted = byTone[tone] or (if descendant.Material == Enum.Material.Neon then accent else nil)
+			if wanted then
+				descendant.Color = wanted
+			end
 		end
 	end
 

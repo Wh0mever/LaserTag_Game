@@ -23,6 +23,7 @@ RemoteNames.SpinRequest = "SpinRequest"
 RemoteNames.GetFriendsRequest = "GetFriendsRequest"
 RemoteNames.SaveSettingsRequest = "SaveSettingsRequest"
 RemoteNames.ChooseSideRequest = "ChooseSideRequest"
+RemoteNames.TeamCountsRequest = "TeamCountsRequest"
 
 -- Server -> Client
 RemoteNames.ProfileLoaded = "ProfileLoaded"
@@ -53,6 +54,7 @@ RemoteNames.MANIFEST = {
 	-- A Function, not an Event: the player has to be told whether the side they
 	-- picked was allowed, and why not if it was refused.
 	{ name = RemoteNames.ChooseSideRequest, kind = "Function" },
+	{ name = RemoteNames.TeamCountsRequest, kind = "Function" },
 
 	{ name = RemoteNames.ProfileLoaded, kind = "Event" },
 	{ name = RemoteNames.CoinsChanged, kind = "Event" },
