@@ -53,6 +53,23 @@ local accumulator = 0
 	believes the counts are — so a client claiming an empty enemy team cannot
 	talk its way onto a stacked one.
 ]]
+--[[
+	Team sizes for the map a player is on, or nil if they are not on one.
+
+	Zeros rather than an empty table when there is a match but nobody in it, so
+	the interface never has to tell "no match" apart from "no players" by the
+	shape of what came back.
+]]
+local function countsFor(player: Player): { [string]: number }?
+	local mapId = MatchService.getMapFor(player)
+	local runtime = mapId and runtimes[mapId]
+	return runtime and runtime:getCounts() or nil
+end
+
+local function onTeamCountsRequest(player: Player)
+	return { counts = countsFor(player) }
+end
+
 local function onChooseSideRequest(player: Player, teamId: string)
 	local mapId = MatchService.getMapFor(player)
 	if not mapId then
@@ -65,7 +82,16 @@ local function onChooseSideRequest(player: Player, teamId: string)
 	end
 
 	local moved, reason = runtime:switchSide(player, teamId)
-	return { ok = moved, reason = reason, teamId = if moved then teamId else nil }
+
+	-- The counts ride along on every answer, refusals included: a player told
+	-- "that would unbalance it" should see the numbers that made it true in the
+	-- same frame, not after a second round trip.
+	return {
+		ok = moved,
+		reason = reason,
+		teamId = if moved then teamId else nil,
+		counts = runtime:getCounts(),
+	}
 end
 
 local function validateChooseSide(_player: Player, ...): (boolean, string?)
@@ -80,6 +106,15 @@ function MatchService.init()
 	for _, mapId in Constants.MAPS do
 		runtimes[mapId] = MatchRuntime.new(mapId)
 	end
+
+	Remotes.register({
+		Name = RemoteNames.TeamCountsRequest,
+		Type = "Function",
+		Handler = onTeamCountsRequest,
+		-- Polled when the side panel opens, so a little looser than the choice.
+		RateLimit = 12,
+		WindowSeconds = 10,
+	})
 
 	Remotes.register({
 		Name = RemoteNames.ChooseSideRequest,

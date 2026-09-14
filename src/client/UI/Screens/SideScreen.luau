@@ -54,6 +54,60 @@ local panel: any = nil
 local buttons: { [string]: any } = {}
 local status: TextLabel? = nil
 local answered = false
+local counts: { [string]: number } = {}
+
+--[[
+	The team sizes on the buttons, CS2-style.
+
+	They come from the server on every answer and when the panel opens, and are
+	never computed here: the number a player reads has to be the number the rule
+	used, or "that would unbalance it" arrives next to a scoreline that says it
+	would not.
+]]
+local function labelFor(teamId: string): string
+	local team = Constants.TEAMS[teamId]
+	local name = string.upper(team and team.name or teamId)
+	local size = counts[teamId]
+	return if size then `{name}  {size}` else name
+end
+
+local function refreshLabels()
+	for teamId, button in buttons do
+		button:setText(labelFor(teamId))
+	end
+end
+
+local function applyCounts(fresh: any)
+	if type(fresh) ~= "table" then
+		return
+	end
+	counts = {}
+	for _, teamId in Constants.TEAM_IDS do
+		if type(fresh[teamId]) == "number" then
+			counts[teamId] = fresh[teamId]
+		end
+	end
+	refreshLabels()
+end
+
+--[[
+	Asks the server for the current sizes. Fire and forget: the panel is usable
+	without the numbers, so a failure here leaves the plain team names rather
+	than blocking the question.
+]]
+local function pullCounts()
+	local remote = ClientState.getRemote(RemoteNames.TeamCountsRequest)
+	if not remote then
+		return
+	end
+
+	local ok, reply = pcall(function()
+		return (remote :: any):InvokeServer()
+	end)
+	if ok and type(reply) == "table" then
+		applyCounts(reply.counts)
+	end
+end
 
 local function teamColor(teamId: string): Color3
 	local team = Constants.TEAMS[teamId]
@@ -104,6 +158,8 @@ local function choose(teamId: string)
 		return
 	end
 
+	applyCounts(result.counts)
+
 	if result.ok then
 		answered = true
 		UIController.closeMenu(MENU_NAME)
@@ -114,11 +170,10 @@ local function choose(teamId: string)
 end
 
 local function buildSideButton(parent: Instance, teamId: string, order: number)
-	local team = Constants.TEAMS[teamId]
 	local button = Button.create({
 		name = teamId,
 		parent = parent,
-		text = string.upper(team and team.name or teamId),
+		text = labelFor(teamId),
 		size = UDim2.new(0.5, -8, 1, 0),
 		color = teamColor(teamId),
 		onActivated = function()
@@ -144,6 +199,11 @@ end
 ]]
 function SideScreen.buttons(): { [string]: any }
 	return buttons
+end
+
+-- The sizes currently shown, for tests.
+function SideScreen.counts(): { [string]: number }
+	return counts
 end
 
 --[[
@@ -233,6 +293,9 @@ function SideScreen.init()
 			setStatus("")
 			setBusy(false)
 			SideScreen.open()
+			-- After opening, so the question is on screen while the numbers are
+			-- being fetched rather than after.
+			pullCounts()
 		else
 			answered = false
 			if panel and panel:isOpen() then
@@ -248,6 +311,7 @@ function SideScreen.stop()
 	buttons = {}
 	status = nil
 	answered = false
+	counts = {}
 end
 
 return SideScreen

@@ -118,6 +118,50 @@ for _, skinId in skinIds do
 	check(ok, `applySkin({skinId}) succeeds{if ok then "" else ": " .. tostring(err)}`)
 end
 
+--[[
+	The WHOLE gun has to take the skin, not just its neon.
+
+	The body and detail colours used to be two module-level constants, so every
+	weapon was the same near-black object whatever was equipped and a Legendary
+	gold skin was a black gun with a gold stripe. That passed every check there
+	was: the model built, the parts were there, the neon was the right colour.
+	Nothing asked whether the gun LOOKED like the skin.
+]]
+local function bodyColorOf(model)
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("BasePart") and descendant:GetAttribute("Tone") == "body" then
+			return descendant.Color
+		end
+	end
+	return nil
+end
+
+local goldGun = GunModelFactory.build(firstWeapon, "gold")
+local cyanGun = GunModelFactory.build(firstWeapon, "cyan")
+local goldBody = goldGun and bodyColorOf(goldGun)
+local cyanBody = cyanGun and bodyColorOf(cyanGun)
+
+check(goldBody ~= nil, "a built gun has body-toned parts")
+if goldBody and cyanBody then
+	check(
+		goldBody ~= cyanBody,
+		`two skins give two different gun bodies (gold {tostring(goldBody)}, cyan {tostring(cyanBody)})`
+	)
+	-- Gold is warm, cyan is cold: the hue has to survive the darkening, or
+	-- every skin collapses back to the same grey by another route.
+	check(goldBody.R > goldBody.B, `the gold gun's body is warm (r {goldBody.R}, b {goldBody.B})`)
+	check(cyanBody.B > cyanBody.R, `the cyan gun's body is cold (r {cyanBody.R}, b {cyanBody.B})`)
+	-- Still dark enough for the neon to be the brightest thing on the weapon.
+	check(goldBody.R < 0.75, `the body stays dark rather than becoming a toy brick ({goldBody.R})`)
+end
+
+-- Re-skinning must move the body too, not only the neon.
+if cyanGun then
+	GunModelFactory.applySkin(cyanGun, "gold")
+	local after = bodyColorOf(cyanGun)
+	check(after == goldBody, "applySkin recolours the body, not just the glowing parts")
+end
+
 -- An unknown skin must be refused or ignored, never applied as nil colour.
 local okUnknown = pcall(function()
 	GunModelFactory.applySkin(sample, "no-such-skin")
