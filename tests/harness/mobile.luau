@@ -478,7 +478,117 @@ if sideOk then
 	player:SetAttribute("InMatch", "")
 	check(not SideScreen.isOpen(), "leaving the match takes the question away")
 
+	--[[
+		THE ONE THAT MADE THE GAME LOOK BROKEN FOR THE FIRST MINUTE.
+
+		A panel's own X button calls Panel:close() directly. UIController never
+		hears about it, so MenuVisibilityChanged does not fire — and that signal
+		is what puts the touch controls back and frees the mouse. Closing the
+		side question with its X therefore left a phone player with NO fire
+		button, until some unrelated menu happened to open and close and shook
+		everything loose. Which is exactly what "the buttons show up after a
+		minute" is.
+
+		Worse on the side question than anywhere else, because in a small match
+		the X is the only exit: a 1v1 refuses both sides by the balance rule, so
+		there is no side to pick and no way forward except the button that broke
+		everything.
+
+		Asserted through the panel's own close, not UIController.closeMenu —
+		testing the tidy path would have gone on passing throughout.
+	]]
+	player:SetAttribute("InMatch", "Dust")
+	check(SideScreen.isOpen(), "the question is open again")
+	check(not MobileControls.areButtonsBound(), "and the controls are hidden while it is")
+
+	local sidePanel = SideScreen.panel()
+	check(sidePanel ~= nil, "the side question exposes its panel")
+	if sidePanel then
+		sidePanel:close()
+		check(not SideScreen.isOpen(), "the panel's own close shuts it")
+		check(MobileControls.areButtonsBound(), "closing it with its OWN button hands the fire control back")
+	end
+
+	--[[
+		And exactly once, either way round.
+
+		The panel now reports every close, including the ones UIController asked
+		for — so the tidy path had two mouths and one event. Firing "closed"
+		twice is not harmless: everything listening does its restore work twice,
+		and the second one lands after whatever opened next.
+	]]
+	local closeEvents = 0
+	local counting = UIController.MenuVisibilityChanged:Connect(function(name: string, visible: boolean)
+		if name == "Side" and not visible then
+			closeEvents += 1
+		end
+	end)
+
+	player:SetAttribute("InMatch", "")
+	player:SetAttribute("InMatch", "Dust")
+	check(SideScreen.isOpen(), "the question opens for the counting pass")
+	UIController.closeMenu("Side")
+	check(closeEvents == 1, `closing through UIController reports it once, not twice (got {closeEvents})`)
+
+	closeEvents = 0
+	player:SetAttribute("InMatch", "")
+	player:SetAttribute("InMatch", "Dust")
+	local countingPanel = SideScreen.panel()
+	if countingPanel then
+		countingPanel:close()
+	end
+	check(closeEvents == 1, `closing with the panel's own button reports it once (got {closeEvents})`)
+	counting:Disconnect()
+
+	--[[
+		THE OTHER HALF OF THE SAME REPORT.
+
+		The balance rule refuses a move that would leave the sides more than one
+		apart, and in a 1v1 — which is what nearly every match starts as, and
+		exactly what the screenshot showed — that is BOTH sides. So the two team
+		buttons were the whole screen and neither could be pressed. A question
+		with no acceptable answer, over a match the player had just walked into.
+
+		Two ways out, and both are checked here rather than assumed: a button
+		that asks the server for nothing and so can never be refused, and a
+		countdown that answers for a player who taps nothing at all.
+	]]
+	player:SetAttribute("InMatch", "")
+	player:SetAttribute("InMatch", "Dust")
+	check(SideScreen.isOpen(), "the question is open for the 1v1 case")
+
+	local stayButton = SideScreen.stayButton()
+	check(stayButton ~= nil, "there is a way out that is not the ✕")
+	if stayButton then
+		check(stayButton:isEnabled(), "and it is pressable")
+		stayButton.instance.Activated:Fire()
+		check(not SideScreen.isOpen(), "pressing it answers the question")
+		check(MobileControls.areButtonsBound(), "and hands the fire control back")
+	end
+
+	--[[
+		The countdown, stepped rather than slept through: Env.advance moves the
+		harness clock and resumes whatever came due, so ten seconds of waiting
+		is exercised in full and instantly.
+
+		Both halves matter, and only asserting the second one is the feature. A
+		countdown of zero would close the question too — on the frame it opened,
+		which is a menu that flashes and a question nobody was asked. So the
+		check is that it is STILL up after four seconds and gone after twelve.
+	]]
+	player:SetAttribute("InMatch", "")
+	player:SetAttribute("InMatch", "Dust")
+	check(SideScreen.isOpen(), "the question comes back for the next match")
+
+	Env.advance(4)
+	check(SideScreen.isOpen(), "four seconds in, the question is still there to be read")
+
+	Env.advance(8)
+	check(not SideScreen.isOpen(), "a player who taps nothing at all is let into the match anyway")
+	check(MobileControls.areButtonsBound(), "and gets the fire control without having pressed anything")
+
 	-- Back into a match, and past the question, for the sections below.
+	player:SetAttribute("InMatch", "")
 	player:SetAttribute("InMatch", "Dust")
 	UIController.closeMenu("Side")
 	check(MobileControls.areButtonsBound(), "closing the question hands the controls back")
@@ -565,6 +675,10 @@ check(laptopOk, `the touchscreen laptop boots: {tostring(laptopErr)}`)
 --------------------------------------------------------------------------------
 
 heading("Result")
+
+-- Spawned work runs on its own thread now, so a thread that dies takes its
+-- timer or its poll with it and says nothing. This is where it says something.
+check(#Env.spawnErrors == 0, `no background thread died: {table.concat(Env.spawnErrors, " | ")}`)
 
 print(`  Passed: {passed}   Failed: {failed}`)
 if failed > 0 then

@@ -364,6 +364,11 @@ function SpinScreen.init()
 	end
 
 	panel = Panel.create({
+		-- The panel's own X button and the tap-behind close it without going
+		-- through UIController, so it would never learn. This is how it learns.
+		onClose = function()
+			UIController.notifyClosed("Spin")
+		end,
 		title = "КОЛЕСО НАГРАД",
 		subtitle = `Free spin every {math.floor(SpinConfig.FREE_SPIN_INTERVAL / SECONDS_PER_HOUR)}h — all odds shown`,
 		size = UDim2.fromScale(0.7, 0.76),

@@ -292,6 +292,10 @@ end
 --------------------------------------------------------------------------------
 
 heading("Result")
+-- Spawned work runs on its own thread now, so a thread that dies takes its
+-- timer or its poll with it and says nothing. This is where it says something.
+check(#Env.spawnErrors == 0, `no background thread died: {table.concat(Env.spawnErrors, " | ")}`)
+
 print(`  Passed: {passed}   Failed: {failed}`)
 
 if failed > 0 then

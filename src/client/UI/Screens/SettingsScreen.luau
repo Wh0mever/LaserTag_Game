@@ -123,6 +123,11 @@ function SettingsScreen.init()
 	end
 
 	panel = Panel.create({
+		-- The panel's own X button and the tap-behind close it without going
+		-- through UIController, so it would never learn. This is how it learns.
+		onClose = function()
+			UIController.notifyClosed("Settings")
+		end,
 		title = "НАСТРОЙКИ",
 		subtitle = "Применяется сразу и запоминается до следующего входа",
 		size = UDim2.fromScale(0.48, 0.72),

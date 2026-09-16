@@ -44,6 +44,9 @@ Env.renderBindings = {}
 -- Desktop unless a scenario says otherwise; see Env.setDevice.
 Env.device = { TouchEnabled = false, KeyboardEnabled = true, MouseEnabled = true }
 Env.boundActions = {}
+-- Seconds the game has asked task.wait for. Nothing real elapses; this is how a
+-- check tells a loop that waited from one that did not.
+Env.virtualTime = 0
 
 local function record(what: string)
 	recorded[what] = (recorded[what] or 0) + 1
@@ -51,6 +54,108 @@ end
 
 function Env.calls(): { [string]: number }
 	return recorded
+end
+
+-- Virtual seconds spent inside task.wait since `from` (default: the start).
+function Env.elapsed(from: number?): number
+	return Env.virtualTime - (from or 0)
+end
+
+--------------------------------------------------------------------------------
+-- The scheduler
+--
+-- task.spawn used to call the function inline and task.wait used to return
+-- straight away, which between them meant a spawned loop ran to its very end
+-- before spawn() returned. Every `task.spawn(function() while ... task.wait(1)
+-- end end)` in the game — a countdown, a respawn timer, a poll — completed on
+-- the line that started it. Code like that could never be observed running,
+-- only finished, and a timer set to zero was indistinguishable from one set to
+-- ten. That is the shape of stub this harness keeps getting caught by.
+--
+-- So spawned work gets a real coroutine and task.wait parks it against a
+-- virtual clock. Nothing sleeps: Env.advance(seconds) moves the clock and
+-- resumes whatever came due, so a ten second countdown is exercised in full,
+-- in order, instantly.
+--
+-- task.wait on the main thread cannot park (there is nobody to resume it), so
+-- there it books the time and returns — the old behaviour, now only where it
+-- is the only option.
+--------------------------------------------------------------------------------
+
+type Parked = { co: thread, resumeAt: number }
+
+local parked: { Parked } = {}
+
+-- Errors thrown inside spawned work. A real client would print these and carry
+-- on, and so does this — but they are kept so a scenario can assert nobody's
+-- background thread died, which inline spawning used to surface for free by
+-- propagating.
+Env.spawnErrors = {}
+
+local function resume(co: thread, ...)
+	local ok, err = coroutine.resume(co, ...)
+	if not ok then
+		table.insert(Env.spawnErrors, tostring(err))
+		print(`[spawn error] {err}`)
+	end
+end
+
+--[[
+	Starts `fn` on its own thread and runs it until it finishes or waits.
+]]
+function Env.spawn(fn, ...)
+	local co = coroutine.create(fn)
+	resume(co, ...)
+	return co
+end
+
+local function schedulerWait(t: number?): number
+	record("task.wait")
+	local seconds = if type(t) == "number" and t == t and t > 0 then t else 0
+
+	local co, isMain = coroutine.running()
+	if isMain or not coroutine.isyieldable() then
+		Env.virtualTime += seconds
+		return seconds
+	end
+
+	table.insert(parked, { co = co, resumeAt = Env.virtualTime + seconds })
+	coroutine.yield()
+	return seconds
+end
+
+--[[
+	Moves the clock forward by `seconds`, resuming parked threads in the order
+	their waits come due — including waits created by the resumes themselves, so
+	a loop that waits a second at a time is stepped a second at a time.
+]]
+function Env.advance(seconds: number)
+	local target = Env.virtualTime + math.max(seconds, 0)
+
+	while true do
+		local dueIndex, dueAt = nil, math.huge
+		for index, entry in parked do
+			if entry.resumeAt < dueAt then
+				dueAt, dueIndex = entry.resumeAt, index
+			end
+		end
+
+		if not dueIndex or dueAt > target then
+			break
+		end
+
+		local entry = table.remove(parked, dueIndex)
+		Env.virtualTime = math.max(Env.virtualTime, entry.resumeAt)
+		resume(entry.co)
+	end
+
+	Env.virtualTime = target
+end
+
+-- How many threads are waiting. A scenario that expects a timer to be running
+-- can say so, rather than inferring it from the timer's effect.
+function Env.parkedCount(): number
+	return #parked
 end
 
 --[[
@@ -946,21 +1051,29 @@ local function buildEnvironment(scriptHandle: any)
 		script = scriptHandle,
 
 		task = {
-			wait = function(_t)
-				record("task.wait")
-				return 0
-			end,
+			wait = schedulerWait,
 			spawn = function(fn, ...)
 				record("task.spawn")
-				fn(...)
+				return Env.spawn(fn, ...)
 			end,
+			-- Runs at the end of the current step in Roblox. Nothing in this
+			-- harness renders, so "the end of the step" and "now" are the same
+			-- moment — but it still gets its own thread, so a defer that waits
+			-- parks like any other instead of blocking its caller.
 			defer = function(fn, ...)
 				record("task.defer")
-				fn(...)
+				return Env.spawn(fn, ...)
 			end,
-			delay = function(_t, fn, ...)
+			delay = function(t, fn, ...)
 				record("task.delay")
-				return fn and fn(...)
+				if not fn then
+					return nil
+				end
+				local args = table.pack(...)
+				return Env.spawn(function()
+					schedulerWait(t)
+					fn(table.unpack(args, 1, args.n))
+				end)
 			end,
 			cancel = function() end,
 		},
@@ -1282,6 +1395,12 @@ function Env.reset()
 	handleCache = {}
 	moduleResults = {}
 	recorded = {}
+	-- Threads parked by the run that just ended belong to modules this is about
+	-- to throw away; resuming one later would run the old client's code against
+	-- the new client's state.
+	table.clear(parked)
+	table.clear(Env.spawnErrors)
+	Env.virtualTime = 0
 	buildServices()
 end
 

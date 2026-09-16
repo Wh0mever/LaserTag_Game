@@ -201,6 +201,40 @@ function UIController.isAnyMenuOpen(): boolean
 	return false
 end
 
+--[[
+	True while UIController is the one doing the closing, so a panel reporting
+	its own close does not fire the signal a second time.
+]]
+local closingFromController = false
+
+--[[
+	A panel telling us it closed ITSELF — its own X button, or a tap on the
+	overlay behind it.
+
+	Without this the signal never fires for those two paths, and the signal is
+	what frees the mouse and puts the touch controls back. So closing the shop
+	with its X left a desktop player's cursor locked and a phone player with no
+	fire button at all, until some unrelated menu happened to open and close and
+	shook everything loose. On a phone that reads as "the game takes a minute to
+	start working".
+
+	Calling closeMenu instead does not help: it returns early when the panel is
+	already shut, which by then it is.
+]]
+function UIController.notifyClosed(name: string)
+	if closingFromController then
+		return
+	end
+	if not menus[name] then
+		return
+	end
+
+	if currentMenu == name then
+		currentMenu = nil
+	end
+	UIController.MenuVisibilityChanged:FireSync(name, false)
+end
+
 function UIController.closeMenu(name: string)
 	local handle = menus[name]
 	if not handle then
@@ -215,7 +249,9 @@ function UIController.closeMenu(name: string)
 		return
 	end
 
+	closingFromController = true
 	local ok, err = pcall(handle.close)
+	closingFromController = false
 	if not ok then
 		warn(`[UIController] {name}.close() failed: {err}`)
 	end
