@@ -290,6 +290,12 @@ check(not UIControllerModule.isMenuOpen("Welcome"), "a player who has played is 
 
 ClientStateModule.stats = { MatchesPlayed = 0 }
 ClientStateModule.ProfileChanged:Fire({ stats = ClientStateModule.stats })
+-- The card waits out a delay so the hub has finished building behind it. That
+-- delay is real now — task.delay schedules instead of firing on the spot — so
+-- the clock has to be moved past it, and the card not being up before that is
+-- half of what this asserts.
+check(not UIControllerModule.isMenuOpen("Welcome"), "the card waits for the hub rather than appearing mid-load")
+Env.advance(3)
 check(UIControllerModule.isMenuOpen("Welcome"), "a player who has never played is shown the card")
 
 -- ...and only once, however many times the profile lands.
@@ -881,6 +887,10 @@ end
 --------------------------------------------------------------------------------
 
 heading("Result")
+-- Spawned work runs on its own thread now, so a thread that dies takes its
+-- timer or its poll with it and says nothing. This is where it says something.
+check(#Env.spawnErrors == 0, `no background thread died: {table.concat(Env.spawnErrors, " | ")}`)
+
 print(`  Passed: {passed}   Failed: {failed}`)
 
 if failed > 0 then

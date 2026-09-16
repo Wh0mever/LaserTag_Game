@@ -245,6 +245,11 @@ function EquipScreen.init()
 	end
 
 	panel = Panel.create({
+		-- The panel's own X button and the tap-behind close it without going
+		-- through UIController, so it would never learn. This is how it learns.
+		onClose = function()
+			UIController.notifyClosed("Equip")
+		end,
 		title = "СКИНЫ",
 		subtitle = "Цвет лазера для каждого оружия",
 		size = UDim2.fromScale(0.82, 0.72),

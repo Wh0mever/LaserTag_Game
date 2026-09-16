@@ -19,6 +19,18 @@
 	with no explanation is the same dead button this project keeps finding — a
 	player who is told the sides would become uneven understands immediately,
 	tries again after someone else swaps, and never files it as broken.
+
+	IT MUST NEVER BE A WALL. The balance rule refuses a move that would make the
+	sides more than one apart, and in a 1v1 — the size nearly every match starts
+	at — that is BOTH sides: leaving A for B turns 1v1 into 0v2. So the two team
+	buttons are the entire screen and neither of them can be pressed, in front of
+	a player who has just walked into a match and wants to shoot.
+
+	Two things stop that. ИГРАТЬ answers the question with "leave me where I am",
+	which is always available because it asks the server for nothing. And the
+	whole panel closes itself after a countdown, so a player who taps nothing at
+	all is still playing a few seconds later. A question with no acceptable
+	answer is worse than no question.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -49,12 +61,30 @@ local REASONS = {
 	unknownTeam = "Такой команды нет.",
 }
 
+-- How long the question waits before answering itself with "stay". Long enough
+-- to read two team names and a number, short enough that nobody stands in a
+-- match they cannot see because a menu is over it.
+local AUTO_CLOSE_SECONDS = 10
+
+-- Bands inside the panel content, bottom-up. Named because the sides row is
+-- sized by subtracting them, so a taller button would otherwise silently start
+-- overlapping the row above it.
+local STATUS_HEIGHT = 40
+local STAY_HEIGHT = 48
+local STAY_TEXT = "ИГРАТЬ"
+
 local trove = Trove.new()
 local panel: any = nil
 local buttons: { [string]: any } = {}
+local stayButton: any = nil
 local status: TextLabel? = nil
 local answered = false
 local counts: { [string]: number } = {}
+-- Bumped every time the question opens or closes. The countdown loop carries the
+-- value it started with and stops the moment it stops matching, which is how a
+-- player who answers in the first second does not get closed on again later by a
+-- timer from a previous match.
+local generation = 0
 
 --[[
 	The team sizes on the buttons, CS2-style.
@@ -63,12 +93,19 @@ local counts: { [string]: number } = {}
 	never computed here: the number a player reads has to be the number the rule
 	used, or "that would unbalance it" arrives next to a scoreline that says it
 	would not.
+
+	The side the player is already on is marked, because "ВЫБЕРИ СТОРОНУ" in front
+	of two identical buttons does not say which one you are looking out of.
 ]]
 local function labelFor(teamId: string): string
 	local team = Constants.TEAMS[teamId]
 	local name = string.upper(team and team.name or teamId)
 	local size = counts[teamId]
-	return if size then `{name}  {size}` else name
+	local label = if size then `{name}  {size}` else name
+	if ClientState.getTeamId() == teamId then
+		label ..= "  ·  ТЫ"
+	end
+	return label
 end
 
 local function refreshLabels()
@@ -122,10 +159,32 @@ local function setStatus(text: string, color: Color3?)
 	end
 end
 
+--[[
+	Only the TEAM buttons. ИГРАТЬ is deliberately left alone: it is the answer
+	that needs no server, so greying it out while a request is in flight would
+	take away the only guaranteed exit at exactly the moment the request is
+	about to come back refused.
+]]
 local function setBusy(busy: boolean)
 	for _, button in buttons do
 		button:setEnabled(not busy)
 	end
+end
+
+--[[
+	Answer "leave me where I am" and get out of the way.
+
+	Nothing is sent. The server already put this player on a side when the match
+	started, so staying is not a request that can be refused — which is the whole
+	point of having it.
+]]
+local function stay()
+	if answered then
+		return
+	end
+	answered = true
+	generation += 1
+	UIController.closeMenu(MENU_NAME)
 end
 
 --[[
@@ -162,11 +221,17 @@ local function choose(teamId: string)
 
 	if result.ok then
 		answered = true
+		generation += 1
 		UIController.closeMenu(MENU_NAME)
 		return
 	end
 
 	setStatus(REASONS[result.reason] or "Пока нельзя.", UITheme.Colors.Negative)
+	-- A refusal is the case where the countdown matters most, so it is the case
+	-- where the way out has to be named out loud rather than left to a small ✕.
+	if stayButton then
+		stayButton:setText("ИГРАТЬ ЗА СВОЮ СТОРОНУ")
+	end
 end
 
 local function buildSideButton(parent: Instance, teamId: string, order: number)
@@ -201,6 +266,11 @@ function SideScreen.buttons(): { [string]: any }
 	return buttons
 end
 
+-- The panel itself, for tests that need to close it the way a player does.
+function SideScreen.panel(): any
+	return panel
+end
+
 -- The sizes currently shown, for tests.
 function SideScreen.counts(): { [string]: number }
 	return counts
@@ -216,9 +286,50 @@ end
 	nobody can answer would go.
 ]]
 function SideScreen.open()
-	if panel and not answered then
-		UIController.openMenu(MENU_NAME)
+	if not panel or answered then
+		return
 	end
+
+	UIController.openMenu(MENU_NAME)
+	SideScreen.startCountdown()
+end
+
+--[[
+	Counts the question down and then answers it with "stay".
+
+	This exists because of the 1v1: the balance rule refuses both sides, so
+	without it the only exit is the ✕ in the corner, and a player who does not
+	find it is standing in a match behind a menu wondering why nothing responds.
+	A timer cannot be missed.
+
+	It carries the generation it started in and checks it every second, so
+	answering early does not leave a timer running that closes the question the
+	player reopened for the next match.
+
+	Separate from open() only so tests can run the loop without waiting out ten
+	real seconds.
+]]
+function SideScreen.startCountdown(seconds: number?)
+	generation += 1
+	local mine = generation
+	local remaining = seconds or AUTO_CLOSE_SECONDS
+
+	task.spawn(function()
+		while remaining > 0 do
+			if generation ~= mine or not SideScreen.isOpen() then
+				return
+			end
+			if panel then
+				panel:setSubtitle(`Команды должны остаться равными  ·  {remaining}`)
+			end
+			task.wait(1)
+			remaining -= 1
+		end
+
+		if generation == mine and SideScreen.isOpen() then
+			stay()
+		end
+	end)
 end
 
 --------------------------------------------------------------------------------
@@ -234,6 +345,11 @@ function SideScreen.init()
 	end
 
 	panel = Panel.create({
+		-- The panel's own X button and the tap-behind close it without going
+		-- through UIController, so it would never learn. This is how it learns.
+		onClose = function()
+			UIController.notifyClosed(MENU_NAME)
+		end,
 		title = "ВЫБЕРИ СТОРОНУ",
 		subtitle = "Команды должны остаться равными",
 		size = UDim2.fromScale(0.62, 0.42),
@@ -247,9 +363,12 @@ function SideScreen.init()
 		panel:destroy()
 	end)
 
+	-- Three bands down the panel: the two sides, the reason line, and the way
+	-- out. The way out is last and full width because it is the one control that
+	-- can never be refused, and a 1v1 is a match where it is the only one.
 	local row = Instance.new("Frame")
 	row.Name = "Sides"
-	row.Size = UDim2.new(1, 0, 1, -56)
+	row.Size = UDim2.new(1, 0, 1, -(STATUS_HEIGHT + STAY_HEIGHT))
 	row.BackgroundTransparency = 1
 	row.Parent = panel.content
 
@@ -267,11 +386,26 @@ function SideScreen.init()
 	status = UITheme.label("", UITheme.TextSizes.Small, UITheme.Colors.TextDim)
 	status.Name = "Status"
 	status.AnchorPoint = Vector2.new(0.5, 1)
-	status.Position = UDim2.new(0.5, 0, 1, 0)
-	status.Size = UDim2.new(1, -16, 0, 40)
+	status.Position = UDim2.new(0.5, 0, 1, -STAY_HEIGHT)
+	status.Size = UDim2.new(1, -16, 0, STATUS_HEIGHT)
 	status.TextWrapped = true
 	status.TextXAlignment = Enum.TextXAlignment.Center
 	status.Parent = panel.content
+
+	stayButton = Button.create({
+		name = "Stay",
+		parent = panel.content,
+		text = STAY_TEXT,
+		size = UDim2.new(1, -16, 0, STAY_HEIGHT - 10),
+		position = UDim2.new(0.5, 0, 1, 0),
+		anchorPoint = Vector2.new(0.5, 1),
+		color = UITheme.Colors.Accent,
+		textColor = UITheme.Colors.Background,
+		onActivated = stay,
+	})
+	trove:Add(function()
+		stayButton:destroy()
+	end)
 
 	UIController.registerMenu(MENU_NAME, panel:asMenuHandle())
 	trove:Add(function()
@@ -292,12 +426,20 @@ function SideScreen.init()
 			answered = false
 			setStatus("")
 			setBusy(false)
+			-- Back to the plain wording: the longer "ИГРАТЬ ЗА СВОЮ СТОРОНУ" is
+			-- an answer to a refusal, and this match has not refused anything yet.
+			if stayButton then
+				stayButton:setText(STAY_TEXT)
+			end
+			refreshLabels()
 			SideScreen.open()
 			-- After opening, so the question is on screen while the numbers are
 			-- being fetched rather than after.
 			pullCounts()
 		else
 			answered = false
+			-- Retires any countdown still running for the match just left.
+			generation += 1
 			if panel and panel:isOpen() then
 				UIController.closeMenu(MENU_NAME)
 			end
@@ -309,9 +451,18 @@ function SideScreen.stop()
 	trove:Clean()
 	panel = nil
 	buttons = {}
+	stayButton = nil
 	status = nil
 	answered = false
 	counts = {}
+	-- Retires any countdown still in flight, so it cannot fire into a torn-down
+	-- screen after a restart.
+	generation += 1
+end
+
+-- The "leave me where I am" button, for tests.
+function SideScreen.stayButton(): any
+	return stayButton
 end
 
 return SideScreen

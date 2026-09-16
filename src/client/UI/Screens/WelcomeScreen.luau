@@ -242,6 +242,11 @@ function WelcomeScreen.init()
 	end
 
 	panel = Panel.create({
+		-- The panel's own X button and the tap-behind close it without going
+		-- through UIController, so it would never learn. This is how it learns.
+		onClose = function()
+			UIController.notifyClosed(MENU_NAME)
+		end,
 		title = "КАК ИГРАТЬ",
 		-- The name goes in the subtitle rather than the title: a Panel title
 		-- truncates at the end instead of shrinking, and on a phone this one is

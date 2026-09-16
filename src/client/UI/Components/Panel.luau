@@ -15,7 +15,7 @@
 		showOverlay: boolean?,         -- default true; dims the rest of the screen
 		closeOnOverlay: boolean?,      -- default true; clicking the backdrop closes
 		name: string?,
-		onClose: (() -> ())?,          -- called after :close() finishes tweening out
+		onClose: (() -> ())?,          -- called the moment :close() runs, before the tween
 	}
 
 	Returns an object:
@@ -256,6 +256,27 @@ function Panel:close()
 	-- mouse lock) reacts immediately rather than after the animation.
 	self._open = false
 
+	--[[
+		Announced here rather than when the exit tween finishes, for two reasons.
+
+		It is what hands the touch controls back and frees the cursor, and those
+		belong to the player the instant they press ✕ — making them wait out an
+		animation is a fifth of a second of a game that does not respond.
+
+		And the tween is not a promise. It is cancelled if the panel reopens, and
+		the Completed handler bails on any state that is not Completed, so every
+		one of those paths was a close that told nobody — a phone player left with
+		no fire button until some other menu happened to shake it loose. The caller
+		also has no way to tell a close it asked for from one it did not, because
+		the notice used to arrive long after its call returned.
+	]]
+	if self._onClose then
+		local ok, err = pcall(self._onClose)
+		if not ok then
+			warn(`[Panel] onClose failed: {err}`)
+		end
+	end
+
 	TweenService:Create(self._overlay, UITheme.Tween.Exit, { BackgroundTransparency = 1 }):Play()
 	TweenService:Create(self._shadow, UITheme.Tween.Exit, { BackgroundTransparency = 1 }):Play()
 	TweenService:Create(self._shadowScale, UITheme.Tween.Exit, { Scale = CLOSED_SCALE }):Play()
@@ -268,9 +289,6 @@ function Panel:close()
 			return
 		end
 		self.instance.Visible = false
-		if self._onClose then
-			self._onClose()
-		end
 	end)
 	tween:Play()
 end
