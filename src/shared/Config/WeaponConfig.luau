@@ -11,10 +11,17 @@
 
 local WeaponConfig = {}
 
+--[[
+	`shortName` is for places a full name cannot fit: hotbar slots, tabs, the
+	ammo readout on a phone. "ИМПУЛЬСНАЯ ВИНТОВКА" is 19 letters of bold caps,
+	and in a 128 px hotbar slot it ran across the next two slots.
+]]
+
 WeaponConfig.Weapons = {
 	Rifle = {
 		id = "Rifle",
 		displayName = "ИМПУЛЬСНАЯ ВИНТОВКА",
+		shortName = "ВИНТОВКА",
 		slot = 1,
 		automatic = true,
 
@@ -51,6 +58,7 @@ WeaponConfig.Weapons = {
 	Pistol = {
 		id = "Pistol",
 		displayName = "ИОННЫЙ ПИСТОЛЕТ",
+		shortName = "ПИСТОЛЕТ",
 		slot = 2,
 		automatic = false,
 
@@ -86,6 +94,7 @@ WeaponConfig.Weapons = {
 	Lance = {
 		id = "Lance",
 		displayName = "ДУГОВАЯ ПИКА",
+		shortName = "ПИКА",
 		slot = 3,
 		automatic = false,
 

@@ -29,11 +29,15 @@
 
 local SkinCatalog = {}
 
+-- `label` is what a player reads. The id stays English because it is a key —
+-- in the catalog, in PriceBands, in the spin config — while every other word
+-- in this game is Russian, so the shop printing "COMMON" under "Стандарт" read
+-- as an untranslated leftover.
 SkinCatalog.Rarity = {
-	Common = { tier = 1, color = { r = 200, g = 200, b = 200 } },
-	Rare = { tier = 2, color = { r = 60, g = 140, b = 255 } },
-	Epic = { tier = 3, color = { r = 170, g = 70, b = 255 } },
-	Legendary = { tier = 4, color = { r = 255, g = 190, b = 40 } },
+	Common = { tier = 1, label = "Обычный", color = { r = 200, g = 200, b = 200 } },
+	Rare = { tier = 2, label = "Редкий", color = { r = 60, g = 140, b = 255 } },
+	Epic = { tier = 3, label = "Эпический", color = { r = 170, g = 70, b = 255 } },
+	Legendary = { tier = 4, label = "Легендарный", color = { r = 255, g = 190, b = 40 } },
 }
 
 -- Price band per rarity, as {min, max}. The catalog above must stay inside
@@ -204,6 +208,14 @@ end
 function SkinCatalog.isPurchasable(skinId: any): boolean
 	local skin = SkinCatalog.get(skinId)
 	return skin ~= nil and not skin.isDefault and skin.price > 0
+end
+
+-- The rarity as a player reads it, for a skin id. Falls back to the first tier
+-- rather than printing a raw id.
+function SkinCatalog.rarityLabel(skinId: string): string
+	local skin = SkinCatalog.get(skinId)
+	local rarity = skin and SkinCatalog.Rarity[skin.rarity]
+	return rarity and rarity.label or SkinCatalog.Rarity.Common.label
 end
 
 function SkinCatalog.rarityColor(skinId: string)

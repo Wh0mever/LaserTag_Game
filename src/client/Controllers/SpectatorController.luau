@@ -13,7 +13,7 @@
 	rather than off a tick from the server, because a respawn timer that stutters
 	with packet loss looks broken even when it is not. The overlay hides on
 	Respawned — the authoritative "you are alive again" — not when the countdown
-	reaches zero, so a slow server spawn shows "RESPAWNING…" instead of dropping
+	reaches zero, so a slow server spawn shows "…" instead of dropping
 	the overlay onto a corpse.
 ]]
 
@@ -27,6 +27,7 @@ assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.js
 local CameraController = require(script.Parent.CameraController)
 local ClientState = require(script.Parent.Parent.ClientState)
 local Constants = require(Shared.Constants)
+local TextUtil = require(Shared.Util.TextUtil)
 local Trove = require(Shared.Util.Trove)
 local UIController = require(script.Parent.Parent.UI.UIController)
 local UITheme = require(script.Parent.Parent.UI.UITheme)
@@ -119,7 +120,8 @@ local function ensureGui(): boolean
 	layout.Padding = UDim.new(0, 4)
 	layout.Parent = card
 
-	local eyebrow = centeredLabel("ELIMINATED", UITheme.TextSizes.Small, UITheme.Colors.TextDim, UITheme.Fonts.Bold)
+	local eyebrow =
+		centeredLabel("ВЫ УБИТЫ", UITheme.TextSizes.Small, UITheme.Colors.TextDim, UITheme.Fonts.Bold)
 	eyebrow.Size = UDim2.new(1, 0, 0, 16)
 	eyebrow.LayoutOrder = 1
 	eyebrow.Parent = card
@@ -131,7 +133,12 @@ local function ensureGui(): boolean
 	name.Parent = card
 	killerLabel = name
 
-	local respawn = centeredLabel("RESPAWNING IN", UITheme.TextSizes.Small, UITheme.Colors.TextDim, UITheme.Fonts.Bold)
+	local respawn = centeredLabel(
+		"ВОЗРОЖДЕНИЕ ЧЕРЕЗ",
+		UITheme.TextSizes.Small,
+		UITheme.Colors.TextDim,
+		UITheme.Fonts.Bold
+	)
 	respawn.Size = UDim2.new(1, 0, 0, 16)
 	respawn.LayoutOrder = 3
 	respawn.Parent = card
@@ -189,7 +196,7 @@ local function onCountdownStep()
 
 	if footerLabel then
 		local watching = killer and killer.Parent ~= nil and CameraController.isDeathCamActive()
-		footerLabel.Text = if watching then `SPECTATING {killer.DisplayName}` else ""
+		footerLabel.Text = if watching then `НАБЛЮДЕНИЕ: {killer.DisplayName}` else ""
 	end
 end
 
@@ -224,7 +231,7 @@ local function show(killerUserId: number?, respawnSeconds: number)
 
 	if killer and killer ~= Players.LocalPlayer then
 		eyebrowLabel.Text = "ВАС УБИЛ"
-		killerLabel.Text = string.upper(killer.DisplayName)
+		killerLabel.Text = TextUtil.upper(killer.DisplayName)
 		killerLabel.TextColor3 = UITheme.teamColor(killer:GetAttribute("TeamId"))
 	else
 		-- No attribution: fall damage, the kill plane, or a killer who left.

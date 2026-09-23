@@ -58,6 +58,10 @@ local DIVIDER_WIDTH = 0.007
 local LABEL_HEIGHT = 14
 -- Text sits out near the rim, clear of the hub disc.
 local LABEL_INSET = 0.1
+-- Narrower than this and a four-letter word does not fit across the wedge: the
+-- 4% and 2% skins printed "СКИН" over each other. Such a sliver keeps its
+-- colour and loses its word — the odds table beside the wheel names it.
+local MIN_LABEL_SWEEP = 20
 
 --------------------------------------------------------------------------------
 -- Segment maths
@@ -105,20 +109,39 @@ end
 --------------------------------------------------------------------------------
 
 --[[
-	One radial bar from the wheel's centre out to `height`, rotated to `angle`.
-	Rotation pivots on the AnchorPoint, so anchoring the bottom edge at the
-	centre makes the bar sweep like a clock hand.
+	One radial bar from the wheel's centre out to `height`, pointing at `angle`.
+
+	ROBLOX ROTATES A GUI OBJECT ABOUT ITS CENTRE, NEVER ITS ANCHORPOINT. This
+	used to rotate the bar itself, on the belief that anchoring its bottom edge
+	at the wheel's centre would make it sweep like a clock hand. It does not:
+	every bar spun about its own middle, half a radius up, and the whole wheel
+	collapsed into a small fan in the upper half of the rim — a playing card
+	where a wheel should be.
+
+	So the bar rides an invisible "arm" the size of the whole wheel. The arm's
+	centre IS the wheel's centre, so turning the arm swings the bar around the
+	right point. The bar is returned, not the arm, so callers keep working in
+	the bar's own coordinates.
 ]]
 local function radial(parent: Frame, name: string, angle: number, width: number, height: number, zIndex: number): Frame
+	local arm = Instance.new("Frame")
+	arm.Name = name .. "Arm"
+	arm.AnchorPoint = Vector2.new(0.5, 0.5)
+	arm.Position = UDim2.fromScale(0.5, 0.5)
+	arm.Size = UDim2.fromScale(1, 1)
+	arm.Rotation = angle
+	arm.BackgroundTransparency = 1
+	arm.ZIndex = zIndex
+	arm.Parent = parent
+
 	local bar = Instance.new("Frame")
 	bar.Name = name
 	bar.AnchorPoint = Vector2.new(0.5, 1)
 	bar.Position = UDim2.fromScale(0.5, 0.5)
 	bar.Size = UDim2.fromScale(width, height)
-	bar.Rotation = angle
 	bar.BorderSizePixel = 0
 	bar.ZIndex = zIndex
-	bar.Parent = parent
+	bar.Parent = arm
 	return bar
 end
 
@@ -170,22 +193,40 @@ local function buildSlices(rotor: Frame)
 
 		-- The label rides its own radial frame, so it points outward from the
 		-- centre and turns with the wheel exactly like a real prize wheel's does.
-		local holder = radial(wedge, "Tag", accumulated + sweep * 0.5, 0.28, WHEEL_RADIUS, 6)
-		holder.BackgroundTransparency = 1
+		local mid = accumulated + sweep * 0.5
+		if sweep >= MIN_LABEL_SWEEP then
+			-- As wide as the wedge is across at the label's radius, and no wider:
+			-- a fixed width overlapped the neighbouring labels on narrow wedges.
+			local labelRadius = WHEEL_RADIUS * (1 - LABEL_INSET)
+			local chord = 2 * labelRadius * math.sin(math.rad(sweep) / 2) * 0.9
+			local holder = radial(wedge, "Tag", mid, math.min(0.28, chord), WHEEL_RADIUS, 6)
+			holder.BackgroundTransparency = 1
 
-		local tag = UITheme.label(
-			if segment.kind == "skin" then "СКИН" else tostring(segment.coins),
-			UITheme.TextSizes.Tiny,
-			readableOn(color),
-			UITheme.Fonts.Bold
-		)
-		tag.Name = "Text"
-		tag.AnchorPoint = Vector2.new(0.5, 0)
-		tag.Position = UDim2.fromScale(0.5, LABEL_INSET)
-		tag.Size = UDim2.new(1, 0, 0, LABEL_HEIGHT)
-		tag.TextXAlignment = Enum.TextXAlignment.Center
-		tag.ZIndex = 6
-		tag.Parent = holder
+			local tag = UITheme.label(
+				if segment.kind == "skin" then "СКИН" else tostring(segment.coins),
+				UITheme.TextSizes.Tiny,
+				readableOn(color),
+				UITheme.Fonts.Bold
+			)
+			tag.Name = "Text"
+			tag.AnchorPoint = Vector2.new(0.5, 0)
+			tag.Position = UDim2.fromScale(0.5, LABEL_INSET)
+			tag.Size = UDim2.new(1, 0, 0, LABEL_HEIGHT)
+			tag.TextXAlignment = Enum.TextXAlignment.Center
+			-- Shrinks to its wedge on a phone instead of truncating to "…".
+			tag.TextScaled = true
+			local cap = Instance.new("UITextSizeConstraint")
+			cap.MaxTextSize = UITheme.TextSizes.Tiny
+			cap.Parent = tag
+			-- Upright on the lower half, where pointing outward would print the
+			-- number upside down ("004"). A label turns about its own centre, so
+			-- this flips it in place.
+			if mid > 90 and mid < 270 then
+				tag.Rotation = 180
+			end
+			tag.ZIndex = 6
+			tag.Parent = holder
+		end
 
 		accumulated += sweep
 	end

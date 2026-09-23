@@ -1,7 +1,9 @@
 --!nonstrict
 --[[
 	ScoreboardScreen.luau
-	The hold-Tab roster: both teams side by side with each player's kills.
+	The hold-Tab roster: both teams side by side with each player's kills in
+	THIS match. On a touchscreen, tapping the score at the top of the screen
+	opens it — Tab was the only way in, so a phone player never saw it.
 
 	It asks the server for nothing. Team membership and kill counts already
 	replicate as player attributes (TeamId, SessionKills, InMatch), and the team
@@ -22,6 +24,7 @@ assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.js
 local ClientState = require(script.Parent.Parent.Parent.ClientState)
 local Constants = require(Shared.Constants)
 local InputController = require(script.Parent.Parent.Parent.Controllers.InputController)
+local TextUtil = require(Shared.Util.TextUtil)
 local Trove = require(Shared.Util.Trove)
 local UIController = require(script.Parent.Parent.UIController)
 local UITheme = require(script.Parent.Parent.UITheme)
@@ -32,7 +35,10 @@ ScoreboardScreen.Priority = 40
 local ROW_HEIGHT = 30
 local ROW_SPACING = 4
 local HEADER_HEIGHT = 46
-local COLUMN_WIDTH = 0.48
+local COLUMN_GUTTER = 12
+-- How long a tap-opened board stays up on a touchscreen. There is no key to
+-- let go of, so it closes itself (or on a second tap).
+local TOUCH_OPEN_SECONDS = 5
 local REFRESH_INTERVAL = 0.5
 
 local trove = Trove.new()
@@ -80,14 +86,16 @@ local function buildColumn(parent: Frame, teamId: string, alignRight: boolean)
 
 	local holder = Instance.new("Frame")
 	holder.Name = teamId
-	holder.Size = UDim2.new(COLUMN_WIDTH, 0, 1, -HEADER_HEIGHT - 16)
+	-- Half the board each, less a fixed gutter, so the two columns never touch
+	-- however narrow the board gets. As fractions they overlapped below 600 px.
+	holder.Size = UDim2.new(0.5, -COLUMN_GUTTER * 1.5, 1, -HEADER_HEIGHT - 16)
 	holder.Position = if alignRight
-		then UDim2.new(1 - COLUMN_WIDTH, -12, 0, HEADER_HEIGHT + 8)
-		else UDim2.fromOffset(12, HEADER_HEIGHT + 8)
+		then UDim2.new(0.5, COLUMN_GUTTER / 2, 0, HEADER_HEIGHT + 8)
+		else UDim2.fromOffset(COLUMN_GUTTER, HEADER_HEIGHT + 8)
 	holder.BackgroundTransparency = 1
 	holder.Parent = parent
 
-	local header = UITheme.label(team.name:upper(), UITheme.TextSizes.Subtitle, color, UITheme.Fonts.Heading)
+	local header = UITheme.label(TextUtil.upper(team.name), UITheme.TextSizes.Subtitle, color, UITheme.Fonts.Heading)
 	header.Name = "Header"
 	header.Size = UDim2.new(1, 0, 0, 26)
 	header.TextXAlignment = Enum.TextXAlignment.Left
@@ -150,6 +158,7 @@ local function build(): boolean
 	)
 	title.Name = "Title"
 	title.Size = UDim2.new(1, 0, 0, HEADER_HEIGHT)
+	title.TextXAlignment = Enum.TextXAlignment.Center
 	title.Parent = panel
 
 	root = panel
@@ -195,7 +204,7 @@ local function refresh()
 		if bucket then
 			table.insert(bucket, {
 				name = player.DisplayName,
-				kills = tonumber(player:GetAttribute("SessionKills")) or 0,
+				kills = tonumber(player:GetAttribute("MatchKills")) or 0,
 			})
 		end
 	end
@@ -213,7 +222,7 @@ local function refresh()
 			return a.kills > b.kills
 		end)
 
-		column.header.Text = `{Constants.TEAMS[teamId].name:upper()}  —  {scores[teamId] or 0}`
+		column.header.Text = `{TextUtil.upper(Constants.TEAMS[teamId].name)}  —  {scores[teamId] or 0}`
 
 		for index, entry in bucket do
 			local row = rowFor(teamId, index)
@@ -234,6 +243,11 @@ end
 --------------------------------------------------------------------------------
 
 local function setOpen(open: boolean)
+	-- Only during a match. In the hub it listed everyone playing on every other
+	-- map, merged into two columns under this player's last final score.
+	if open and not ClientState.isInMatch() then
+		return
+	end
 	if open == isOpen or not root then
 		return
 	end
@@ -267,6 +281,48 @@ function ScoreboardScreen.init()
 	end
 
 	trove:Add(InputController.ScoreboardHeld:Connect(setOpen))
+
+	if ClientState.isTouch then
+		-- An invisible tap target over the timer and the two score chips: the
+		-- score is where a player looks to see how the match is going, so it
+		-- is where they tap to see more of it.
+		local gui = root and root.Parent
+		local tap = Instance.new("TextButton")
+		tap.Name = "ScoreTap"
+		tap.AnchorPoint = Vector2.new(0.5, 0)
+		tap.Position = UDim2.new(0.5, 0, 0, 6)
+		tap.Size = UDim2.fromOffset(280, 92)
+		tap.BackgroundTransparency = 1
+		tap.Text = ""
+		tap.Visible = ClientState.isInMatch()
+		tap.Parent = gui
+		trove:Add(tap)
+
+		local openedAt = 0
+		trove:Connect(tap.Activated, function()
+			if isOpen then
+				setOpen(false)
+				return
+			end
+			setOpen(true)
+			openedAt = os.clock()
+			local mine = openedAt
+			task.delay(TOUCH_OPEN_SECONDS, function()
+				if isOpen and openedAt == mine then
+					setOpen(false)
+				end
+			end)
+		end)
+
+		trove:Add(ClientState.AttributeChanged:Connect(function(name: string)
+			if name == "InMatch" then
+				tap.Visible = ClientState.isInMatch()
+				if not ClientState.isInMatch() then
+					setOpen(false)
+				end
+			end
+		end))
+	end
 
 	-- A menu taking the screen closes the board; otherwise it would sit on top
 	-- of the shop with a stale roster.

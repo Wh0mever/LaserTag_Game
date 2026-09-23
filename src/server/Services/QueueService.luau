@@ -176,9 +176,13 @@ local function publish(mapId: string, current: { Player }, previous: { Player },
 		Remotes.fireClient(RemoteNames.QueueUpdate, player, mapId, count, needed, countdown)
 	end
 
+	-- A leaver is told they are in no queue at all (an empty map id), not the
+	-- queue's new size: given the same message as the players still standing
+	-- there, a client cannot tell that it has stepped off, and its "in queue"
+	-- chip would stay up in the hub forever.
 	for _, player in previous do
 		if not notified[player] and player:IsDescendantOf(Players) then
-			Remotes.fireClient(RemoteNames.QueueUpdate, player, mapId, count, needed, countdown)
+			Remotes.fireClient(RemoteNames.QueueUpdate, player, "", 0, needed, nil)
 		end
 	end
 end

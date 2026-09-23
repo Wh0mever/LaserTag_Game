@@ -119,6 +119,27 @@ local function onAmmoChanged(ammo)
 	widgets.ammoWeapon.TextColor3 = dim and UITheme.Colors.Warning or UITheme.Colors.TextDim
 end
 
+--[[
+	Marks the player's own side. Both chips were styled the same with Альфа
+	always on the left, so a player on Браво could not tell from the HUD whether
+	the "23" beside their colour was theirs — after a mid-match join or a side
+	switch, not even which colour was theirs.
+]]
+local function refreshOwnTeam()
+	if not widgets or not widgets.scoreChips then
+		return
+	end
+	local own = ClientState.getTeamId()
+	for teamId, chip in widgets.scoreChips do
+		local mine = teamId == own
+		chip.BackgroundTransparency = if mine then 0.45 else 0.78
+		local stroke = chip:FindFirstChildOfClass("UIStroke")
+		if stroke then
+			stroke.Thickness = if mine then 3 else 1.5
+		end
+	end
+end
+
 local function onSlotChanged(slot: number)
 	if not widgets then
 		return
@@ -236,7 +257,7 @@ function HUDScreen.init()
 		-- The same intent the number keys publish; WeaponClient decides whether
 		-- the swap is allowed.
 		InputController.SlotPressed:Fire(slot)
-	end)
+	end, { touch = ClientState.isTouch })
 	trove:Add(function()
 		widgets.destroy()
 	end)
@@ -252,6 +273,8 @@ function HUDScreen.init()
 	trove:Add(ClientState.AttributeChanged:Connect(function(name: string)
 		if name == "InMatch" then
 			refreshVisibility()
+		elseif name == "TeamId" then
+			refreshOwnTeam()
 		end
 	end))
 
@@ -267,6 +290,7 @@ function HUDScreen.init()
 	onSlotChanged(ClientState.currentSlot)
 	onMatchChanged(ClientState.match)
 	refreshVisibility()
+	refreshOwnTeam()
 end
 
 function HUDScreen.start()

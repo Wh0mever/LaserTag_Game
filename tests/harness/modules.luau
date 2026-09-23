@@ -158,6 +158,39 @@ else
 end
 
 --------------------------------------------------------------------------------
+-- A new profile can hold a skin for every weapon
+--
+-- The equipped-skin slots were written out by hand as Rifle and Pistol, and the
+-- Lance, added later, never got one. The shop refuses to equip onto a missing
+-- slot, so no skin could ever go on the Lance and nothing anywhere complained.
+--------------------------------------------------------------------------------
+
+print("")
+print("Profile template")
+print(string.rep("-", 60))
+
+local templateOk, templateErr = pcall(function()
+	local DataService = Env.load("src/server/Services/DataService")
+	local WeaponConfig = Env.load("src/shared/Config/WeaponConfig")
+	local SkinCatalog = Env.load("src/shared/Config/SkinCatalog")
+	local template = DataService.newProfileTemplate()
+	for _, weaponId in WeaponConfig.Order do
+		assert(
+			template.EquippedSkins[weaponId] == SkinCatalog.DEFAULT_SKIN_ID,
+			`a new profile has no skin slot for {weaponId}, so nothing can ever be equipped on it`
+		)
+	end
+end)
+
+if templateOk then
+	print("  every weapon has a skin slot")
+else
+	failedCount += 1
+	table.insert(failures, { path = "src/server/Services/DataService", err = tostring(templateErr) })
+	print(`  FAILED: {templateErr}`)
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 

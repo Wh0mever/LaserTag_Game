@@ -77,6 +77,11 @@ ClientState.ammo = { weaponId = Constants.SLOTS[Constants.DEFAULT_SLOT], mag = 0
 ClientState.currentSlot = Constants.DEFAULT_SLOT
 ClientState.isDead = false
 ClientState.isTouch = false
+-- While the reward wheel is turning, the coin counter waits: the server pays
+-- the prize before it answers, so the counter would count up and give the
+-- result away before the wheel had landed. SpinScreen raises this and lowers
+-- it when the wheel stops.
+ClientState.holdCoinDisplay = false
 
 --------------------------------------------------------------------------------
 -- Signals

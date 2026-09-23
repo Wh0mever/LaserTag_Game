@@ -91,6 +91,7 @@ Runner.isDeepEqual = deepEqual
 -- Every spec file returns a function(t) where `t` is this runner.
 local SPECS = {
 	"TableUtil",
+	"TextUtil",
 	"MathUtil",
 	"SprayPatterns",
 	"WeaponConfig",

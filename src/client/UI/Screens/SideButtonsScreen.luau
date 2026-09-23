@@ -10,9 +10,9 @@
 	click and a menu opened by a keypress go through the same exclusivity rules.
 
 	On a small screen the labels are dropped and the buttons collapse to their
-	icons. The trigger is UIController.ScaleChanged, which already fires on the
-	Constants.SMALL_SCREEN_WIDTH crossing — a second viewport watcher here could
-	only disagree with it.
+	icons. The trigger is UIController.ScaleChanged, which already fires when the
+	screen becomes small enough to shrink the UI — a second viewport watcher
+	here could only disagree with it.
 
 	THE STACK FOLDS AWAY. Five buttons down the left edge is a reasonable amount
 	of chrome on a monitor and half the screen on a phone, where it sat over the
@@ -44,7 +44,9 @@ local SideButtonsScreen = {}
 SideButtonsScreen.Priority = 22
 
 local BUTTON_HEIGHT = 46
-local BUTTON_WIDTH = 150
+-- Fits the longest label ("НАСТРОЙКИ") with its icon and the room the key badge
+-- keeps free; at 150 the last letter ran under the badge.
+local BUTTON_WIDTH = 176
 local COMPACT_WIDTH = 52
 local BUTTON_GAP = 10
 
@@ -102,6 +104,23 @@ local function setExpanded(value: boolean)
 	end
 end
 
+--[[
+	On a touchscreen the stack opens SIDEWAYS, to the right of the toggle.
+
+	Downwards, on a phone, the five buttons ran from under the coin counter to
+	past the bottom edge: the wheel and the settings were off the screen with no
+	other way to reach them, and the rest sat over the thumbstick, where a thumb
+	landing to walk opened the shop instead. A row beside the toggle stays in
+	the top-left corner, which on a touchscreen nothing else wants.
+]]
+local function stackSize(width: number): UDim2
+	local count = #MENUS
+	if ClientState.isTouch then
+		return UDim2.fromOffset(count * width + (count - 1) * BUTTON_GAP, BUTTON_HEIGHT)
+	end
+	return UDim2.fromOffset(width, count * BUTTON_HEIGHT + (count - 1) * BUTTON_GAP)
+end
+
 local function applyCompact(isCompact: boolean)
 	if isCompact == compact then
 		return
@@ -113,7 +132,7 @@ local function applyCompact(isCompact: boolean)
 		panel.Size = UDim2.fromOffset(width, 0)
 	end
 	if stack then
-		stack.Size = UDim2.fromOffset(width, #MENUS * BUTTON_HEIGHT + (#MENUS - 1) * BUTTON_GAP)
+		stack.Size = stackSize(width)
 	end
 	if toggle then
 		toggle.instance.Size = UDim2.fromOffset(width, BUTTON_HEIGHT)
@@ -141,8 +160,11 @@ local function refreshMouseHint(unlocked: boolean)
 		return
 	end
 
-	local key = Constants.KEYBINDS.MouseUnlock == "RightControl" and "Right Ctrl" or Constants.KEYBINDS.MouseUnlock
-	mouseHint.Text = if unlocked then `MOUSE FREE — {key} to lock` else `UNLOCK MOUSE — {key}`
+	local key = Constants.KEYBINDS.MouseUnlock == "RightControl" and "Правый Ctrl"
+		or Constants.KEYBINDS.MouseUnlock
+	mouseHint.Text = if unlocked
+		then `КУРСОР СВОБОДЕН — {key}, чтобы вернуть`
+		else `ОСВОБОДИТЬ КУРСОР — {key}`
 	mouseHint.TextColor3 = if unlocked then UITheme.Colors.Accent else UITheme.Colors.TextDim
 end
 
@@ -199,13 +221,15 @@ local function buildStack(parent: Instance)
 	holder.AnchorPoint = if ClientState.isTouch then Vector2.new(0, 0) else Vector2.new(0, 0.5)
 	holder.Position = if ClientState.isTouch then topLeftBelowRobloxBar(56) else UDim2.new(0, 16, 0.5, 0)
 	holder.Size = UDim2.fromOffset(BUTTON_WIDTH, 0)
-	holder.AutomaticSize = Enum.AutomaticSize.Y
+	holder.AutomaticSize = if ClientState.isTouch then Enum.AutomaticSize.XY else Enum.AutomaticSize.Y
 	holder.BackgroundTransparency = 1
 	holder.Parent = parent
 	panel = holder
 
 	local panelLayout = Instance.new("UIListLayout")
-	panelLayout.FillDirection = Enum.FillDirection.Vertical
+	panelLayout.FillDirection = if ClientState.isTouch
+		then Enum.FillDirection.Horizontal
+		else Enum.FillDirection.Vertical
 	panelLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 	panelLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	panelLayout.Padding = UDim.new(0, BUTTON_GAP)
@@ -232,13 +256,13 @@ local function buildStack(parent: Instance)
 	local list = Instance.new("Frame")
 	list.Name = "Buttons"
 	list.LayoutOrder = 1
-	list.Size = UDim2.fromOffset(BUTTON_WIDTH, #MENUS * BUTTON_HEIGHT + (#MENUS - 1) * BUTTON_GAP)
+	list.Size = stackSize(BUTTON_WIDTH)
 	list.BackgroundTransparency = 1
 	list.Parent = holder
 	stack = list
 
 	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.FillDirection = if ClientState.isTouch then Enum.FillDirection.Horizontal else Enum.FillDirection.Vertical
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Padding = UDim.new(0, BUTTON_GAP)
@@ -272,7 +296,7 @@ local function buildFooter(parent: Instance)
 	hint.AnchorPoint = Vector2.new(1, 1)
 	-- Clear of the HUD ammo counter, which owns the bottom-right corner.
 	hint.Position = UDim2.new(1, -24, 1, -92)
-	hint.Size = UDim2.fromOffset(240, 18)
+	hint.Size = UDim2.fromOffset(320, 18)
 	hint.TextXAlignment = Enum.TextXAlignment.Right
 	hint.Visible = not ClientState.isTouch
 	hint.Parent = parent
@@ -324,10 +348,16 @@ function SideButtonsScreen.init()
 	buildFooter(root)
 
 	trove:Add(ClientState.CoinsChanged:Connect(function(newCoins: number)
+		if ClientState.holdCoinDisplay then
+			return
+		end
 		coins:set(newCoins)
 	end))
 
 	trove:Add(ClientState.ProfileChanged:Connect(function()
+		if ClientState.holdCoinDisplay then
+			return
+		end
 		-- The profile snapshot is a full reload, not a reward: no count-up.
 		coins:setInstant(ClientState.coins)
 	end))
@@ -335,6 +365,15 @@ function SideButtonsScreen.init()
 	trove:Add(InputController.MouseUnlockToggled:Connect(refreshMouseHint))
 	trove:Add(UIController.ScaleChanged:Connect(function(scale: number)
 		applyCompact(scale < 1)
+	end))
+
+	-- On a touchscreen, opening a menu folds the row away again. It opened it
+	-- to get somewhere; left open, it stays in the top-left for the rest of
+	-- the match, one mis-tap from a shop.
+	trove:Add(UIController.MenuVisibilityChanged:Connect(function(_name: string, visible: boolean)
+		if visible and ClientState.isTouch and expanded then
+			setExpanded(false)
+		end
 	end))
 
 	refreshMouseHint(InputController.isMouseUnlocked())

@@ -640,6 +640,40 @@ check(not ClientState.isInMatch(), "clearing the attribute leaves the match")
 check(not MobileControls.areButtonsBound(), "no fire button in the hub")
 
 --------------------------------------------------------------------------------
+-- The scoreboard on a phone
+--
+-- It opened on Tab and nothing else, so a phone player never saw it for a
+-- whole match. Tapping the score at the top is the way in now.
+--------------------------------------------------------------------------------
+
+heading("Scoreboard on a phone")
+
+local ScoreboardScreen = Env.load("src/client/UI/Screens/ScoreboardScreen")
+local boardOk, boardErr = pcall(ScoreboardScreen.init)
+check(boardOk, `the scoreboard initialises on a phone: {tostring(boardErr)}`)
+
+player:SetAttribute("InMatch", "Dust")
+UIController.closeMenu("Side")
+
+local boardGui = UIController.getScreen("Scoreboard")
+local scoreTap = boardGui and boardGui:FindFirstChild("ScoreTap")
+local board = boardGui and boardGui:FindFirstChild("Board")
+check(scoreTap ~= nil and scoreTap.Visible, "in a match the score at the top can be tapped")
+if scoreTap and board then
+	scoreTap.Activated:Fire()
+	check(board.Visible, "tapping the score opens the scoreboard")
+	scoreTap.Activated:Fire()
+	check(not board.Visible, "tapping it again closes it")
+
+	scoreTap.Activated:Fire()
+	Env.advance(6)
+	check(not board.Visible, "left alone, it closes itself — there is no key to let go of")
+
+	player:SetAttribute("InMatch", "")
+	check(not scoreTap.Visible, "in the hub there is nothing to tap: the board is for a match")
+end
+
+--------------------------------------------------------------------------------
 -- A touchscreen laptop is not a phone
 --
 -- The device test is "touch AND no mouse", not "touch". Someone on a Surface or

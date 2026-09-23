@@ -19,6 +19,7 @@ local SCENARIOS = {
 	{ name = "lighting", what = "the rig and the palettes agree on what may glow" },
 	{ name = "client", what = "every client module loads and boots" },
 	{ name = "mobile", what = "a phone can aim, shoot, reload and switch view" },
+	{ name = "match", what = "the match runtime's own rules: sides, late joins, results" },
 }
 
 local failed = {}

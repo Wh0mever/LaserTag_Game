@@ -31,6 +31,9 @@ print(`[LaserTag] Client booting ({Constants.VERSION})`)
 pcall(function()
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
+	-- Our scoreboard replaces it. Left on, Roblox's list sat in the top-right
+	-- corner over the kill feed, and Tab opened both at once.
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
 end)
 
 local clientRoot = script

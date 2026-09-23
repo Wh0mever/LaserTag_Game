@@ -116,6 +116,29 @@ jobs:
       # property or a broken map definition fails here rather than in a playtest.
       - run: lune run tests/harness/run
 
+  ui:
+    name: UI screenshots (phone, tablet, desktop)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ok-nick/setup-aftman@v0.4.2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pillow==12.3.0 fonttools==4.65.0
+      # Boots the real client modules at a phone's, a tablet's and a monitor's
+      # viewport, draws every screen, and fails on text spilling out of its
+      # button, text under Roblox's jump button or thumbstick, controls on
+      # Roblox's own buttons, and anything off the screen. The pictures are the
+      # point as much as the verdict: they are uploaded on every run, pass or
+      # fail, so a layout can be looked at without a phone.
+      - run: python3 tools/render_all.py ui-screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-screenshots
+          path: ui-screenshots
+
   build:
     name: Build place (Rojo)
     runs-on: ubuntu-latest
@@ -134,7 +157,7 @@ jobs:
     # Every check has to pass first. Publishing is the one job here with an
     # effect outside this repository, so it is also the one that must never run
     # on a red tree.
-    needs: [format, lint, test, harness, build]
+    needs: [format, lint, test, harness, ui, build]
     # Never from a pull request, and never from a branch: a fork's PR must not
     # be able to reach the live game, and neither should a work-in-progress
     # branch that happens to be green.

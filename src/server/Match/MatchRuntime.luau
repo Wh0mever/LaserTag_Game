@@ -40,6 +40,7 @@ local RemoteNames = require(Shared.RemoteNames)
 local Remotes = require(script.Parent.Parent.Net.Remotes)
 local SideAssignment = require(script.Parent.SideAssignment)
 local TeamService = require(script.Parent.Parent.Services.TeamService)
+local Validators = require(script.Parent.Parent.Net.Validators)
 
 local MatchRuntime = {}
 MatchRuntime.__index = MatchRuntime
@@ -55,6 +56,10 @@ local FSM_CONFIG = {
 
 local REWARD_REASONS = { win = "Match win", draw = "Match draw", played = "Match played" }
 
+-- Seconds past the side question's own countdown that a switch is still taken,
+-- for the round trip of the answer.
+local SIDE_CHOICE_GRACE = 2
+
 function MatchRuntime.new(mapId: string)
 	return setmetatable({
 		mapId = mapId,
@@ -62,6 +67,9 @@ function MatchRuntime.new(mapId: string)
 		queued = {} :: { Player }, -- standing on the pad, in arrival order
 		roster = {} :: { [Player]: string }, -- playing right now -> team id
 		kills = {} :: { [Player]: number }, -- kills this match, for BestKillsInMatch
+		-- Until when each player may still change sides (os.clock()). Set on
+		-- placement, cleared by the one switch a player is allowed.
+		sideDeadline = {} :: { [Player]: number },
 		pending = {} :: { { [string]: any } }, -- events raised while one is dispatching
 		dispatching = false,
 		idle = IdleTracker.new({
@@ -226,13 +234,25 @@ end
 ]]
 function MatchRuntime:_place(player: Player, teamId: string)
 	player:SetAttribute("InMatch", self.mapId)
+	-- This match's kills, for the scoreboard. SessionKills counts the whole
+	-- visit, so a player 20 kills into their evening topped every board they
+	-- joined, beside a team total that said 0.
+	player:SetAttribute("MatchKills", 0)
 	TeamService.assignToTeam(player, teamId)
 	AnalyticsService.matchStarted(player, self.mapId)
 	-- Where they stood before this match says nothing about whether they are
 	-- playing it, and the idle clock starts now rather than at some earlier
 	-- sighting.
 	IdleTracker.reset(self.idle, player, workspace:GetServerTimeNow())
-	task.spawn(PlayerService.spawnInMatch, player, self.mapId, teamId)
+	-- A little over the question's own countdown, for the round trip.
+	self.sideDeadline[player] = os.clock() + Constants.SIDE_CHOICE_SECONDS + SIDE_CHOICE_GRACE
+	task.spawn(function()
+		PlayerService.spawnInMatch(player, self.mapId, teamId)
+		-- The side question is on screen now and the player cannot shoot
+		-- through it; the ordinary three seconds would leave them a target
+		-- for the other seven. Their first shot ends this, as on any spawn.
+		PlayerService.extendSpawnProtection(player, Constants.SIDE_CHOICE_SECONDS)
+	end)
 end
 
 --[[
@@ -259,6 +279,27 @@ end
 
 function MatchRuntime:switchSide(player: Player, teamId: string): (boolean, string)
 	local from = self.roster[player]
+	if not from or not self:isInProgress() then
+		return false, SideAssignment.NOT_PLAYING
+	end
+
+	--[[
+		WHEN, before WHO. A switch respawns the player at full health in their
+		new spawn room, and nothing used to limit when it could be asked for:
+		a client could call it mid-fight to escape any losing duel, every
+		couple of seconds, or in the last second of a match to be paid as the
+		winning side. It is the answer to the question asked on entry, so it
+		is accepted only while that question is open, only from a player who
+		is alive and not waiting on a respawn, and only once.
+	]]
+	local deadline = self.sideDeadline[player]
+	if not deadline or os.clock() > deadline then
+		return false, SideAssignment.TOO_LATE
+	end
+	if not Validators.isAlive(player) or PlayerService.isRespawning(player) then
+		return false, SideAssignment.NOT_ALIVE
+	end
+
 	local counts = SideAssignment.countTeams(self.roster, Constants.TEAM_IDS)
 
 	local allowed, reason = SideAssignment.evaluate(counts, from, teamId, Constants.TEAM_IDS)
@@ -267,6 +308,7 @@ function MatchRuntime:switchSide(player: Player, teamId: string): (boolean, stri
 	end
 
 	self.roster[player] = teamId
+	self.sideDeadline[player] = nil
 	TeamService.assignToTeam(player, teamId)
 
 	-- Respawned rather than teleported: they are standing in what is now the
@@ -288,6 +330,7 @@ function MatchRuntime:_startMatch()
 	table.clear(self.queued)
 	table.clear(self.roster)
 	table.clear(self.kills)
+	table.clear(self.sideDeadline)
 
 	for player, teamId in TeamService.balanceAssign(entrants) do
 		self.roster[player] = teamId
@@ -330,8 +373,13 @@ function MatchRuntime:_endMatch(effect: { [string]: any })
 				else REWARD_REASONS.played
 
 			DataService.recordMatchResult(player, won, self.kills[player] or 0)
+			-- Keyed by the UserId as a STRING. A table keyed by large numbers is
+			-- not an array, and a RemoteEvent does not carry it as one: the
+			-- numeric keys do not arrive as numbers, so the client's lookup by
+			-- player.UserId found nothing and every player, paid or not, read
+			-- "Монет не начислено" under the result.
 			if DataService.addCoins(player, amount, reason) then
-				rewards[player.UserId] = amount
+				rewards[tostring(player.UserId)] = amount
 			end
 
 			-- The only place a match reports. Where players stop appearing in
@@ -360,6 +408,7 @@ function MatchRuntime:_returnToHub()
 
 	table.clear(self.roster)
 	table.clear(self.kills)
+	table.clear(self.sideDeadline)
 
 	for _, player in leaving do
 		if isPresent(player) then
@@ -442,13 +491,14 @@ function MatchRuntime:_joinMidMatch(candidates: { Player })
 			joined = true
 
 			self:_place(player, teamId)
-			Remotes.fireClient(
-				RemoteNames.MatchStateChanged,
-				player,
-				self.mapId,
-				MatchStateMachine.States.InProgress,
-				{ timeLeft = math.max(math.floor(self.state.timeLeft + 0.5), 0), scores = self:getScores() }
-			)
+			Remotes.fireClient(RemoteNames.MatchStateChanged, player, self.mapId, MatchStateMachine.States.InProgress, {
+				timeLeft = math.max(math.floor(self.state.timeLeft + 0.5), 0),
+				scores = self:getScores(),
+				-- The phase broadcast everyone else got carried the kill
+				-- target; without it here a late joiner's HUD never showed
+				-- "ДО N УБИЙСТВ" for the rest of the match.
+				scoreLimit = self.state.scoreLimit,
+			})
 		end
 	end
 
@@ -480,6 +530,7 @@ function MatchRuntime:registerKill(victim: Player, killer: Player?, _weaponId: s
 		local killerTeam = self.roster[killer] or TeamService.getTeamId(killer)
 		if killerTeam and killerTeam ~= victimTeam then
 			self.kills[killer] = (self.kills[killer] or 0) + 1
+			killer:SetAttribute("MatchKills", self.kills[killer])
 			-- Counted, not sent: analytics is rate-limited and this fires
 			-- hundreds of times an hour. It is reported once at match end.
 			AnalyticsService.killScored(killer)
@@ -566,6 +617,7 @@ end
 function MatchRuntime:_removeIdle(player: Player)
 	self.roster[player] = nil
 	self.kills[player] = nil
+	self.sideDeadline[player] = nil
 	IdleTracker.forget(self.idle, player)
 
 	if isPresent(player) then
@@ -597,6 +649,7 @@ function MatchRuntime:onPlayerRemoving(player: Player)
 	if self.roster[player] then
 		self.roster[player] = nil
 		self.kills[player] = nil
+		self.sideDeadline[player] = nil
 		self:_syncRoster()
 	end
 end

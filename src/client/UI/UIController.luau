@@ -47,6 +47,10 @@ local playerGui: Instance? = nil
 UIController.scale = 1
 UIController.MenuVisibilityChanged = Signal.new()
 UIController.ScaleChanged = Signal.new()
+-- Every viewport resize or rotation, whether or not it moved the scale. Things
+-- sized off the viewport itself (the touch cluster) need this rather than
+-- ScaleChanged, which is silent whenever the scale happens not to move.
+UIController.ViewportChanged = Signal.new()
 
 --------------------------------------------------------------------------------
 -- ScreenGui registry
@@ -72,8 +76,13 @@ end
 --[[
 	Creates (once) and returns the ScreenGui for a screen.
 	`displayOrder` should come from Constants.DISPLAY_ORDER.
+
+	`options.unscaled` leaves the screen out of the small-screen UIScale. Only
+	for a screen that already sizes itself from the viewport — the touch
+	cluster measures everything in fractions of the viewport height, so scaling
+	it again would shrink the fire button twice on exactly the device it is for.
 ]]
-function UIController.getScreenGui(name: string, displayOrder: number?): ScreenGui?
+function UIController.getScreenGui(name: string, displayOrder: number?, options: { unscaled: boolean? }?): ScreenGui?
 	local existing = screens[name]
 	if existing and existing.Parent then
 		return existing
@@ -94,10 +103,12 @@ function UIController.getScreenGui(name: string, displayOrder: number?): ScreenG
 	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	screenGui.Parent = parent
 
-	local uiScale = Instance.new("UIScale")
-	uiScale.Scale = UIController.scale
-	uiScale.Parent = screenGui
-	table.insert(scales, uiScale)
+	if not (options and options.unscaled) then
+		local uiScale = Instance.new("UIScale")
+		uiScale.Scale = UIController.scale
+		uiScale.Parent = screenGui
+		table.insert(scales, uiScale)
+	end
 
 	screens[name] = screenGui
 	return screenGui
@@ -111,17 +122,38 @@ end
 -- Responsive scale
 --------------------------------------------------------------------------------
 
-local function computeScale(): number
-	local camera = workspace.CurrentCamera
-	if not camera then
+--[[
+	1 on a monitor or a tablet, shrinking on a phone.
+
+	Height leads: a phone on its side reports about 640x294, so a width test
+	alone (what this used to be) passes it as a desktop and draws every panel
+	at monitor size on a screen a third as tall. Width still takes part so a
+	narrow window does not keep panels wider than itself.
+
+	Rounded to hundredths so a viewport that jitters by a pixel while the
+	on-screen keyboard or the Roblox menu animates does not rescale every
+	screen on every frame of it.
+]]
+function UIController.computeScale(viewport: Vector2?): number
+	local size = viewport
+	if not size then
+		local camera = workspace.CurrentCamera
+		if not camera then
+			return 1
+		end
+		size = camera.ViewportSize
+	end
+	if size.X <= 0 or size.Y <= 0 then
 		return 1
 	end
 
-	local width = camera.ViewportSize.X
-	if width > 0 and width < Constants.SMALL_SCREEN_WIDTH then
-		return Constants.SMALL_SCREEN_UI_SCALE
-	end
-	return 1
+	local fit = math.min(size.Y / Constants.UI_REFERENCE_HEIGHT, size.X / Constants.UI_REFERENCE_WIDTH)
+	local clamped = math.clamp(fit, Constants.UI_MIN_SCALE, 1)
+	return math.floor(clamped * 100 + 0.5) / 100
+end
+
+local function computeScale(): number
+	return UIController.computeScale()
 end
 
 local function applyScale()
@@ -153,7 +185,10 @@ local function watchViewport()
 		return
 	end
 
-	viewportTrove:Connect(camera:GetPropertyChangedSignal("ViewportSize"), applyScale)
+	viewportTrove:Connect(camera:GetPropertyChangedSignal("ViewportSize"), function()
+		applyScale()
+		UIController.ViewportChanged:Fire(camera.ViewportSize)
+	end)
 	applyScale()
 end
 

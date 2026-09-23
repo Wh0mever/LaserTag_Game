@@ -56,6 +56,11 @@ function Env.calls(): { [string]: number }
 	return recorded
 end
 
+-- Fire RunService.Heartbeat once, the way one frame of a running game would.
+function Env.stepHeartbeat(dt: number?)
+	Env.service("RunService").Heartbeat:Fire(dt or 1 / 60)
+end
+
 -- Virtual seconds spent inside task.wait since `from` (default: the start).
 function Env.elapsed(from: number?): number
 	return Env.virtualTime - (from or 0)
@@ -620,7 +625,9 @@ local function buildServices()
 
 	services.RunService = {
 		Name = "RunService",
-		Heartbeat = signal(),
+		-- Live, but nothing fires it on its own: a scenario steps it with
+		-- Env.stepHeartbeat, so per-frame logic runs only when a check asks.
+		Heartbeat = liveSignal(),
 		Stepped = signal(),
 		RenderStepped = signal(),
 		IsServer = function()
@@ -1165,6 +1172,20 @@ function Env.requireHandle(target: any): any
 end
 
 --[[
+	Stand `value` in for the module at `modulePath` for everything loaded after
+	this. For driving one module whose neighbours reach DataStores, characters
+	or the network: the match runtime is worth running for real, the services
+	it calls are not what is under test.
+]]
+function Env.provide(modulePath: string, value: any)
+	local handle = Env.handleFor(REPO_ROOT .. "/" .. modulePath)
+	if not handle then
+		error(`[harness] no module at {modulePath}`)
+	end
+	moduleResults[handle.__file] = value
+end
+
+--[[
 	Load a module by repository path, e.g. "src/server/World/MapBuilder".
 ]]
 function Env.load(modulePath: string): any
@@ -1227,6 +1248,13 @@ function Env.enableClientRuntime()
 		roblox.implementMethod("Workspace", "GetServerTimeNow", function()
 			return os.clock()
 		end)
+		-- Playback exists only in a running game. Recorded rather than silent,
+		-- so a check can still ask whether a sound was played.
+		for _, method in { "Play", "Stop", "Pause", "Resume" } do
+			roblox.implementMethod("Sound", method, function()
+				record(`Sound:{method}`)
+			end)
+		end
 	end
 
 	-- The server creates ReplicatedStorage.Remotes at boot, so on a real client

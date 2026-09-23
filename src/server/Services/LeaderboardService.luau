@@ -263,7 +263,7 @@ local function render(gui: SurfaceGui, entries)
 	end
 
 	if shown == 0 then
-		fillRow(parent, 1, "", "No scores yet", "", DIM_TEXT_COLOR)
+		fillRow(parent, 1, "", "Пока нет результатов", "", DIM_TEXT_COLOR)
 	end
 
 	for rank = math.max(shown, 1) + 1, DISPLAY_ROWS do

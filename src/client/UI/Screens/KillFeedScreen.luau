@@ -31,6 +31,13 @@ KillFeedScreen.Priority = 21
 -- More than this on screen and the oldest entries are unreadable anyway; the
 -- feed drops the oldest rather than growing down over the score chips.
 local MAX_VISIBLE = 5
+-- A phone shows fewer: five rows on a 294-tall screen reach the crosshair and
+-- slide under the switch and view buttons on the right.
+local MAX_VISIBLE_TOUCH = 3
+-- The widest a name may draw before it is cut with "…". Roblox display names
+-- run to 20 characters, and a row of two of them was wider than the whole
+-- right half of a phone screen.
+local NAME_MAX_WIDTH = 120
 local ROW_HEIGHT = 26
 local ROW_SPACING = 4
 local FADE_SECONDS = 0.5
@@ -45,6 +52,10 @@ local active: { any } = {}
 --------------------------------------------------------------------------------
 -- Rows
 --------------------------------------------------------------------------------
+
+local function maxVisible(): number
+	return if ClientState.isTouch then MAX_VISIBLE_TOUCH else MAX_VISIBLE
+end
 
 local function buildRow()
 	local root = Instance.new("Frame")
@@ -66,23 +77,28 @@ local function buildRow()
 	layout.Padding = UDim.new(0, 6)
 	layout.Parent = root
 
-	local function part(name: string, order: number, font: Enum.Font): TextLabel
+	local function part(name: string, order: number, font: Enum.Font, capped: boolean?): TextLabel
 		local label = UITheme.label("", UITheme.TextSizes.Small, UITheme.Colors.Text, font)
 		label.Name = name
 		label.LayoutOrder = order
 		label.AutomaticSize = Enum.AutomaticSize.X
 		label.Size = UDim2.new(0, 0, 1, 0)
-		label.TextTruncate = Enum.TextTruncate.None
+		label.TextTruncate = if capped then Enum.TextTruncate.AtEnd else Enum.TextTruncate.None
+		if capped then
+			local cap = Instance.new("UISizeConstraint")
+			cap.MaxSize = Vector2.new(NAME_MAX_WIDTH, math.huge)
+			cap.Parent = label
+		end
 		label.Parent = root
 		return label
 	end
 
 	local row = {
 		instance = root,
-		killer = part("Killer", 1, UITheme.Fonts.Bold),
+		killer = part("Killer", 1, UITheme.Fonts.Bold, true),
 		arrow = part("Arrow", 2, UITheme.Fonts.Body),
 		headshot = part("Headshot", 3, UITheme.Fonts.Bold),
-		victim = part("Victim", 4, UITheme.Fonts.Bold),
+		victim = part("Victim", 4, UITheme.Fonts.Bold, true),
 		expiresAt = 0,
 	}
 
@@ -129,7 +145,7 @@ local function push(entry)
 	end
 
 	-- Oldest first in `active`, so trimming from the front drops the stalest row.
-	while #active >= MAX_VISIBLE do
+	while #active >= maxVisible() do
 		release(1)
 	end
 
@@ -188,7 +204,7 @@ function KillFeedScreen.init()
 	holder.Name = "Feed"
 	holder.AnchorPoint = Vector2.new(1, 0)
 	holder.Position = UDim2.new(1, -18, 0, 18)
-	holder.Size = UDim2.new(0.32, 0, 0, MAX_VISIBLE * (ROW_HEIGHT + ROW_SPACING))
+	holder.Size = UDim2.new(0.32, 0, 0, maxVisible() * (ROW_HEIGHT + ROW_SPACING))
 	holder.BackgroundTransparency = 1
 	holder.Parent = gui
 	container = trove:Add(holder)

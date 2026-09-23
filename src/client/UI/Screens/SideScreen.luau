@@ -43,6 +43,7 @@ local ClientState = require(script.Parent.Parent.Parent.ClientState)
 local Constants = require(Shared.Constants)
 local Panel = require(script.Parent.Parent.Components.Panel)
 local RemoteNames = require(Shared.RemoteNames)
+local TextUtil = require(Shared.Util.TextUtil)
 local Trove = require(Shared.Util.Trove)
 local UIController = require(script.Parent.Parent.UIController)
 local UITheme = require(script.Parent.Parent.UITheme)
@@ -59,12 +60,19 @@ local REASONS = {
 	alreadyThere = "Ты уже в этой команде.",
 	notPlaying = "Сейчас ты не в матче.",
 	unknownTeam = "Такой команды нет.",
+	tooLate = "Сторону выбирают только в начале матча.",
+	notAlive = "Дождись возрождения.",
 }
 
--- How long the question waits before answering itself with "stay". Long enough
--- to read two team names and a number, short enough that nobody stands in a
--- match they cannot see because a menu is over it.
-local AUTO_CLOSE_SECONDS = 10
+-- After a refusal the side buttons rest this long. A child who is told "no"
+-- taps again, fast; every tap is a request, and a burst of them trips the
+-- remote's rate limit, which is the road to being kicked for pressing a button.
+local REFUSAL_REST_SECONDS = 1.5
+
+-- How long the question waits before answering itself with "stay". Shared with
+-- the server, which accepts a switch for this long and protects the player for
+-- this long while the question covers their controls.
+local AUTO_CLOSE_SECONDS = Constants.SIDE_CHOICE_SECONDS
 
 -- Bands inside the panel content, bottom-up. Named because the sides row is
 -- sized by subtracting them, so a taller button would otherwise silently start
@@ -99,7 +107,7 @@ local generation = 0
 ]]
 local function labelFor(teamId: string): string
 	local team = Constants.TEAMS[teamId]
-	local name = string.upper(team and team.name or teamId)
+	local name = TextUtil.upper(team and team.name or teamId)
 	local size = counts[teamId]
 	local label = if size then `{name}  {size}` else name
 	if ClientState.getTeamId() == teamId then
@@ -227,6 +235,12 @@ local function choose(teamId: string)
 	end
 
 	setStatus(REASONS[result.reason] or "Пока нельзя.", UITheme.Colors.Negative)
+	setBusy(true)
+	task.delay(REFUSAL_REST_SECONDS, function()
+		if not answered then
+			setBusy(false)
+		end
+	end)
 	-- A refusal is the case where the countdown matters most, so it is the case
 	-- where the way out has to be named out loud rather than left to a small ✕.
 	if stayButton then
@@ -417,6 +431,15 @@ function SideScreen.init()
 		Without the reset a player would be asked once per session rather than
 		once per match, which is the same as not being asked.
 	]]
+	-- Dying ends the question. The server refuses a switch from a dead player
+	-- (it would respawn them twice), so a panel left open over the death
+	-- screen could only ever answer "no".
+	trove:Add(ClientState.Died:Connect(function()
+		if panel and panel:isOpen() then
+			stay()
+		end
+	end))
+
 	trove:Add(ClientState.AttributeChanged:Connect(function(name: string)
 		if name ~= "InMatch" then
 			return

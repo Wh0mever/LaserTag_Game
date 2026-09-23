@@ -255,6 +255,24 @@ function PlayerService.clearSpawnProtection(player: Player)
 	end
 end
 
+--[[
+	Protect a freshly placed player for `seconds` rather than the usual spawn
+	window, never shortening protection they already have. Firing still ends it
+	(clearSpawnProtection), so this cannot be ridden into a fight.
+]]
+function PlayerService.extendSpawnProtection(player: Player, seconds: number)
+	local current = player:GetAttribute("SpawnProtectedUntil")
+	local wanted = workspace:GetServerTimeNow() + seconds
+	if type(current) ~= "number" or current < wanted then
+		player:SetAttribute("SpawnProtectedUntil", wanted)
+	end
+end
+
+-- True between a death and the respawn it scheduled.
+function PlayerService.isRespawning(player: Player): boolean
+	return respawning[player] == true
+end
+
 local function configureCharacter(player: Player, character: Model, teamId: string)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
@@ -384,6 +402,14 @@ function PlayerService.scheduleRespawn(player: Player, mapId: string, teamId: st
 				and player:GetAttribute("InMatch") == mapId
 
 			if stillPlaying then
+				-- The side on record NOW, not the one captured at death: the
+				-- team can change in between, and respawning on the old one put
+				-- the character on one side while the match scored it for the
+				-- other.
+				local current = player:GetAttribute("TeamId")
+				if current == "A" or current == "B" then
+					teamId = current
+				end
 				PlayerService.spawnInMatch(player, mapId, teamId)
 			elseif not player.Character then
 				-- The match ended mid-respawn. Whoever returned the roster to the

@@ -242,7 +242,9 @@ local function build()
 		return
 	end
 
-	local gui = UIController.getScreenGui("TouchControls", Constants.DISPLAY_ORDER.TouchControls)
+	-- Unscaled: the cluster is already measured in fractions of the viewport
+	-- height, and the phone UIScale would shrink it a second time.
+	local gui = UIController.getScreenGui("TouchControls", Constants.DISPLAY_ORDER.TouchControls, { unscaled = true })
 	if not gui then
 		return
 	end
@@ -405,9 +407,10 @@ function MobileControlsController.init()
 
 	trove:Add(UIController.MenuVisibilityChanged:Connect(refresh))
 
-	-- A rotation or a resize reaches the UI as a scale change; the cluster is
-	-- sized off the viewport, so it has to be re-derived when that moves.
-	trove:Add(UIController.ScaleChanged:Connect(layout))
+	-- The cluster is sized off the viewport, so any rotation or resize has to
+	-- re-derive it — including the ones that leave the UI scale where it was,
+	-- which is why this is not ScaleChanged.
+	trove:Add(UIController.ViewportChanged:Connect(layout))
 
 	-- A respawn does not rebuild the GUI, but it does end the life during which
 	-- the trigger was held.

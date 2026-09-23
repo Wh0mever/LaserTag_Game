@@ -46,6 +46,9 @@ Button.__index = Button
 local DEFAULT_SIZE = UDim2.new(0, 180, 0, 44)
 local HOVER_LIGHTEN = 0.08
 local PRESS_SCALE = 0.95
+-- Right padding a button keeps free for its key-hint badge: the badge's 20 px,
+-- its 6 px inset, and a little air.
+local KEY_HINT_RESERVE = 30
 
 local function lighten(color: Color3, amount: number): Color3
 	return Color3.new(math.min(color.R + amount, 1), math.min(color.G + amount, 1), math.min(color.B + amount, 1))
@@ -113,7 +116,8 @@ function Button.create(props: { [string]: any })
 	content.BackgroundTransparency = 1
 	content.ZIndex = 2
 	content.Parent = root
-	UITheme.padding(12, 0).Parent = content
+	local padding = UITheme.padding(12, 0)
+	padding.Parent = content
 
 	local layout = Instance.new("UIListLayout")
 	layout.FillDirection = Enum.FillDirection.Horizontal
@@ -151,11 +155,16 @@ function Button.create(props: { [string]: any })
 		_baseColor = baseColor,
 		_enabled = true,
 		_keyHint = nil,
+		_padding = padding,
 		_onActivated = props.onActivated,
 	}, Button)
 
 	if props.keyHint then
 		self._keyHint = trove:Add(buildKeyHint(root, props.keyHint))
+		-- The badge sits in the top-right corner over the content, so the label
+		-- centres in what is left of the button instead of under the badge —
+		-- "МАГАЗИН" and "ВИНТОВКА" both had their last letter covered.
+		padding.PaddingRight = UDim.new(0, KEY_HINT_RESERVE)
 	end
 
 	trove:Connect(root.MouseEnter, function()
@@ -169,7 +178,10 @@ function Button.create(props: { [string]: any })
 	end)
 
 	trove:Connect(root.MouseLeave, function()
-		TweenService:Create(root, UITheme.Tween.Fast, { BackgroundColor3 = self._baseColor }):Play()
+		-- The resting colour, not the base colour: a disabled button that lost
+		-- the pointer used to tween back to its enabled colour and stay that
+		-- way, so an unaffordable КУПИТЬ looked pressable and did nothing.
+		TweenService:Create(root, UITheme.Tween.Fast, { BackgroundColor3 = self:_restColor() }):Play()
 		TweenService:Create(stroke, UITheme.Tween.Fast, { Color = UITheme.Colors.Stroke }):Play()
 		TweenService:Create(scale, UITheme.Tween.Fast, { Scale = 1 }):Play()
 	end)
@@ -217,14 +229,22 @@ function Button:setKeyHint(key: string?)
 		self._keyHint:Destroy()
 		self._keyHint = nil
 	end
+	self._padding.PaddingRight = UDim.new(0, if key then KEY_HINT_RESERVE else 12)
 	if key then
 		self._keyHint = self._trove:Add(buildKeyHint(self.instance, key))
 	end
 end
 
+-- What the button shows when nothing is pointing at it.
+function Button:_restColor(): Color3
+	return if self._enabled then self._baseColor else UITheme.Colors.Disabled
+end
+
 function Button:setColor(color: Color3)
 	self._baseColor = color
-	self.instance.BackgroundColor3 = color
+	-- Stored either way; painted only if it is what should be showing, so a
+	-- screen recolouring a disabled button does not re-enable its look.
+	self.instance.BackgroundColor3 = self:_restColor()
 end
 
 function Button:setOnActivated(callback: (() -> ())?)

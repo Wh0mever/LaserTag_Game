@@ -182,9 +182,11 @@ return function(t)
 	local cost = SpinConfig.EXTRA_SPIN_COST
 
 	t.expect(fresh > cost, `a paid spin is worth taking ({fresh} value for {cost})`)
+	-- Once the wheel's skins are owned a paid spin must LOSE coins on average.
+	-- If it breaks even, spinning on a macro out-earns playing without limit.
 	t.expect(
-		owned >= cost,
-		`a paid spin stays worth taking once the wheel's skins are owned ({owned} value for {cost})`
+		owned < cost,
+		`a collector's paid spin loses coins on average, so the wheel cannot print them ({owned} back for {cost})`
 	)
 	-- ...but not so generous that spinning replaces playing, which would make
 	-- the shop decorative.

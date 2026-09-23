@@ -24,6 +24,7 @@ local Constants = require(Shared.Constants)
 local ListRow = require(script.Parent.Parent.Components.ListRow)
 local Panel = require(script.Parent.Parent.Components.Panel)
 local RemoteNames = require(Shared.RemoteNames)
+local TextUtil = require(Shared.Util.TextUtil)
 local Trove = require(Shared.Util.Trove)
 local UIController = require(script.Parent.Parent.UIController)
 local UITheme = require(script.Parent.Parent.UITheme)
@@ -91,7 +92,7 @@ local function fill(section, entries, valueText: string, accent: Color3)
 			value = valueText,
 			valueColor = accent,
 			accentColor = accent,
-			icon = string.upper(string.sub(display, 1, 1)),
+			icon = TextUtil.upper(TextUtil.firstChar(display)),
 			layoutOrder = index,
 		})
 		count += 1
@@ -225,9 +226,11 @@ function FriendsScreen.init()
 			UIController.notifyClosed("Friends")
 		end,
 		title = "ДРУЗЬЯ",
-		subtitle = "Кто сейчас в игре и на этом сервере",
+		subtitle = "Кто в игре и на этом сервере",
 		size = UDim2.fromScale(0.56, 0.68),
 		parent = gui,
+		-- The close button and the ОБНОВИТЬ button beside it.
+		headerInset = 56 + 104 + 8,
 		accentColor = UITheme.Colors.Positive,
 		closeOnOverlay = false,
 	})

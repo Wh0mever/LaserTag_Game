@@ -44,6 +44,21 @@ local DataService = {}
 DataService.Priority = 1
 DataService.ProfileLoadedSignal = Signal.new()
 
+--[[
+	One equipped-skin slot per weapon, derived from WeaponConfig.Order rather
+	than written out. It was written out as Rifle and Pistol, and when the Lance
+	was added nobody added it here: ShopLogic.canEquip treats a missing slot as
+	an unknown weapon, so no skin could ever be put on the Lance. Reconcile
+	backfills the new key into existing profiles on their next load.
+]]
+local function defaultEquippedSkins(): { [string]: string }
+	local slots = {}
+	for _, weaponId in WeaponConfig.Order do
+		slots[weaponId] = SkinCatalog.DEFAULT_SKIN_ID
+	end
+	return slots
+end
+
 -- Bump DataVersion when a field changes meaning rather than when one is added:
 -- Profile:Reconcile() already backfills new keys from this template.
 local PROFILE_TEMPLATE = {
@@ -57,10 +72,7 @@ local PROFILE_TEMPLATE = {
 		BestKillsInMatch = 0,
 	},
 	OwnedSkins = {},
-	EquippedSkins = {
-		Rifle = SkinCatalog.DEFAULT_SKIN_ID,
-		Pistol = SkinCatalog.DEFAULT_SKIN_ID,
-	},
+	EquippedSkins = defaultEquippedSkins(),
 	Spin = {
 		LastFreeSpinAt = 0,
 		Pity = 0,
@@ -72,9 +84,17 @@ local PROFILE_TEMPLATE = {
 	Settings = SettingsConfig.defaults(),
 }
 
+-- A deep copy of what a brand-new profile holds, for checks that a field is
+-- present for everything that needs one (a skin slot for every weapon).
+function DataService.newProfileTemplate()
+	return TableUtil.deepClone(PROFILE_TEMPLATE)
+end
+
 local KEY_PREFIX = "Player_"
-local LOAD_FAILED_MESSAGE = "Could not load your data. Please rejoin."
-local RELEASED_MESSAGE = "Your data was opened on another server. Please rejoin."
+local LOAD_FAILED_MESSAGE =
+	"Не удалось загрузить ваши данные. Зайдите в игру ещё раз."
+local RELEASED_MESSAGE =
+	"Ваши данные открыты на другом сервере. Зайдите в игру ещё раз."
 
 local profileStore = nil
 local profiles: { [Player]: any } = {}

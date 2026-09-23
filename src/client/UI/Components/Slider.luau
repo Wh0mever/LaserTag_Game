@@ -51,6 +51,9 @@ Slider.__index = Slider
 
 local ROW_HEIGHT = 62
 local TRACK_HEIGHT = 6
+-- The part of the row that answers a touch: the knob's height and then some,
+-- which is what a thumb can actually hit.
+local HIT_HEIGHT = 32
 local KNOB_SIZE = 18
 
 --[[
@@ -122,20 +125,37 @@ function Slider.create(props: { [string]: any })
 	hint.ZIndex = 3
 	hint.Parent = root
 
-	-- The track is a button purely so it receives input; it draws as a bar.
+	--[[
+		The track is an invisible button HIT_HEIGHT tall, with the visible bar
+		centred inside it. The bar itself used to be the button, and it is 6 px
+		tall: a thumb had to land on a strip about a millimetre and a half high,
+		and a touch on the knob's upper or lower half, or anywhere else in the
+		row, did nothing. Same width as the bar, so the value under a finger is
+		computed exactly as before.
+	]]
 	local track = Instance.new("TextButton")
 	track.Name = "Track"
 	track.Text = ""
 	track.AutoButtonColor = false
 	track.AnchorPoint = Vector2.new(0, 0.5)
 	track.Position = UDim2.new(0, 0, 0, 48)
-	track.Size = UDim2.new(1, 0, 0, TRACK_HEIGHT)
-	track.BackgroundColor3 = UITheme.Colors.PanelDark
+	track.Size = UDim2.new(1, 0, 0, HIT_HEIGHT)
+	track.BackgroundTransparency = 1
 	track.BorderSizePixel = 0
 	track.ZIndex = 3
 	track.Parent = root
-	UITheme.corner(UITheme.Radius.Pill).Parent = track
 	self._track = track
+
+	local bar = Instance.new("Frame")
+	bar.Name = "Bar"
+	bar.AnchorPoint = Vector2.new(0, 0.5)
+	bar.Position = UDim2.fromScale(0, 0.5)
+	bar.Size = UDim2.new(1, 0, 0, TRACK_HEIGHT)
+	bar.BackgroundColor3 = UITheme.Colors.PanelDark
+	bar.BorderSizePixel = 0
+	bar.ZIndex = 3
+	bar.Parent = track
+	UITheme.corner(UITheme.Radius.Pill).Parent = bar
 
 	local fill = Instance.new("Frame")
 	fill.Name = "Fill"
@@ -143,7 +163,7 @@ function Slider.create(props: { [string]: any })
 	fill.BackgroundColor3 = accent
 	fill.BorderSizePixel = 0
 	fill.ZIndex = 4
-	fill.Parent = track
+	fill.Parent = bar
 	UITheme.corner(UITheme.Radius.Pill).Parent = fill
 	self._fill = fill
 
@@ -155,7 +175,7 @@ function Slider.create(props: { [string]: any })
 	knob.BackgroundColor3 = UITheme.Colors.Text
 	knob.BorderSizePixel = 0
 	knob.ZIndex = 5
-	knob.Parent = track
+	knob.Parent = bar
 	UITheme.corner(UITheme.Radius.Pill).Parent = knob
 	UITheme.stroke(accent, 2).Parent = knob
 	self._knob = knob

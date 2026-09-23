@@ -207,7 +207,7 @@ function SpinLogic.applyResult(data: any, segment: any): (string, number, string
 		local amount = if isFiniteNumber(segment.coins) then math.max(math.floor(segment.coins), 0) else 0
 		data.Coins += amount
 		spin.Pity = pity + 1
-		return Kinds.Coins, amount, segment.label or `{amount} Coins`
+		return Kinds.Coins, amount, segment.label or `{amount} монет`
 	end
 
 	if segment.kind == "skin" then
@@ -229,7 +229,9 @@ function SpinLogic.applyResult(data: any, segment: any): (string, number, string
 		local price = if isFiniteNumber(skin.price) then skin.price else 0
 		local refund = math.max(math.floor(price * spinConfig.DUPLICATE_REFUND_RATIO), 0)
 		data.Coins += refund
-		return Kinds.Duplicate, refund, `{skin.displayName} duplicate — +{refund} Coins`
+		-- Shown to the player verbatim ("ВЫИГРЫШ: …"), so it is Russian like the
+		-- rest of the screen.
+		return Kinds.Duplicate, refund, `«{skin.displayName}» уже есть — +{refund} монет`
 	end
 
 	spin.Pity = pity + 1

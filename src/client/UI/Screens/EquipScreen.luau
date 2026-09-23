@@ -1,8 +1,15 @@
 --!nonstrict
 --[[
 	EquipScreen.luau
-	One column per weapon (Rifle, Pistol), each listing the skins the player
-	actually owns and marking the one currently equipped.
+	A tab per weapon; under the lit tab, the skins the player actually owns for
+	it, with the one currently equipped marked.
+
+	TABS, NOT COLUMNS. This was a column per weapon side by side, which on a
+	monitor cut every skin name to "…" (three columns of a 820 px panel leave a
+	row about 90 px for the name) and on a phone could not work at all: its
+	"stacked" fallback gave each weapon a third of a 290 px panel, room for the
+	header and nothing else, so a phone player could not see a single skin to
+	tap. One weapon at a time gets the whole panel on every screen.
 
 	Every catalog skin gets a row per weapon at build time and unowned rows are
 	hidden rather than destroyed — UIListLayout skips invisible children, so a
@@ -19,6 +26,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
 assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.json")
 
+local Button = require(script.Parent.Parent.Components.Button)
 local ClientState = require(script.Parent.Parent.Parent.ClientState)
 local Constants = require(Shared.Constants)
 local ListRow = require(script.Parent.Parent.Components.ListRow)
@@ -34,17 +42,17 @@ local EquipScreen = {}
 EquipScreen.Priority = 30
 
 local ROW_HEIGHT = 46
+local TAB_HEIGHT = 32
+local TAB_GAP = 8
 local HEADER_HEIGHT = 26
 local PREVIEW_HEIGHT = 16
 local STATUS_HEIGHT = 22
--- Gap between weapon columns, in pixels.
-local COLUMN_GAP = 12
 
 local trove = Trove.new()
 local panel: any = nil
-local columnsHolder: Frame? = nil
-local columnsLayout: UIListLayout? = nil
 local columns: { [string]: any } = {}
+local tabs: { [string]: any } = {}
+local selectedWeapon: string? = nil
 local statusLabel: TextLabel? = nil
 local pending = false
 
@@ -71,6 +79,25 @@ local function setStatus(message: string, isError: boolean)
 	end
 	statusLabel.Text = message
 	statusLabel.TextColor3 = if isError then UITheme.Colors.Negative else UITheme.Colors.Positive
+end
+
+local function refreshTabs()
+	for weaponId, tab in tabs do
+		local active = weaponId == selectedWeapon
+		tab:setColor(if active then UITheme.Colors.Accent else UITheme.Colors.PanelLight)
+		tab.label.TextColor3 = if active then UITheme.Colors.PanelDark else UITheme.Colors.Text
+	end
+	for weaponId, column in columns do
+		column.instance.Visible = weaponId == selectedWeapon
+	end
+end
+
+local function selectWeapon(weaponId: string)
+	if not columns[weaponId] then
+		return
+	end
+	selectedWeapon = weaponId
+	refreshTabs()
 end
 
 local function refresh()
@@ -137,7 +164,9 @@ local function buildColumn(weaponId: string, index: number, parent: Instance)
 	local root = Instance.new("Frame")
 	root.Name = weaponId
 	root.LayoutOrder = index
+	root.Size = UDim2.fromScale(1, 1)
 	root.BackgroundTransparency = 1
+	root.Visible = false
 	root.ZIndex = 3
 	root.Parent = parent
 
@@ -173,10 +202,13 @@ local function buildColumn(weaponId: string, index: number, parent: Instance)
 	scroll.ZIndex = 3
 	scroll.Parent = root
 
-	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Vertical
+	-- Two skins per row. A phone panel is short, and a single column of 46 px
+	-- rows showed one and a half skins before the player had to scroll.
+	local layout = Instance.new("UIGridLayout")
+	layout.CellSize = UDim2.new(0.5, -4, 0, ROW_HEIGHT)
+	layout.CellPadding = UDim2.fromOffset(8, 6)
+	layout.FillDirection = Enum.FillDirection.Horizontal
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, 6)
 	layout.Parent = scroll
 
 	local column = {
@@ -193,7 +225,7 @@ local function buildColumn(weaponId: string, index: number, parent: Instance)
 			name = skinId,
 			parent = scroll,
 			title = skin.displayName,
-			subtitle = skin.rarity,
+			subtitle = SkinCatalog.rarityLabel(skinId),
 			icon = "■",
 			accentColor = UITheme.fromRGB(skin.color),
 			height = ROW_HEIGHT,
@@ -212,24 +244,56 @@ local function buildColumn(weaponId: string, index: number, parent: Instance)
 	columns[weaponId] = column
 end
 
-local function applyStacked(stacked: boolean)
-	if not columnsHolder or not columnsLayout then
-		return
-	end
+--[[
+	One tab per weapon, sharing the width evenly. Short names: three full names
+	side by side do not fit a phone-width panel.
+]]
+local function buildTabs(parent: Instance)
+	local row = Instance.new("Frame")
+	row.Name = "Tabs"
+	row.Size = UDim2.new(1, 0, 0, TAB_HEIGHT)
+	row.BackgroundTransparency = 1
+	row.ZIndex = 3
+	row.Parent = parent
 
-	-- Columns share the panel evenly. The fraction is computed from how many
-	-- weapons there are rather than written down: it was 0.5 from when there
-	-- were two, and adding the third left it running off the right edge with no
-	-- way to reach it. The padding between columns has to come out of their
-	-- width too, or the last one is pushed past the edge by the accumulated gap.
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, TAB_GAP)
+	layout.Parent = row
+
 	local count = math.max(1, #WeaponConfig.Order)
-	local share = 1 / count
-	local gap = COLUMN_GAP * (count - 1) / count
-
-	columnsLayout.FillDirection = if stacked then Enum.FillDirection.Vertical else Enum.FillDirection.Horizontal
-	for _, column in columns do
-		column.instance.Size = if stacked then UDim2.new(1, 0, share, -gap) else UDim2.new(share, -gap, 1, 0)
+	-- The gaps come out of the tabs' width, or the last tab is pushed past the
+	-- edge by the accumulated padding.
+	local gap = TAB_GAP * (count - 1) / count
+	for index, weaponId in WeaponConfig.Order do
+		local weapon = WeaponConfig.get(weaponId)
+		local tab = Button.create({
+			name = weaponId,
+			parent = row,
+			text = weapon and (weapon.shortName or weapon.displayName) or weaponId,
+			size = UDim2.new(1 / count, -gap, 1, 0),
+			layoutOrder = index,
+			onActivated = function()
+				selectWeapon(weaponId)
+			end,
+		})
+		tab.label.TextSize = UITheme.TextSizes.Small
+		trove:Add(function()
+			tab:destroy()
+		end)
+		tabs[weaponId] = tab
 	end
+end
+
+-- The tab buttons, for tests.
+function EquipScreen.tabs(): { [string]: any }
+	return tabs
+end
+
+-- Which weapon's skins are on show, for tests.
+function EquipScreen.selectedWeapon(): string?
+	return selectedWeapon
 end
 
 --------------------------------------------------------------------------------
@@ -260,20 +324,16 @@ function EquipScreen.init()
 		panel:destroy()
 	end)
 
+	buildTabs(panel.content)
+
+	-- Every weapon's list lives here at full size; only the selected one shows.
 	local holder = Instance.new("Frame")
 	holder.Name = "Columns"
-	holder.Size = UDim2.new(1, 0, 1, -STATUS_HEIGHT)
+	holder.Position = UDim2.new(0, 0, 0, TAB_HEIGHT + TAB_GAP)
+	holder.Size = UDim2.new(1, 0, 1, -(TAB_HEIGHT + TAB_GAP + STATUS_HEIGHT))
 	holder.BackgroundTransparency = 1
 	holder.ZIndex = 3
 	holder.Parent = panel.content
-	columnsHolder = holder
-
-	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, COLUMN_GAP)
-	layout.Parent = holder
-	columnsLayout = layout
 
 	for index, weaponId in WeaponConfig.Order do
 		buildColumn(weaponId, index, holder)
@@ -305,20 +365,26 @@ function EquipScreen.init()
 	end)
 
 	trove:Add(ClientState.ProfileChanged:Connect(refresh))
-	trove:Add(UIController.ScaleChanged:Connect(function(scale: number)
-		applyStacked(scale < 1)
+
+	-- Open on the weapon in hand: that is the gun whose look the player just
+	-- noticed and wants to change.
+	trove:Add(UIController.MenuVisibilityChanged:Connect(function(name: string, visible: boolean)
+		if name == "Equip" and visible then
+			local current = ClientState.ammo and ClientState.ammo.weaponId
+			selectWeapon(if columns[current] then current else WeaponConfig.Order[1])
+		end
 	end))
 
-	applyStacked(UIController.scale < 1)
+	selectWeapon(WeaponConfig.Order[1])
 	refresh()
 end
 
 function EquipScreen.stop()
 	trove:Clean()
 	table.clear(columns)
+	table.clear(tabs)
+	selectedWeapon = nil
 	panel = nil
-	columnsHolder = nil
-	columnsLayout = nil
 	statusLabel = nil
 end
 

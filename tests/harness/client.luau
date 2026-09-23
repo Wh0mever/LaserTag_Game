@@ -733,12 +733,15 @@ if menuPanel then
 	end
 end
 
--- The equip panel lays its weapons out side by side, and the width of a column
--- was a constant rather than a fraction of however many weapons exist. Adding
--- the third left it off the right edge of the panel, unreachable, with nothing
--- anywhere failing. Adding a fourth would do it again.
-heading("Equip columns")
+-- The equip panel shows one weapon at a time behind a row of tabs. It used to
+-- be a column per weapon side by side, which cut every skin name to "…" on a
+-- monitor and on a phone left no room for a single skin row — a player could
+-- not equip anything. So the checks are about reaching every weapon's skins,
+-- not about how the panel is divided.
+heading("Equip tabs")
 
+local EquipScreenModule = Env.load("src/client/UI/Screens/EquipScreen")
+local equipTabs = EquipScreenModule.tabs()
 local equipGui = UIControllerModule.getScreen("EquipMenu")
 local columnsHolder = nil
 if equipGui then
@@ -749,44 +752,89 @@ if equipGui then
 		end
 	end
 end
+check(columnsHolder ~= nil, "the equip panel has a holder for the weapons' skin lists")
 
-check(columnsHolder ~= nil, "the equip panel has a column holder")
-if columnsHolder then
-	local widthScale, widthOffset, found = 0, 0, 0
-	for _, weaponId in WeaponConfig.Order do
-		local column = columnsHolder:FindFirstChild(weaponId)
-		check(column ~= nil, `the equip panel has a column for {weaponId}`)
-		if column then
-			found += 1
-			widthScale += column.Size.X.Scale
-			widthOffset += column.Size.X.Offset
+local tabScale = 0
+for _, weaponId in WeaponConfig.Order do
+	local tab = equipTabs[weaponId]
+	check(tab ~= nil, `the equip panel has a tab for {weaponId}`)
+	if not tab then
+		continue
+	end
+	tabScale += tab.instance.Size.X.Scale
+
+	-- Pressing the tab is the only way to that weapon's skins, so it is pressed
+	-- the way a player would and the result is read off the screen.
+	tab.instance.Activated:Fire()
+	check(EquipScreenModule.selectedWeapon() == weaponId, `pressing the {weaponId} tab selects it`)
+	if columnsHolder then
+		for _, other in WeaponConfig.Order do
+			local column = columnsHolder:FindFirstChild(other)
+			check(
+				column ~= nil and column.Visible == (other == weaponId),
+				`with {weaponId} selected, {other}'s skins are {if other == weaponId then "shown" else "hidden"}`
+			)
 		end
 	end
-
-	local layout = columnsHolder:FindFirstChildOfClass("UIListLayout")
-	local padding = if layout then layout.Padding.Offset * (found - 1) else 0
-
-	-- Scale is the part that can silently overflow: the offsets only ever pull
-	-- columns narrower to pay for the padding between them.
-	check(
-		widthScale <= 1.0001,
-		string.format("the columns fit across the panel (%.3f of its width for %d weapons)", widthScale, found)
-	)
-	check(
-		widthOffset + padding >= -1 and widthOffset + padding <= 1,
-		string.format(
-			"the gaps between columns are paid for out of their width (%d px left over)",
-			widthOffset + padding
-		)
-	)
 end
+check(tabScale <= 1.0001, string.format("the tabs fit across the panel (%.3f of its width)", tabScale))
 
 -- The wheel is the one widget whose correctness is geometric: it has to paint
--- each segment across its true share of the circle. Nothing else checks that,
--- and a wheel that draws a 30% prize across 43 degrees looks like a bug in the
--- odds rather than in the drawing.
+-- each segment across its true share of the circle, as a WHEEL.
+--
+-- The previous version of these checks read each bar's Rotation property and
+-- concluded the wheel was right, while in the game it was a small fan in the
+-- top half of the rim. Roblox turns a GuiObject about its CENTRE, never its
+-- AnchorPoint, and the bars were anchored at their bottom edge on the belief
+-- that they would sweep about it. A check that reads the property the code set
+-- agrees with the code. So this one works out where each bar's outer tip
+-- actually lands, applying Roblox's rule up the parent chain, and demands that
+-- every tip sits on the rim at its segment's angle.
 local SpinWheel = Env.load("src/client/UI/Screens/SpinWheel")
 local SpinConfig = Env.load("src/shared/Config/SpinConfig")
+
+-- Where `point` (in `node`'s parent's unrotated space, unit-square units) ends
+-- up in `stop`'s space, rotating about each object's own centre. Every part of
+-- the wheel is sized by Scale alone, so a unit square is the whole world.
+local function box(node, parentW: number, parentH: number)
+	local w = node.Size.X.Scale * parentW
+	local h = node.Size.Y.Scale * parentH
+	local x = node.Position.X.Scale * parentW - node.AnchorPoint.X * w
+	local y = node.Position.Y.Scale * parentH - node.AnchorPoint.Y * h
+	return x, y, w, h
+end
+
+local function throughChain(chain: { any }, px: number, py: number): (number, number)
+	-- chain[1] is the outermost frame (the rotor), chain[#chain] the innermost.
+	-- Boxes are resolved top-down, then the point is carried bottom-up.
+	local boxes = {}
+	local originX, originY, parentW, parentH = 0, 0, 1, 1
+	for index, node in chain do
+		local x, y, w, h = box(node, parentW, parentH)
+		boxes[index] = { x = originX + x, y = originY + y, w = w, h = h, rot = node.Rotation }
+		originX, originY, parentW, parentH = originX + x, originY + y, w, h
+	end
+	for index = #chain, 1, -1 do
+		local b = boxes[index]
+		if b.rot ~= 0 then
+			local cx, cy = b.x + b.w / 2, b.y + b.h / 2
+			local a = math.rad(b.rot)
+			local dx, dy = px - cx, py - cy
+			px, py = cx + dx * math.cos(a) - dy * math.sin(a), cy + dx * math.sin(a) + dy * math.cos(a)
+		end
+	end
+	return px, py
+end
+
+local function chainTo(node, stop)
+	local chain = {}
+	local current = node
+	while current and current ~= stop do
+		table.insert(chain, 1, current)
+		current = current.Parent
+	end
+	return chain
+end
 
 local wheelOk, wheel = pcall(function()
 	return SpinWheel.create(roblox.Instance.new("ScreenGui"))
@@ -801,6 +849,8 @@ if wheelOk then
 
 	local total = SpinConfig.totalWeight()
 	local sweepSum = 0
+	local accumulated = 0
+	local rimRadius = nil
 
 	for _, segment in SpinConfig.Segments do
 		local sweep = total > 0 and segment.weight / total * 360 or 0
@@ -809,53 +859,409 @@ if wheelOk then
 		local wedge = rotor and rotor:FindFirstChild(segment.id)
 		check(wedge ~= nil, `the wheel draws a wedge for {segment.id}`)
 		if not wedge then
+			accumulated += sweep
 			continue
 		end
 
-		check(wedge:FindFirstChild("Divider") ~= nil, `{segment.id} has a boundary line`)
-		check(wedge:FindFirstChild("Tag") ~= nil, `{segment.id} is labelled`)
+		local divider = wedge:FindFirstChild("Divider", true)
+		check(divider ~= nil, `{segment.id} has a boundary line`)
 
-		local lowest, highest = math.huge, -math.huge
-		local barWidth, radius, bars = 0, 0, 0
-		for _, child in wedge:GetChildren() do
-			if child.Name == "Slice" then
-				bars += 1
-				lowest = math.min(lowest, child.Rotation)
-				highest = math.max(highest, child.Rotation)
-				barWidth = child.Size.X.Scale
-				radius = child.Size.Y.Scale
+		-- Every bar's outer tip, where it really lands.
+		local lowest, highest, bars = math.huge, -math.huge, 0
+		local worstRadiusError = 0
+		for _, child in wedge:GetDescendants() do
+			if child.Name ~= "Slice" then
+				continue
 			end
+			bars += 1
+			local chain = chainTo(child, rotor)
+			local b = chain[#chain]
+			-- The tip is the middle of the bar's top edge, in its parent's space.
+			local parentChain = table.clone(chain)
+			table.remove(parentChain)
+			local _, _, pw, ph = 0, 0, 1, 1
+			for _, node in parentChain do
+				local _, _, w, h = box(node, pw, ph)
+				pw, ph = w, h
+			end
+			local bx, by, bw = box(b, pw, ph)
+			local tipX, tipY = throughChain(chain, bx + bw / 2, by)
+
+			local dx, dy = tipX - 0.5, tipY - 0.5
+			local radius = math.sqrt(dx * dx + dy * dy)
+			rimRadius = rimRadius or radius
+			worstRadiusError = math.max(worstRadiusError, math.abs(radius - rimRadius))
+
+			-- Clockwise from the top, as the pointer reads it.
+			local angle = (math.deg(math.atan2(dx, -dy)) + 360) % 360
+			-- Unwrap across 0 so a segment that starts at the top stays contiguous.
+			if angle < accumulated - 180 then
+				angle += 360
+			end
+			lowest = math.min(lowest, angle)
+			highest = math.max(highest, angle)
 		end
 
 		check(bars > 0, `{segment.id} is drawn with at least one bar`)
 		if bars == 0 then
+			accumulated += sweep
 			continue
 		end
 
-		-- A bar is a rectangle: at the rim it spans a chord, and the angle that
-		-- chord subtends is how much of the circle the bar actually covers.
-		local subtended = 2 * math.deg(math.asin(math.clamp(barWidth / (2 * radius), -1, 1)))
-		local painted = (highest - lowest) + subtended
-
-		-- Below its own sweep and the wheel lies about the odds in the player's
-		-- favour or against it; far above and it eats the neighbouring prize.
 		check(
-			painted >= sweep - 0.5,
-			`{segment.id} covers its {string.format("%.1f", sweep)} degrees (painted {string.format("%.1f", painted)})`
+			worstRadiusError < 0.01,
+			`every {segment.id} bar reaches the rim, not a point inside it (worst {string.format(
+				"%.3f",
+				worstRadiusError
+			)} off)`
+		)
+
+		-- The bars' tips must fall inside the segment's own arc, and between
+		-- them reach close to both of its edges.
+		check(
+			lowest >= accumulated - 0.5 and highest <= accumulated + sweep + 0.5,
+			`{segment.id} is drawn inside its own arc {string.format("%.1f-%.1f", accumulated, accumulated + sweep)} `
+				.. `(tips at {string.format("%.1f-%.1f", lowest, highest)})`
 		)
 		check(
-			painted <= sweep + 8,
-			`{segment.id} does not spill into its neighbour (sweep {string.format("%.1f", sweep)}, painted {string.format(
+			(highest - lowest) >= sweep - 2 * 3.5,
+			`{segment.id} spans its {string.format("%.1f", sweep)} degrees (tips span {string.format(
 				"%.1f",
-				painted
+				highest - lowest
 			)})`
 		)
+
+		accumulated += sweep
 	end
 
 	check(math.abs(sweepSum - 360) < 0.001, `the segments account for the whole circle (got {sweepSum})`)
+	check(
+		rimRadius ~= nil and rimRadius > 0.4,
+		`the bars reach out to the rim of the wheel (radius {string.format("%.2f", rimRadius or 0)} of its size)`
+	)
 
 	wheel:destroy()
 end
+
+--------------------------------------------------------------------------------
+-- Recoil comes back down
+--
+-- Roblox's camera module starts every frame from the look direction Camera
+-- .CFrame already has (BaseCamera:GetCameraLookVector), so anything this game
+-- rotates the camera by is carried into the next frame. The recoil offset used
+-- to be applied IN FULL every frame, which added the decaying kick onto itself
+-- over and over: one Lance shot left the view 32 degrees higher for good. The
+-- stand-in below behaves like ClassicCamera with no mouse input — it keeps the
+-- current look direction — and the view has to rise by the kick and return.
+--------------------------------------------------------------------------------
+
+heading("Recoil comes back down")
+
+do
+	local CameraControllerModule = Env.load("src/client/Controllers/CameraController")
+	local RecoilControllerModule = Env.load("src/client/Controllers/RecoilController")
+	local recoilCamera = Env.workspace().CurrentCamera
+	local focus = roblox.Vector3.new(0, 5, 0)
+
+	local function pitchOf(cf): number
+		return math.deg(math.asin(cf.LookVector.Y))
+	end
+
+	-- The ClassicCamera stand-in, at Enum.RenderPriority.Camera like the real one.
+	Env.renderBindings["cameraRenderUpdate"] = {
+		priority = 200,
+		callback = function()
+			local look = recoilCamera.CFrame.LookVector
+			local p = math.asin(look.Y)
+			local y = math.atan2(-look.X, -look.Z)
+			local rot = roblox.CFrame.Angles(0, y, 0) * roblox.CFrame.Angles(p, 0, 0)
+			recoilCamera.CFrame = roblox.CFrame.new(focus - rot.LookVector * 12) * rot
+		end,
+	}
+
+	CameraControllerModule.resetRecoil()
+	Env.stepRender()
+	local before = pitchOf(recoilCamera.CFrame)
+
+	RecoilControllerModule.onShot("Lance", os.clock())
+	local kick = select(1, CameraControllerModule.getRecoilOffset())
+	local peak = -math.huge
+	for _ = 1, 180 do
+		local errors = Env.stepRender()
+		check(#errors == 0, `the render bindings run cleanly{if errors[1] then ": " .. errors[1].err else ""}`)
+		peak = math.max(peak, pitchOf(recoilCamera.CFrame) - before)
+	end
+	local drift = pitchOf(recoilCamera.CFrame) - before
+
+	check(
+		math.abs(peak - kick) < 0.3,
+		`one shot lifts the view by its kick and no more (kick {string.format("%.2f", kick)}, rose {string.format(
+			"%.2f",
+			peak
+		)})`
+	)
+	check(math.abs(drift) < 0.05, `and the view comes back down (left {string.format("%.2f", drift)} degrees off)`)
+
+	-- A full rifle burst, the case players actually meet.
+	CameraControllerModule.resetRecoil()
+	Env.stepRender()
+	before = pitchOf(recoilCamera.CFrame)
+	for shot = 1, 10 do
+		RecoilControllerModule.onShot("Rifle", os.clock() + shot * 0.1)
+		for _ = 1, 6 do
+			Env.stepRender()
+		end
+	end
+	for _ = 1, 240 do
+		Env.stepRender()
+	end
+	drift = pitchOf(recoilCamera.CFrame) - before
+	check(
+		math.abs(drift) < 0.1,
+		`a ten-round rifle burst settles back where it started (left {string.format("%.2f", drift)} degrees off)`
+	)
+
+	Env.renderBindings["cameraRenderUpdate"] = nil
+end
+
+--------------------------------------------------------------------------------
+-- A weapon switch settles on what the server says
+--
+-- The client swaps its gun the moment a key is pressed and tells the server.
+-- The server can drop that request without a word (the player died a moment
+-- earlier, or the rate limit), and the client used to keep its gun anyway: for
+-- the rest of that life every shot named a weapon the server did not think was
+-- in hand, and every one was silently thrown away.
+--------------------------------------------------------------------------------
+
+heading("Weapon switch reconciliation")
+
+do
+	local realTask = require("@lune/task")
+	local WeaponClientModule = Env.load("src/client/Controllers/WeaponClient")
+	local switchPlayer = Env.service("Players").LocalPlayer
+
+	-- A living character in a running match, so the gun may be used at all.
+	local character = roblox.Instance.new("Model")
+	local humanoid = roblox.Instance.new("Humanoid")
+	-- Lune's Humanoid carries no default health; a real one spawns at 100.
+	humanoid.MaxHealth = 100
+	humanoid.Health = 100
+	humanoid.Parent = character
+	switchPlayer.Character = character
+	ClientStateModule.isDead = false
+	switchPlayer:SetAttribute("InMatch", "Dust")
+	ClientStateModule.match.phase = "InProgress"
+	switchPlayer:SetAttribute("CurrentWeapon", "Rifle")
+	for _ = 1, 3 do
+		UIControllerModule.closeAll()
+	end
+	ClientStateModule.SlotChanged:Fire(1, "Rifle")
+	realTask.wait(1.1)
+	Env.stepHeartbeat()
+
+	check(WeaponClientModule.getWeaponId() == "Rifle", "the rifle is in hand to begin with")
+
+	-- 1. A switch the server never answers.
+	WeaponClientModule.equipSlot(2)
+	check(WeaponClientModule.getWeaponId() == "Pistol", "pressing 2 shows the pistol at once")
+	Env.stepHeartbeat()
+	check(WeaponClientModule.getWeaponId() == "Pistol", "and keeps it while the answer is on its way")
+	realTask.wait(1.1)
+	Env.stepHeartbeat()
+	check(
+		WeaponClientModule.getWeaponId() == "Rifle",
+		`an unanswered switch gives way to the server's weapon (holding {WeaponClientModule.getWeaponId()})`
+	)
+
+	-- 2. A late echo of an older switch.
+	WeaponClientModule.equipSlot(2)
+	WeaponClientModule.equipSlot(1)
+	ClientStateModule.SlotChanged:Fire(2, "Pistol")
+	check(
+		WeaponClientModule.getWeaponId() == "Rifle",
+		`the echo of a switch already replaced does not bounce the gun back (holding {WeaponClientModule.getWeaponId()})`
+	)
+	ClientStateModule.SlotChanged:Fire(1, "Rifle")
+
+	-- 3. No shooting at the scoreboard. The switch lockout from above is waited
+	-- out first, and the same moment in a running match is the control: without
+	-- it this check would pass on the lockout alone.
+	realTask.wait(0.4)
+	Env.stepHeartbeat()
+	check(WeaponClientModule.canFire(), "the gun can fire while the match is running")
+	ClientStateModule.match.phase = "Results"
+	check(not WeaponClientModule.canFire(), "and nothing fires during the results")
+	ClientStateModule.match.phase = "InProgress"
+
+	switchPlayer.Character = nil
+end
+
+--------------------------------------------------------------------------------
+-- A disabled button stays looking disabled
+--------------------------------------------------------------------------------
+
+heading("Disabled buttons")
+
+do
+	local UIThemeModule = Env.load("src/client/UI/UITheme")
+	local ButtonModule = Env.load("src/client/UI/Components/Button")
+	local tweens = Env.service("TweenService")
+	local inertCreate = tweens.Create
+	-- Tweens land at once for this check: the bug is where a tween ENDS.
+	tweens.Create = function(_self, instance, _info, goals)
+		return {
+			Play = function()
+				for property, value in goals do
+					(instance :: any)[property] = value
+				end
+			end,
+			Cancel = function() end,
+			Completed = Env.liveSignal(),
+		}
+	end
+
+	local holder = roblox.Instance.new("ScreenGui")
+	local buy = ButtonModule.create({ text = "КУПИТЬ", parent = holder, color = UIThemeModule.Colors.Coin })
+	buy:setEnabled(false)
+	buy.instance.MouseEnter:Fire()
+	buy.instance.MouseLeave:Fire()
+	check(
+		buy.instance.BackgroundColor3 == UIThemeModule.Colors.Disabled,
+		"a disabled button still looks disabled after the pointer passes over it"
+	)
+	buy:setColor(UIThemeModule.Colors.Accent)
+	check(
+		buy.instance.BackgroundColor3 == UIThemeModule.Colors.Disabled,
+		"and recolouring it does not paint it enabled"
+	)
+	buy:setEnabled(true)
+	check(buy.instance.BackgroundColor3 == UIThemeModule.Colors.Accent, "enabling it shows the colour it was given")
+	buy:destroy()
+
+	tweens.Create = inertCreate
+end
+
+--------------------------------------------------------------------------------
+-- A slider can be grabbed with a thumb
+--------------------------------------------------------------------------------
+
+heading("Slider touch targets")
+
+do
+	local settingsGui = UIControllerModule.getScreen("SettingsMenu")
+	local tracks = 0
+	if settingsGui then
+		for _, descendant in settingsGui:GetDescendants() do
+			if descendant.Name == "Track" and descendant:IsA("GuiButton") then
+				tracks += 1
+				check(
+					descendant.Size.Y.Offset >= 28,
+					`a slider answers a touch across {descendant.Size.Y.Offset} px of height, at least 28`
+				)
+			end
+		end
+	end
+	check(tracks > 0, "the settings panel has sliders to check")
+end
+
+--------------------------------------------------------------------------------
+-- The spin button says what a spin costs
+--
+-- It read КРУТИТЬ in every state, so once the free spin was used the same tap
+-- quietly took 600 coins, and with too few coins it stayed lit and failed.
+--------------------------------------------------------------------------------
+
+heading("Spin button")
+
+do
+	local SpinScreenModule = Env.load("src/client/UI/Screens/SpinScreen")
+	local SpinConfigModule = Env.load("src/shared/Config/SpinConfig")
+	local cost = SpinConfigModule.EXTRA_SPIN_COST
+	UIControllerModule.openMenu("Spin")
+
+	local function show(nextFreeAt: number, coinBalance: number): string?
+		ClientStateModule.spin.nextFreeAt = nextFreeAt
+		ClientStateModule.coins = coinBalance
+		ClientStateModule.CoinsChanged:Fire(coinBalance, 0, "test")
+		return SpinScreenModule.buttonText()
+	end
+
+	check(show(0, 0) == "КРУТИТЬ БЕСПЛАТНО", `a free spin says it is free (got {tostring(show(0, 0))})`)
+	local later = os.clock() + 3600
+	check(show(later, cost + 50) == `КРУТИТЬ ЗА {cost}`, "a paid spin names its price on the button")
+	check(show(later, cost - 1) == `НУЖНО {cost} МОНЕТ`, "a spin the player cannot afford says so")
+
+	-- The panel refreshes its clock and button every frame while open; a frame
+	-- has to run cleanly, which is how a call to a function defined further
+	-- down the file shows itself.
+	local frameOk, frameErr = pcall(Env.stepHeartbeat)
+	check(frameOk, `a frame with the wheel open runs cleanly{if frameOk then "" else ": " .. tostring(frameErr)}`)
+
+	UIControllerModule.closeMenu("Spin")
+end
+
+--------------------------------------------------------------------------------
+-- A player on a pad can see they are queued
+--
+-- The server sent the queue size and the countdown every second and nothing
+-- drew it; the only feedback was a sign behind the player.
+--------------------------------------------------------------------------------
+
+heading("Queue chip")
+
+local QueueScreenModule = Env.load("src/client/UI/Screens/QueueScreen")
+check(QueueScreenModule.textFor("Dust", 1, 2, nil) == "DUST  ·  В ОЧЕРЕДИ 1/2", "one of two reads as a queue")
+check(QueueScreenModule.textFor("Dust", 2, 2, 7) == "DUST  ·  СТАРТ ЧЕРЕЗ 7", "a countdown reads as a start")
+check(QueueScreenModule.textFor("", 0, 2, nil) == nil, "no queue shows nothing")
+
+local queueChip = QueueScreenModule.chip()
+check(queueChip ~= nil, "the queue chip is built")
+if queueChip then
+	local queuePlayer = Env.service("Players").LocalPlayer
+	queuePlayer:SetAttribute("InMatch", "")
+	ClientStateModule.queue = { mapId = "Dust", count = 1, needed = 2 }
+	ClientStateModule.QueueChanged:Fire("Dust", 1, 2, nil)
+	check(queueChip.Visible, "stepping on a pad shows the chip")
+
+	-- What QueueService now sends the player who steps off.
+	ClientStateModule.queue = { mapId = "", count = 0, needed = 2 }
+	ClientStateModule.QueueChanged:Fire("", 0, 2, nil)
+	check(not queueChip.Visible, "stepping off hides it again")
+end
+
+--------------------------------------------------------------------------------
+-- The match result says what the player earned
+--
+-- The server paid every player and the card said "Монет не начислено" to all
+-- of them. The rewards table was keyed by numeric UserId, which a RemoteEvent
+-- does not deliver as numbers, so the client's lookup found nothing. The
+-- payload here is shaped the way it actually arrives: string keys.
+--------------------------------------------------------------------------------
+
+heading("Match result")
+
+local ResultsScreenModule = Env.load("src/client/UI/Screens/ResultsScreen")
+local resultsPlayer = Env.service("Players").LocalPlayer
+local resultsGui = UIControllerModule.getScreen("Results")
+check(resultsGui ~= nil, "the results screen exists")
+
+ClientStateModule.match.mapId = "Dust"
+ClientStateModule.match.phase = "Results"
+ClientStateModule.match.data = {
+	scores = { A = 12, B = 9 },
+	winnerTeam = "A",
+	rewards = { [tostring(resultsPlayer.UserId)] = 400 },
+}
+ClientStateModule.MatchChanged:Fire(ClientStateModule.match)
+
+local rewardText = nil
+if resultsGui then
+	local label = resultsGui:FindFirstChild("Reward", true)
+	rewardText = label and label.Text
+end
+check(rewardText == "+400 монет", `a paid player is told what they earned (card says "{tostring(rewardText)}")`)
+local _ = ResultsScreenModule
 
 --------------------------------------------------------------------------------
 -- What the run left behind

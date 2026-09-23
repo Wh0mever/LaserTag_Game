@@ -32,6 +32,7 @@ local Panel = require(script.Parent.Parent.Components.Panel)
 local RemoteNames = require(Shared.RemoteNames)
 local SpinConfig = require(Shared.Config.SpinConfig)
 local SpinWheel = require(script.Parent.SpinWheel)
+local TextUtil = require(Shared.Util.TextUtil)
 local Trove = require(Shared.Util.Trove)
 local UIController = require(script.Parent.Parent.UIController)
 local UITheme = require(script.Parent.Parent.UITheme)
@@ -52,6 +53,15 @@ local pityFill: Frame? = nil
 local pityLabel: TextLabel? = nil
 local spinning = false
 local lastClockText = ""
+local lastButtonState = ""
+-- When each of the last accepted spins went out, so the button can wait out
+-- the server's rate window instead of sending a request it will refuse.
+local recentSpins: { number } = {}
+-- Must match SpinService's SPIN_RATE / SPIN_WINDOW.
+local SPIN_RATE, SPIN_WINDOW = 5, 10
+-- If the wheel never reports landing (torn down mid-spin), the coin counter is
+-- released after this long anyway.
+local REVEAL_TIMEOUT = 6
 
 --------------------------------------------------------------------------------
 -- Status lines
@@ -70,11 +80,65 @@ local function formatWait(seconds: number): string
 	local minutes = math.floor(whole % SECONDS_PER_HOUR / 60)
 
 	if hours > 0 then
-		return `{hours}h {minutes}m`
+		return `{hours} ч {minutes} мин`
 	elseif minutes > 0 then
-		return `{minutes}m {whole % 60}s`
+		return `{minutes} мин {whole % 60} с`
 	end
-	return `{whole}s`
+	return `{whole} с`
+end
+
+--[[
+	The button says what pressing it will do, and cannot be pressed when that is
+	nothing. It used to read КРУТИТЬ in every state: once the day's free spin
+	was used, the same tap quietly took 600 coins, and with fewer than 600 it
+	stayed lit and answered with an error.
+]]
+local function refreshSpinButton()
+	if not spinButton then
+		return
+	end
+
+	local now = os.clock()
+	while recentSpins[1] and now - recentSpins[1] > SPIN_WINDOW do
+		table.remove(recentSpins, 1)
+	end
+
+	local free = (ClientState.spin.nextFreeAt or 0) - workspace:GetServerTimeNow() <= 0
+	local cost = SpinConfig.EXTRA_SPIN_COST
+	local state, text, color, enabled
+	if spinning then
+		state, text, color, enabled = "spinning", "КРУТИМ…", UITheme.Colors.Accent, false
+	elseif #recentSpins >= SPIN_RATE then
+		state, text, color, enabled = "wait", "ПОДОЖДИ…", UITheme.Colors.Accent, false
+	elseif free then
+		state, text, color, enabled = "free", "КРУТИТЬ БЕСПЛАТНО", UITheme.Colors.Accent, true
+	elseif (ClientState.coins or 0) >= cost then
+		state, text, color, enabled = "paid", `КРУТИТЬ ЗА {cost}`, UITheme.Colors.Coin, true
+	else
+		state, text, color, enabled = "broke", `НУЖНО {cost} МОНЕТ`, UITheme.Colors.Coin, false
+	end
+
+	if state == lastButtonState then
+		return
+	end
+	lastButtonState = state
+	spinButton:setText(text)
+	spinButton:setColor(color)
+	spinButton:setEnabled(enabled)
+end
+
+-- The button's current wording, for tests.
+function SpinScreen.buttonText(): string?
+	return spinButton and spinButton.label.Text
+end
+
+local function releaseCoinDisplay()
+	if ClientState.holdCoinDisplay then
+		ClientState.holdCoinDisplay = false
+		-- Replayed now that the wheel has landed, so the counter counts up to
+		-- the prize at the moment it is revealed.
+		ClientState.CoinsChanged:Fire(ClientState.coins, 0, "Spin")
+	end
 end
 
 --[[
@@ -92,7 +156,9 @@ local function refreshClock()
 	local remaining = (ClientState.spin.nextFreeAt or 0) - workspace:GetServerTimeNow()
 	local text = if remaining <= 0
 		then "БЕСПЛАТНОЕ ВРАЩЕНИЕ ГОТОВО"
-		else `Free spin in {formatWait(remaining)}  ·  or {SpinConfig.EXTRA_SPIN_COST} coins now`
+		else `Бесплатно через {formatWait(remaining)}  ·  или сейчас за {SpinConfig.EXTRA_SPIN_COST} монет`
+
+	refreshSpinButton()
 
 	if text ~= lastClockText then
 		lastClockText = text
@@ -113,7 +179,12 @@ local function refreshPity()
 	pityFill.Size = UDim2.fromScale(MathUtil.clamp(pity / threshold, 0, 1), 1)
 	pityLabel.Text = if remaining <= 0
 		then "Следующее вращение — гарантированный скин"
-		else `Гарантированный скин через {remaining} вращени{remaining == 1 and "е" or "й"}`
+		else `Гарантированный скин через {remaining} {TextUtil.plural(
+			remaining,
+			"вращение",
+			"вращения",
+			"вращений"
+		)}`
 end
 
 --------------------------------------------------------------------------------
@@ -139,9 +210,8 @@ end
 
 local function finish(result)
 	spinning = false
-	if spinButton then
-		spinButton:setEnabled(true)
-	end
+	releaseCoinDisplay()
+	refreshSpinButton()
 
 	setStatus(
 		result.rewardLabel and `ВЫИГРЫШ: {result.rewardLabel}` or "ВЫИГРЫШ!",
@@ -157,10 +227,10 @@ local function spin()
 	end
 
 	spinning = true
-	if spinButton then
-		spinButton:setEnabled(false)
-	end
+	refreshSpinButton()
 	setStatus("Крутим…", UITheme.Colors.TextDim)
+	ClientState.holdCoinDisplay = true
+	task.delay(REVEAL_TIMEOUT, releaseCoinDisplay)
 
 	task.spawn(function()
 		local remote = ClientState.getRemote(RemoteNames.SpinRequest)
@@ -174,14 +244,15 @@ local function spin()
 
 		if type(result) ~= "table" or not result.ok then
 			spinning = false
-			if spinButton then
-				spinButton:setEnabled(true)
-			end
+			releaseCoinDisplay()
+			refreshSpinButton()
 			local reason = type(result) == "table" and result.err
 				or "Вращение не прошло — попробуйте ещё раз"
 			setStatus(reason, UITheme.Colors.Negative)
 			return
 		end
+
+		table.insert(recentSpins, os.clock())
 
 		-- The server's numbers, adopted wholesale: the client computes no part of
 		-- the reward, the timer or the pity counter.
@@ -370,7 +441,7 @@ function SpinScreen.init()
 			UIController.notifyClosed("Spin")
 		end,
 		title = "КОЛЕСО НАГРАД",
-		subtitle = `Free spin every {math.floor(SpinConfig.FREE_SPIN_INTERVAL / SECONDS_PER_HOUR)}h — all odds shown`,
+		subtitle = `Бесплатно раз в {math.floor(SpinConfig.FREE_SPIN_INTERVAL / SECONDS_PER_HOUR)} ч · все шансы открыты`,
 		size = UDim2.fromScale(0.7, 0.76),
 		parent = gui,
 		accentColor = UITheme.Colors.AccentAlt,
@@ -414,9 +485,16 @@ function SpinScreen.init()
 	end)
 
 	trove:Add(ClientState.ProfileChanged:Connect(function()
-		refreshPity()
+		-- Not while the wheel turns: the profile the server pushes with a spin
+		-- already carries the new pity count, and a bar dropping to zero
+		-- announces a skin before the wheel has landed on it. finish()
+		-- refreshes it.
+		if not spinning then
+			refreshPity()
+		end
 		refreshClock()
 	end))
+	trove:Add(ClientState.CoinsChanged:Connect(refreshSpinButton))
 	trove:Connect(RunService.Heartbeat, refreshClock)
 
 	refreshPity()

@@ -25,6 +25,7 @@ assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.js
 local ClientState = require(script.Parent.Parent.Parent.ClientState)
 local Constants = require(Shared.Constants)
 local GameConfig = require(Shared.Config.GameConfig)
+local TextUtil = require(Shared.Util.TextUtil)
 local Trove = require(Shared.Util.Trove)
 local UIController = require(script.Parent.Parent.UIController)
 local UITheme = require(script.Parent.Parent.UITheme)
@@ -67,7 +68,7 @@ local function buildScoreSide(teamId: string, alignRight: boolean, parent: Insta
 	holder.BackgroundTransparency = 1
 	holder.Parent = parent
 
-	local name = centered(string.upper(team.name), UITheme.TextSizes.Small, color, UITheme.Fonts.Bold)
+	local name = centered(TextUtil.upper(team.name), UITheme.TextSizes.Small, color, UITheme.Fonts.Bold)
 	name.Name = "Name"
 	name.Size = UDim2.new(1, 0, 0, 18)
 	name.Parent = holder
@@ -112,6 +113,15 @@ local function build(gui: Instance)
 		centered("МАТЧ ОКОНЧЕН", UITheme.TextSizes.Display, UITheme.Colors.Text, UITheme.Fonts.Heading)
 	title.Name = "Headline"
 	title.Size = UDim2.new(1, 0, 0.22, 0)
+	-- Shrinks to fit rather than cutting the end off. On a phone the card is
+	-- 260 px across and "ПОБЕДА — АЛЬФА" at full size needs 340: it read
+	-- "ПОБЕДА —…", which is the one thing this screen exists to say, minus the
+	-- part that says it.
+	title.TextScaled = true
+	local titleCap = Instance.new("UITextSizeConstraint")
+	titleCap.MaxTextSize = UITheme.TextSizes.Display
+	titleCap.MinTextSize = UITheme.TextSizes.Body
+	titleCap.Parent = title
 	title.Parent = card
 	headline = title
 
@@ -158,7 +168,7 @@ local function winnerText(winnerTeam: string?): (string, Color3)
 	end
 
 	local team = Constants.TEAMS[winnerTeam]
-	return `ПОБЕДА — {string.upper(team and team.name or winnerTeam)}`, UITheme.teamColor(winnerTeam)
+	return `ПОБЕДА — {TextUtil.upper(team and team.name or winnerTeam)}`, UITheme.teamColor(winnerTeam)
 end
 
 --[[
@@ -168,7 +178,7 @@ end
 ]]
 local function wasParticipant(match): boolean
 	local rewards = match.data and match.data.rewards
-	if type(rewards) == "table" and rewards[player.UserId] ~= nil then
+	if type(rewards) == "table" and rewards[tostring(player.UserId)] ~= nil then
 		return true
 	end
 	return ClientState.getMapId() == match.mapId
@@ -194,7 +204,8 @@ local function show(match)
 		end
 	end
 
-	local earned = type(data.rewards) == "table" and data.rewards[player.UserId] or 0
+	-- String key: see MatchRuntime._endMatch for why a numeric one never arrives.
+	local earned = type(data.rewards) == "table" and tonumber(data.rewards[tostring(player.UserId)]) or 0
 	if rewardLabel then
 		rewardLabel.Text = if earned > 0 then `+{earned} монет` else "Монет не начислено"
 		rewardLabel.TextColor3 = if earned > 0 then UITheme.Colors.Coin else UITheme.Colors.TextMuted
