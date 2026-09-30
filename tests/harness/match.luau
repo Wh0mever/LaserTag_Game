@@ -622,6 +622,22 @@ do
 end
 
 do
+	-- Moving sides changes who is paid the win: the payout follows the side a
+	-- player ends on, and playing time is counted from when they were seated. In
+	-- the last minute that is a way onto the winning side, or onto a losing one
+	-- for a player who did nothing to earn it. Nobody is seated in that minute
+	-- either (LATE_JOIN_CUTOFF_SECONDS).
+	local runtime, onA = lopsided(3, 1)
+	runtime.state.timeLeft = GameConfig.LATE_JOIN_CUTOFF_SECONDS - 1
+	check(runtime:rebalanceOnRespawn(onA[1]) == nil, "nobody is moved in the last minute of a match")
+	check(runtime.roster[onA[1]] == "A", "and the roster stays as it was")
+	check(onA[1]:GetAttribute("TeamId") == "A", "as does their team")
+
+	runtime.state.timeLeft = GameConfig.LATE_JOIN_CUTOFF_SECONDS + 1
+	check(runtime:rebalanceOnRespawn(onA[1]) == "B", "but a minute and a second before the end still is")
+end
+
+do
 	-- The other side is EMPTY: that is a forfeit running its grace, not
 	-- something to fix by dragging a teammate over.
 	local runtime, onA = lopsided(2, 0)

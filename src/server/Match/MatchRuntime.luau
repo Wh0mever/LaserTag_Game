@@ -393,11 +393,19 @@ end
 	Never fills a side that is empty. That is a forfeit running its grace, and
 	dragging a teammate across would turn the win into a fight nobody asked for.
 
+	Not in the last minute (the cutoff for seating a joiner). The payout follows
+	the side a player finishes on, whatever they did on the other, so a move that
+	late is either a way onto the winning side or a win taken from someone who
+	played for it.
+
 	Returns the new team id if the player was moved.
 ]]
 function MatchRuntime:rebalanceOnRespawn(player: Player): string?
 	local from = self.roster[player]
 	if not from or not self:isInProgress() then
+		return nil
+	end
+	if self.state.timeLeft < GameConfig.LATE_JOIN_CUTOFF_SECONDS then
 		return nil
 	end
 
