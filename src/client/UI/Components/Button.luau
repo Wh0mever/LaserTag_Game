@@ -231,6 +231,9 @@ function Button.create(props: { [string]: any })
 		hit.Name = "Hit"
 		hit.Text = ""
 		hit.AutoButtonColor = false
+		-- Touch only. The button under it is what a pad selects; a second
+		-- selectable copy of the same control is a phantom stop for the stick.
+		hit.Selectable = false
 		hit.BackgroundTransparency = 1
 		hit.BorderSizePixel = 0
 		hit.Position = UDim2.fromOffset(-pad.Min.X, -pad.Min.Y)

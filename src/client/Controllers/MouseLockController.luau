@@ -47,6 +47,7 @@
 	perspectives take the same path.
 ]]
 
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -229,6 +230,26 @@ local function apply()
 	writeCursor()
 end
 
+--[[
+	The pad's Select button is the scoreboard hold (InputController), and with
+	GuiService.AutoSelectGuiEnabled on, the engine also uses that button to select
+	a GUI object and reports the press as gameProcessed, so the hold would go
+	dead whenever a Selectable button (side buttons, hotbar slots) is on screen.
+	Selection is only wanted while a panel is open, where the pad navigates it;
+	it is off during play and whatever was selected is let go when the panel
+	closes. Guarded by a pcall: losing this nicety must never take the cursor
+	logic down with it.
+]]
+local function syncGuiSelection()
+	local menuOpen = UIController.isAnyMenuOpen()
+	pcall(function()
+		GuiService.AutoSelectGuiEnabled = menuOpen
+		if not menuOpen then
+			GuiService.SelectedObject = nil
+		end
+	end)
+end
+
 local function refresh()
 	local wanted = toggleUnlocked or UIController.isAnyMenuOpen()
 	if wanted == effectiveUnlocked then
@@ -276,8 +297,10 @@ function MouseLockController.init()
 	end))
 
 	trove:Add(UIController.MenuVisibilityChanged:Connect(function()
+		syncGuiSelection()
 		refresh()
 	end))
+	syncGuiSelection()
 
 	-- A pad has no cursor to click a panel's X with, and B only backs out of
 	-- GUI selection: Y is its way out, and it is answered here because this is
@@ -304,6 +327,10 @@ function MouseLockController.stop()
 	setGuard(false)
 	trove:Clean()
 	modalButton = nil
+	-- Back to the engine default for whoever runs next.
+	pcall(function()
+		GuiService.AutoSelectGuiEnabled = true
+	end)
 end
 
 return MouseLockController
