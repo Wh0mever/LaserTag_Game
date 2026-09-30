@@ -209,6 +209,11 @@ function Panel.create(props: { [string]: any })
 		position = UDim2.new(1, -14, 0, 10),
 		anchorPoint = Vector2.new(1, 0),
 		color = UITheme.Colors.PanelLight,
+		-- 54 units square answers a touch: 44 px at the phone's 0.82, where the
+		-- drawn 32 was 26. Reaches to the panel's edge on the right and stops
+		-- short of whatever a screen puts beside the X (ОБНОВИТЬ is 10 units
+		-- away) on the left.
+		hitPadding = Rect.new(8, 11, 14, 11),
 		parent = body,
 		onActivated = function()
 			self:close()

@@ -569,6 +569,108 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- Tap targets
+--
+-- At 0.82 the hotbar slots were 26 px tall, the panel's close X 26 px, the
+-- compact menu buttons 42x38 - all under the 44 px a thumb needs, and the ones a
+-- player has to hit mid-fight or with the other thumb on the fire button. The
+-- visible controls stay as they are drawn; what answers a touch is larger, by
+-- an invisible hit area where the picture cannot grow (the Slider's approach).
+--------------------------------------------------------------------------------
+
+heading("Tap targets on a 640x294 phone")
+
+do
+	camera.ViewportSize = roblox.Vector2.new(640, 294)
+	UIController.refreshViewport()
+	local scale = UIController.scale
+
+	-- What a touch on the button lands on, in real pixels: the button itself, or
+	-- its invisible hit area (the button's size plus a margin) when it has one.
+	local function touchSize(button: any): (number, number)
+		local hit = button:FindFirstChild("Hit")
+		if not hit then
+			return button.Size.X.Offset * scale, button.Size.Y.Offset * scale
+		end
+		return (hit.Size.X.Scale * button.Size.X.Offset + hit.Size.X.Offset) * scale,
+			(hit.Size.Y.Scale * button.Size.Y.Offset + hit.Size.Y.Offset) * scale
+	end
+
+	local function px(value: number): string
+		return string.format("%.1f", value)
+	end
+
+	local MIN_TAP = 44
+
+	-- The close X of a panel.
+	local settingsRoot = UIController.getScreenRoot("SettingsMenu")
+	local closeButton = nil
+	for _, descendant in settingsRoot:GetDescendants() do
+		if descendant.Name == "Close" and descendant.ClassName == "TextButton" then
+			closeButton = descendant
+			break
+		end
+	end
+	check(closeButton ~= nil, "the settings panel has a close button")
+	if closeButton then
+		local w, h = touchSize(closeButton)
+		check(
+			w >= MIN_TAP and h >= MIN_TAP,
+			`the panel's close X answers a {px(w)}x{px(h)} px touch, at least {MIN_TAP}`
+		)
+	end
+
+	-- The hotbar.
+	local hudRoot = UIController.getScreenRoot("HUD")
+	local hotbar = hudRoot:FindFirstChild("Match"):FindFirstChild("Hotbar")
+	check(hotbar ~= nil, "the HUD has a hotbar")
+	if hotbar then
+		local gap = hotbar:FindFirstChildOfClass("UIListLayout").Padding.Offset
+		for slot = 1, 3 do
+			local button = hotbar:FindFirstChild(`Slot{slot}`)
+			check(button ~= nil, `slot {slot} exists`)
+			if not button then
+				continue
+			end
+
+			local w, h = touchSize(button)
+			check(w >= MIN_TAP and h >= MIN_TAP, `slot {slot} answers a {px(w)}x{px(h)} px touch, at least {MIN_TAP}`)
+			check(
+				button.Size.Y.Offset * scale >= 30,
+				`slot {slot} is drawn at least 30 px tall (got {px(button.Size.Y.Offset * scale)})`
+			)
+
+			-- Bigger hit areas must not eat the neighbour's: the point of the gap
+			-- is that a thumb between two slots is on one of them.
+			local hit = button:FindFirstChild("Hit")
+			check(hit ~= nil, `slot {slot} has a hit area`)
+			if hit then
+				check(
+					hit.Size.X.Offset <= gap,
+					`slot {slot}'s hit area stays clear of its neighbour (margin {hit.Size.X.Offset}, gap {gap})`
+				)
+				check(hit.BackgroundTransparency == 1, `slot {slot}'s hit area is invisible`)
+			end
+		end
+	end
+
+	-- The compact menu row.
+	SideButtons.setExpanded(true)
+	local _, toggle, list = menuRow()
+	local sizes = { toggle }
+	for _, name in { "Equip", "Shop", "Friends", "Spin", "Settings" } do
+		table.insert(sizes, list:FindFirstChild(name))
+	end
+	for _, button in sizes do
+		local w, h = touchSize(button)
+		check(
+			w >= MIN_TAP and h >= MIN_TAP,
+			`the compact {button.Name} button is {px(w)}x{px(h)} px, at least {MIN_TAP}`
+		)
+	end
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 

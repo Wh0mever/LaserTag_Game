@@ -1166,6 +1166,60 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- A button that looks small but answers a large touch
+--------------------------------------------------------------------------------
+
+heading("Button hit areas")
+
+do
+	local ButtonModule = Env.load("src/client/UI/Components/Button")
+	local holder = roblox.Instance.new("ScreenGui")
+
+	local plain = ButtonModule.create({ text = "A", parent = holder, size = roblox.UDim2.fromOffset(40, 30) })
+	check(plain.instance:FindFirstChild("Hit") == nil, "a button has no hit area unless it asks for one")
+	check(plain.hit == nil, "and exposes none")
+
+	local taps = 0
+	local padded = ButtonModule.create({
+		text = "B",
+		parent = holder,
+		size = roblox.UDim2.fromOffset(40, 30),
+		hitPadding = roblox.Rect.new(2, 5, 8, 7),
+		onActivated = function()
+			taps += 1
+		end,
+	})
+	local hit = padded.instance:FindFirstChild("Hit")
+	check(hit ~= nil and hit.ClassName == "TextButton", "a padded button carries a hit button")
+	if hit then
+		check(padded.hit == hit, "and exposes it")
+		check(hit.Position == roblox.UDim2.fromOffset(-2, -5), "the hit area starts left and above by the padding")
+		check(
+			hit.Size == roblox.UDim2.new(1, 10, 1, 12),
+			`and is the button plus the padding on all four sides (got {hit.Size.X.Scale},{hit.Size.X.Offset} x {hit.Size.Y.Scale},{hit.Size.Y.Offset})`
+		)
+		check(hit.BackgroundTransparency == 1 and hit.Text == "", "and draws nothing")
+
+		hit.Activated:Fire()
+		check(taps == 1, "a touch on the hit area is a press of the button")
+		padded.instance.Activated:Fire()
+		check(taps == 2, "and the button itself still answers")
+
+		padded:setEnabled(false)
+		check(hit.Active == false, "a disabled button's hit area stops taking touches")
+		hit.Activated:Fire()
+		check(taps == 2, "and its activation does nothing")
+		padded:setEnabled(true)
+		check(hit.Active == true, "an enabled one takes them again")
+		hit.Activated:Fire()
+		check(taps == 3, "and works")
+	end
+
+	plain:destroy()
+	padded:destroy()
+end
+
+--------------------------------------------------------------------------------
 -- A slider inside a scrolling panel
 --
 -- Every slider sits in the vertical ScrollingFrame of the settings panel, and on

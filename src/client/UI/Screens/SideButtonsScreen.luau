@@ -49,6 +49,11 @@ local BUTTON_HEIGHT = 46
 -- keeps free; at 150 the last letter ran under the badge.
 local BUTTON_WIDTH = 176
 local COMPACT_WIDTH = 52
+-- On a touchscreen the buttons are bigger. At the phone's 0.82 a 52x46 icon
+-- button is 43x38 px, and this is the way into the shop, the settings and every
+-- other panel; 56x54 is 46x44.
+local TOUCH_BUTTON_HEIGHT = 54
+local TOUCH_COMPACT_WIDTH = 56
 local BUTTON_GAP = 10
 
 -- The toggle's three bars, drawn as Frames rather than written as a glyph.
@@ -82,6 +87,17 @@ local expanded = true
 -- layout that changed its mind under a live tree would be half of each. A
 -- touchscreen laptop is NOT this - it has the keys the badges name.
 local touchLayout = false
+
+local function buttonHeight(): number
+	return if touchLayout then TOUCH_BUTTON_HEIGHT else BUTTON_HEIGHT
+end
+
+local function buttonWidth(isCompact: boolean): number
+	if not isCompact then
+		return BUTTON_WIDTH
+	end
+	return if touchLayout then TOUCH_COMPACT_WIDTH else COMPACT_WIDTH
+end
 local coins: any = nil
 local mouseHint: TextLabel? = nil
 -- nil until the first pass so the initial call always applies, including the
@@ -153,9 +169,9 @@ end
 local function stackSize(width: number): UDim2
 	local count = #MENUS
 	if touchLayout then
-		return UDim2.fromOffset(count * width + (count - 1) * BUTTON_GAP, BUTTON_HEIGHT)
+		return UDim2.fromOffset(count * width + (count - 1) * BUTTON_GAP, buttonHeight())
 	end
-	return UDim2.fromOffset(width, count * BUTTON_HEIGHT + (count - 1) * BUTTON_GAP)
+	return UDim2.fromOffset(width, count * buttonHeight() + (count - 1) * BUTTON_GAP)
 end
 
 local function applyCompact(isCompact: boolean)
@@ -163,7 +179,7 @@ local function applyCompact(isCompact: boolean)
 		return
 	end
 	compact = isCompact
-	local width = isCompact and COMPACT_WIDTH or BUTTON_WIDTH
+	local width = buttonWidth(isCompact)
 
 	if panel then
 		panel.Size = UDim2.fromOffset(width, 0)
@@ -172,14 +188,14 @@ local function applyCompact(isCompact: boolean)
 		stack.Size = stackSize(width)
 	end
 	if toggle then
-		toggle.instance.Size = UDim2.fromOffset(width, BUTTON_HEIGHT)
+		toggle.instance.Size = UDim2.fromOffset(width, buttonHeight())
 		toggle:setText(if isCompact then "" elseif expanded then "СКРЫТЬ" else "МЕНЮ")
 	end
 
 	for index, entry in MENUS do
 		local button = buttons[index]
 		if button then
-			button.instance.Size = UDim2.fromOffset(width, BUTTON_HEIGHT)
+			button.instance.Size = UDim2.fromOffset(width, buttonHeight())
 			button:setText(isCompact and "" or entry.label)
 			-- A touch device has no key to hint at, and the badge would only
 			-- crowd an icon-sized button.
@@ -292,7 +308,7 @@ local function buildStack(parent: Instance)
 		-- Created with an icon so the Button lays out the slot; the glyph itself
 		-- is replaced by drawn bars immediately below.
 		icon = " ",
-		size = UDim2.fromOffset(BUTTON_WIDTH, BUTTON_HEIGHT),
+		size = UDim2.fromOffset(BUTTON_WIDTH, buttonHeight()),
 		layoutOrder = 0,
 		parent = holder,
 		onActivated = function()
@@ -325,7 +341,7 @@ local function buildStack(parent: Instance)
 			text = entry.label,
 			icon = entry.icon,
 			keyHint = entry.key,
-			size = UDim2.fromOffset(BUTTON_WIDTH, BUTTON_HEIGHT),
+			size = UDim2.fromOffset(BUTTON_WIDTH, buttonHeight()),
 			layoutOrder = index,
 			parent = list,
 			onActivated = function()
