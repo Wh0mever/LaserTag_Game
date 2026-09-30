@@ -432,6 +432,73 @@ local function penetration(a: any, b: any): number
 	return math.min(depth, height)
 end
 
+--[[
+	How a character moves, from the same constants the server sets on it, so the
+	numbers here cannot drift from the game. Gravity is Roblox's default; nothing
+	in this project changes it.
+]]
+local GRAVITY = 196.2
+local JUMP_SPEED = Constants.JUMP_POWER
+local WALK_SPEED = Constants.WALK_SPEED
+local JUMP_APEX = JUMP_SPEED * JUMP_SPEED / (2 * GRAVITY)
+-- Feet clear an edge only with a little to spare; without it a "reachable" top
+-- would be one a player can reach only by touching it at the very peak.
+local JUMP_MARGIN = 0.3
+
+-- How far along the ground a running jump carries a character that ends up
+-- `rise` studs above where it left (on the way down, so the longest carry), or
+-- nil when that rise cannot be jumped at all.
+local function jumpReach(rise: number): number?
+	local discriminant = JUMP_SPEED * JUMP_SPEED - 2 * GRAVITY * (rise + JUMP_MARGIN)
+	if discriminant < 0 then
+		return nil
+	end
+	return WALK_SPEED * (JUMP_SPEED + math.sqrt(discriminant)) / GRAVITY
+end
+
+--[[
+	Tall walls that a step lets a player climb. Any wall taller than a jump is
+	drawn as hard cover ("too tall to jump"), and it only stays that way if
+	nothing a player can jump onto stands close enough to jump from onto the
+	wall. Returns { wall, step, gap } for each wall/step pair that breaks it.
+]]
+local function climbableWalls(built: any)
+	local floorY = built.origin.Y
+	local found = {}
+	local steps = {}
+	for _, part in partsNamed(built.model, { Block = true, Wall = true, Ramp = true }) do
+		local box = uprightTop(part)
+		if box and box.y - floorY <= JUMP_APEX - JUMP_MARGIN and box.y - floorY > 0.5 then
+			box.part = part
+			table.insert(steps, box)
+		end
+	end
+
+	for _, wall in partsNamed(built.model, { Wall = true }) do
+		local box = uprightTop(wall)
+		local height = if box then box.y - floorY else 0
+		-- Only walls that are drawn as cover a player might try to climb: above
+		-- one jump, and not so tall that two stacked jumps still fall short.
+		if not box or height <= JUMP_APEX or height >= 2 * JUMP_APEX - 1 then
+			continue
+		end
+		for _, step in steps do
+			if step.part ~= wall then
+				local reach = jumpReach(box.y - step.y)
+				if reach then
+					local gapX = math.max(step.minX - box.maxX, box.minX - step.maxX, 0)
+					local gapZ = math.max(step.minZ - box.maxZ, box.minZ - step.maxZ, 0)
+					local gap = math.sqrt(gapX * gapX + gapZ * gapZ)
+					if gap < reach then
+						table.insert(found, { wall = wall, step = step, gap = gap, reach = reach })
+					end
+				end
+			end
+		end
+	end
+	return found
+end
+
 local results = {}
 
 for _, entry in MAPS do
@@ -784,6 +851,18 @@ for _, entry in MAPS do
 		end
 	end
 	check(paintedRooms == 0, "no floor inlay reaches into a room")
+
+	for _, climb in climbableWalls(built) do
+		local at, stepAt = climb.wall.CFrame.Position, climb.step.part.CFrame.Position
+		check(
+			false,
+			`the {math.floor(climb.wall.Size.Y)}-stud wall at ({math.floor(at.X - built.origin.X)}, `
+				.. `{math.floor(at.Z - built.origin.Z)}) can be jumped onto from the {climb.step.part.Name} at `
+				.. `({math.floor(stepAt.X - built.origin.X)}, {math.floor(stepAt.Z - built.origin.Z)}), `
+				.. `{string.format("%.1f", climb.gap)} studs away (a jump carries {string.format("%.1f", climb.reach)})`
+		)
+	end
+	check(true, "no wall taller than a jump can be climbed from a step")
 
 	for _, clash in coplanarTops(built) do
 		check(
