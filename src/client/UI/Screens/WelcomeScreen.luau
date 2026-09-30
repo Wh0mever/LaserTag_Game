@@ -31,6 +31,7 @@
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
 assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.json")
@@ -112,6 +113,20 @@ local function controlLines(): { { action: string, keys: string } }
 			{ action = "Меню", keys = "Кнопка ☰ слева вверху" },
 			{ action = "Таблица счёта", keys = "Нажми на счёт вверху" },
 			{ action = "Вид от 1-го / 3-го лица", keys = "Кнопка с глазом" },
+		}
+	end
+
+	-- A controller and nothing else: a console, or a pad on a PC with no keyboard
+	-- in reach. Same buttons as the settings panel's ГЕЙМПАД list.
+	if UserInputService.GamepadEnabled and not UserInputService.KeyboardEnabled then
+		return {
+			{ action = "Движение и обзор", keys = "Левый и правый стик" },
+			{ action = "Огонь", keys = "RT" },
+			{ action = "Перезарядка", keys = "X" },
+			{ action = "Смена оружия", keys = "LB  ·  RB" },
+			{ action = "Таблица счёта", keys = "View" },
+			{ action = "Скины и закрыть окно", keys = "Y" },
+			{ action = "Магазин, друзья, колесо", keys = "D-pad" },
 		}
 	end
 

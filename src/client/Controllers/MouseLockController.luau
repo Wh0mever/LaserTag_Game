@@ -142,6 +142,10 @@ local function ensureModal(): TextButton?
 	button.BackgroundTransparency = 1
 	button.Text = ""
 	button.AutoButtonColor = false
+	-- A pad player has no cursor: the first stick movement auto-selects the first
+	-- selectable button on screen, and this one fills it. Selected, it would draw
+	-- a selection box round the whole view and take the pad's A press.
+	button.Selectable = false
 	button.Modal = true
 	button.Visible = false
 	button.ZIndex = 1
@@ -273,6 +277,13 @@ function MouseLockController.init()
 
 	trove:Add(UIController.MenuVisibilityChanged:Connect(function()
 		refresh()
+	end))
+
+	-- A pad has no cursor to click a panel's X with, and B only backs out of
+	-- GUI selection: Y is its way out, and it is answered here because this is
+	-- the module that already sits between the input layer and the menus.
+	trove:Add(InputController.MenuCloseRequested:Connect(function()
+		UIController.closeAll()
 	end))
 
 	-- Respawning resets MouseBehavior and MouseIconEnabled to the engine default.

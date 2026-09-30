@@ -24,6 +24,9 @@
 	joints, so Roblox replicates these to everyone else — which is what makes
 	this visible at all — and no server work or remote traffic is involved.
 
+	  - in third person the body is turned to face where the camera looks (see
+	    "Facing" below), so the pose above and the beam agree with the body
+
 	R6 and R15 are both handled: the joint names differ, everything else does not.
 ]]
 
@@ -36,8 +39,11 @@ local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
 assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.json")
 
 local ClientState = require(script.Parent.Parent.ClientState)
+local MouseLockController = require(script.Parent.MouseLockController)
+local PerspectiveController = require(script.Parent.PerspectiveController)
 local RecoilController = require(script.Parent.RecoilController)
 local Trove = require(Shared.Util.Trove)
+local UIController = require(script.Parent.Parent.UI.UIController)
 local WeaponClient = require(script.Parent.WeaponClient)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
 
@@ -56,11 +62,27 @@ local FIRE_DECAY = 9
 
 local RELOAD_DIP_RAD = math.rad(35)
 
+-- Below this length the camera's horizontal look is too short to name a
+-- direction (pitch within ~3 degrees of straight up or down), and normalising
+-- it would spin the body on noise.
+local MIN_FLAT_LOOK = 0.05
+-- Cosine of the yaw error left alone (~0.25 degrees), so a still camera writes
+-- nothing and the character's CFrame is not replicated every frame for nothing.
+local FACING_SETTLED = 0.99999
+
 local player = Players.LocalPlayer
 local trove = Trove.new()
 local characterTrove = Trove.new()
 
 local joints: { { motor: Motor6D, base: CFrame, side: number } } = {}
+-- The character being turned, and whether AutoRotate is currently off because
+-- of us. Restoring only what this module switched off keeps it from overriding
+-- a script (a seat, an emote) that turned AutoRotate off for its own reasons.
+local currentHumanoid: Humanoid? = nil
+local currentRoot: BasePart? = nil
+local currentCharacter: Model? = nil
+local rotationHeld = false
+
 local firePunch = 0
 local reloadStartedAt = 0
 local reloadDuration = 0
@@ -108,6 +130,116 @@ local function collectJoints(character: Model)
 end
 
 --------------------------------------------------------------------------------
+-- Facing
+--
+-- Roblox turns a character to face the way it WALKS, and in third person the
+-- camera looks somewhere else: stand still and swing the mouse, and the body
+-- stays put while the beam leaves the head toward the crosshair; strafe, and
+-- the body is turned sideways to its own gun. Everyone else reads a player's aim
+-- off their body, so this is the same competitive-readability problem the arm
+-- pose solves for pitch. Shift-lock solves it in the engine; this game turns
+-- shift-lock off (EnableMouseLockOption), so the same thing is done here.
+--
+-- AutoRotate is switched off and the root is yawed to the camera's horizontal
+-- look every frame, after the camera has moved. Movement is untouched: the
+-- move direction is camera-relative on every device, so the thumbstick and
+-- WASD still walk where they point, and the body simply strafes.
+--
+-- Roblox's own route (UserGameSettings.RotationType) was not used because the
+-- camera module restores that setting itself whenever it believes the view
+-- left first person or shift-lock, so it would need re-asserting every frame
+-- anyway, without the exclusions below.
+--------------------------------------------------------------------------------
+
+local function releaseFacing()
+	if not rotationHeld then
+		return
+	end
+	rotationHeld = false
+
+	local humanoid = currentHumanoid
+	if humanoid and humanoid.Parent then
+		humanoid.AutoRotate = true
+	end
+end
+
+--[[
+	Whether the body should be following the camera right now. Every exclusion
+	is a case where somebody else should be steering:
+
+	  * not in a match: the hub is for wandering, and turning to the walk is the
+	    natural thing there
+	  * dead or seated: the character is not being aimed
+	  * first person: the engine already faces the camera, and two writers to one
+	    CFrame is how a body jitters
+	  * a menu open or the cursor freed: the player is reading a panel, not
+	    aiming, and dragging the view over the shop must not spin the character
+]]
+local function wantsFacing(): boolean
+	local humanoid = currentHumanoid
+	local character = currentCharacter
+	if not humanoid or not character or not humanoid.Parent then
+		return false
+	end
+
+	if not currentRoot or not currentRoot.Parent then
+		-- The rig can still be arriving when the character first appears.
+		local found = character:FindFirstChild("HumanoidRootPart")
+		currentRoot = if found and found:IsA("BasePart") then found else nil
+		if not currentRoot then
+			return false
+		end
+	end
+
+	return ClientState.isInMatch()
+		and not ClientState.isDead
+		and humanoid.Health > 0
+		and not humanoid.Sit
+		and not PerspectiveController.isFirstPerson()
+		and not UIController.isAnyMenuOpen()
+		and not MouseLockController.isUnlocked()
+end
+
+local function updateFacing()
+	if not wantsFacing() then
+		releaseFacing()
+		return
+	end
+
+	local humanoid = currentHumanoid :: Humanoid
+	local root = currentRoot :: BasePart
+
+	-- Asserted every frame rather than once: anything that turns it back on
+	-- would otherwise start a fight with the yaw below.
+	rotationHeld = true
+	if humanoid.AutoRotate then
+		humanoid.AutoRotate = false
+	end
+
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
+
+	local look = camera.CFrame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	if flat.Magnitude < MIN_FLAT_LOOK then
+		return
+	end
+	flat = flat.Unit
+
+	local facing = root.CFrame.LookVector
+	local facingFlat = Vector3.new(facing.X, 0, facing.Z)
+	if facingFlat.Magnitude > 1e-6 and facingFlat.Unit:Dot(flat) > FACING_SETTLED then
+		return
+	end
+
+	-- A pure yaw about the root's own position: upright, and not moved.
+	local position = root.Position
+	root.CFrame = CFrame.lookAt(position, position + flat)
+end
+
+--------------------------------------------------------------------------------
 -- Pose
 --------------------------------------------------------------------------------
 
@@ -138,6 +270,8 @@ local function reloadProgress(): number
 end
 
 local function onRender(deltaTime: number)
+	updateFacing()
+
 	if #joints == 0 then
 		return
 	end
@@ -167,6 +301,10 @@ end
 
 local function onCharacterAdded(character: Model)
 	characterTrove:Clean()
+	releaseFacing()
+	currentCharacter = character
+	currentHumanoid = nil
+	currentRoot = nil
 
 	firePunch = 0
 	reloadStartedAt = 0
@@ -178,6 +316,10 @@ local function onCharacterAdded(character: Model)
 	if not humanoid then
 		return
 	end
+
+	currentHumanoid = humanoid
+	local root = character:FindFirstChild("HumanoidRootPart")
+	currentRoot = if root and root:IsA("BasePart") then root else nil
 
 	collectJoints(character)
 	if #joints == 0 then
@@ -192,6 +334,7 @@ local function onCharacterAdded(character: Model)
 
 	characterTrove:Add(humanoid.Died:Connect(function()
 		joints = {}
+		releaseFacing()
 	end))
 end
 
@@ -235,9 +378,13 @@ function CharacterAnimator.start()
 end
 
 function CharacterAnimator.stop()
+	releaseFacing()
 	characterTrove:Clean()
 	trove:Clean()
 	joints = {}
+	currentCharacter = nil
+	currentHumanoid = nil
+	currentRoot = nil
 end
 
 return CharacterAnimator

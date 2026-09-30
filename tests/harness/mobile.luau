@@ -150,6 +150,13 @@ player:SetAttribute("InMatch", "Dust")
 check(ClientState.isInMatch(), "setting the InMatch attribute puts the client in a match")
 check(MobileControls.areButtonsBound(), "the touch buttons appear when the match starts")
 
+-- A phone has a touchscreen and nothing else, so what the "last input" was
+-- (the engine can report a stray mouse-type event from a paired accessory) never
+-- takes its fire control away.
+Env.setLastInputType("MouseMovement")
+check(MobileControls.areButtonsBound(), "a phone keeps its controls whatever it last reported")
+Env.setLastInputType("Touch")
+
 local controls = MobileControls.controls()
 
 -- The three tap controls are real buttons, so a tap is their Activated event.
@@ -238,6 +245,8 @@ for _, id in { "Fire", "Reload", "Switch", "View" } do
 			node.Size.X.Offset > 0 and node.Size.X.Offset == node.Size.Y.Offset,
 			`{id} is a round control with a real size (got {node.Size.X.Offset})`
 		)
+		-- Smaller than the fire circle on purpose, never smaller than a thumb.
+		check(node.Size.X.Offset >= 44, `{id} is at least 44 px across on this phone (got {node.Size.X.Offset})`)
 		check(
 			rects[id].left >= 0
 				and rects[id].top >= 0
@@ -381,6 +390,52 @@ check(
 	`the switch button picks another slot (got {tostring(slotSeen)})`
 )
 slotConn:Disconnect()
+
+--[[
+	Two quick taps.
+
+	The switch button used to compute the next slot from ClientState.currentSlot,
+	which only moves when the server's answer arrives. A second tap inside that
+	round trip therefore asked for the same slot as the first, the weapon client
+	dropped it as "already holding that", and a player tapping twice for the lance
+	got the pistol. Run against the real weapon client, with no server echo
+	between the taps, because the echo is exactly what is missing.
+]]
+heading("Switching quickly")
+
+local WeaponClient = Env.load("src/client/Controllers/WeaponClient")
+local weaponInitOk, weaponInitErr = pcall(WeaponClient.init)
+check(weaponInitOk, `the weapon client initialises on a phone: {tostring(weaponInitErr)}`)
+
+if weaponInitOk then
+	local body = roblox.Instance.new("Model")
+	local bodyHumanoid = roblox.Instance.new("Humanoid")
+	bodyHumanoid.MaxHealth = 100
+	bodyHumanoid.Health = 100
+	bodyHumanoid.Parent = body
+	player.Character = body
+	ClientState.isDead = false
+	ClientState.match.phase = "InProgress"
+	player:SetAttribute("CurrentWeapon", "Rifle")
+
+	check(WeaponClient.getWeaponId() == "Rifle", "the rifle is in hand")
+	tap("Switch")
+	check(WeaponClient.getWeaponId() == "Pistol", `one tap goes to the pistol (holding {WeaponClient.getWeaponId()})`)
+	check(ClientState.currentSlot == 1, "and the server has not answered yet")
+	tap("Switch")
+	check(
+		WeaponClient.getWeaponId() == "Lance",
+		`a second tap before the answer goes on to the lance (holding {WeaponClient.getWeaponId()})`
+	)
+	tap("Switch")
+	check(
+		WeaponClient.getWeaponId() == "Rifle",
+		`and a third wraps round to the rifle (holding {WeaponClient.getWeaponId()})`
+	)
+
+	WeaponClient.stop()
+	player.Character = nil
+end
 
 -- The one that was cosmetic. It flipped the saved preference and moved nothing,
 -- so the stored setting disagreed with the screen and followed the player to
@@ -906,6 +961,18 @@ local laptopOk, laptopErr = pcall(function()
 	LaptopSide.init()
 	local LaptopWelcome = Env.load("src/client/UI/Screens/WelcomeScreen")
 	LaptopWelcome.init()
+	local LaptopHUD = Env.load("src/client/UI/Screens/HUDScreen")
+	LaptopHUD.init()
+
+	-- The hotbar of the desktop HUD carries its key badges; the phone's, which
+	-- has no keys to press, does not.
+	local badges = 0
+	for _, descendant in LaptopUI.getScreenRoot("HUD"):GetDescendants() do
+		if descendant.Name == "KeyHint" then
+			badges += 1
+		end
+	end
+	check(badges > 0, "the laptop's hotbar carries key badges: it got the desktop HUD, not the phone's")
 
 	local sideRoot = LaptopUI.getScreenRoot("SideButtons"):FindFirstChild("Root")
 	local menu = sideRoot:FindFirstChild("Menu")
@@ -937,6 +1004,159 @@ local laptopOk, laptopErr = pcall(function()
 	check(not State.isTouchOnly(), "and so does a mouse")
 end)
 check(laptopOk, `the touchscreen laptop boots: {tostring(laptopErr)}`)
+
+--------------------------------------------------------------------------------
+-- A touchscreen laptop keeps the desktop's screen
+--
+-- It has a mouse and a keyboard, so the fire circle over the arena is for a
+-- finger that has not touched the glass yet: the cluster waits for the first
+-- touch and gives way again the moment a key or the mouse is used.
+--------------------------------------------------------------------------------
+
+heading("Touchscreen laptop: the fire cluster")
+
+Env.setDevice("touchLaptop")
+Env.reset()
+
+local clusterOk, clusterErr = pcall(function()
+	Env.enableClientRuntime()
+	local State = Env.load("src/client/ClientState")
+	local Perspective = Env.load("src/client/Controllers/PerspectiveController")
+	local Settings = Env.load("src/client/Controllers/SettingsController")
+	local MouseLock = Env.load("src/client/Controllers/MouseLockController")
+
+	State.init()
+	Perspective.init()
+	Settings.init()
+	MouseLock.init()
+
+	local Input = Env.load("src/client/Controllers/InputController")
+	local UI = Env.load("src/client/UI/UIController")
+	local Touch = Env.load("src/client/Controllers/MobileControlsController")
+	Input.init()
+	UI.init()
+	Touch.init()
+	local laptopPlayer = Env.service("Players").LocalPlayer
+	laptopPlayer:SetAttribute("InMatch", "Dust")
+
+	check(Touch.isActive(), "a touchscreen laptop can show touch controls")
+	check(not Touch.isTouchInUse(), "but it starts as a desktop: nobody has touched the glass")
+	check(not Touch.areButtonsBound(), "so the arena has no fire circles over it")
+
+	Env.setLastInputType("Touch")
+	check(Touch.isTouchInUse() and Touch.areButtonsBound(), "the first touch brings the cluster up")
+
+	Env.setLastInputType("MouseMovement")
+	check(not Touch.areButtonsBound(), "moving the mouse takes it away again")
+	Env.setLastInputType("Touch")
+	check(Touch.areButtonsBound(), "and touching the glass brings it back")
+	Env.setLastInputType("Keyboard")
+	check(not Touch.areButtonsBound(), "as does pressing a key")
+
+	-- A trigger held on the glass must not outlive the controls that hold it.
+	Env.setLastInputType("Touch")
+	local laptopFire = Touch.controls().Fire
+	Env.placeGui(laptopFire, 100, 100, 100, 100)
+	local laptopTouch = Env.touchBegan(150, 150)
+	check(Input.isFireHeld(), "a finger on the fire circle holds the trigger")
+	Env.setLastInputType("MouseMovement")
+	check(not Input.isFireHeld(), "switching to the mouse lets go of it")
+	Env.touchEnded(laptopTouch)
+end)
+check(clusterOk, `the touchscreen laptop fire cluster runs: {tostring(clusterErr)}`)
+
+--------------------------------------------------------------------------------
+-- Facing on a phone
+--
+-- The body follows the camera in third person on every device, but a phone has
+-- no cursor manager, so "a menu is open" has to come from the UI itself.
+--------------------------------------------------------------------------------
+
+heading("Facing on a phone")
+
+Env.setDevice("phone")
+Env.reset()
+
+local facingOk, facingErr = pcall(function()
+	Env.enableClientRuntime()
+	local State = Env.load("src/client/ClientState")
+	local Input = Env.load("src/client/Controllers/InputController")
+	local Perspective = Env.load("src/client/Controllers/PerspectiveController")
+	local Settings = Env.load("src/client/Controllers/SettingsController")
+	local UI = Env.load("src/client/UI/UIController")
+	local MouseLock = Env.load("src/client/Controllers/MouseLockController")
+	local Animator = Env.load("src/client/Controllers/CharacterAnimator")
+
+	local phonePlayer = Env.service("Players").LocalPlayer
+	local body = roblox.Instance.new("Model")
+	local humanoid = roblox.Instance.new("Humanoid")
+	humanoid.MaxHealth = 100
+	humanoid.Health = 100
+	humanoid.Sit = false
+	humanoid.AutoRotate = true
+	humanoid.Parent = body
+	local root = roblox.Instance.new("Part")
+	root.Name = "HumanoidRootPart"
+	root.Position = roblox.Vector3.new(0, 5, 0)
+	root.Parent = body
+	phonePlayer.Character = body
+
+	State.init()
+	Input.init()
+	Perspective.init()
+	Settings.init()
+	UI.init()
+	MouseLock.init()
+	Animator.init()
+	Animator.start()
+	phonePlayer:SetAttribute("InMatch", "Dust")
+
+	local phoneCamera = Env.service("Workspace").CurrentCamera
+	local function look(yawDegrees: number)
+		local yaw = math.rad(yawDegrees)
+		local from = roblox.Vector3.new(0, 8, 0)
+		phoneCamera.CFrame = roblox.CFrame.lookAt(from, from + roblox.Vector3.new(-math.sin(yaw), 0, -math.cos(yaw)))
+	end
+	local function facing(): number
+		local a, b = root.CFrame.LookVector, phoneCamera.CFrame.LookVector
+		return a.X * b.X + a.Z * b.Z
+	end
+
+	root.CFrame = roblox.CFrame.lookAt(roblox.Vector3.new(0, 5, 0), roblox.Vector3.new(5, 5, 0))
+	look(0)
+	for _ = 1, 3 do
+		Env.stepRender()
+	end
+	check(facing() > 0.999, "a phone player's body turns to where the camera looks")
+	check(not humanoid.AutoRotate, "and the humanoid stops turning to its walk")
+
+	local open = false
+	UI.registerMenu("Shop", {
+		open = function()
+			open = true
+		end,
+		close = function()
+			open = false
+		end,
+		isOpen = function()
+			return open
+		end,
+	})
+	UI.openMenu("Shop")
+	look(120)
+	for _ = 1, 3 do
+		Env.stepRender()
+	end
+	check(humanoid.AutoRotate, "with a menu open on a phone the humanoid is handed back")
+	check(facing() < 0.5, "and the body is not spun round behind the menu")
+	UI.closeMenu("Shop")
+	Env.stepRender()
+	check(facing() > 0.999, "closing it picks the aim up again")
+
+	Animator.stop()
+	check(humanoid.AutoRotate, "stopping hands the humanoid back")
+end)
+check(facingOk, `the phone facing scenario runs: {tostring(facingErr)}`)
 
 --------------------------------------------------------------------------------
 -- Result

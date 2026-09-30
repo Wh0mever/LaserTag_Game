@@ -257,7 +257,7 @@ function HUDScreen.init()
 		-- The same intent the number keys publish; WeaponClient decides whether
 		-- the swap is allowed.
 		InputController.SlotPressed:Fire(slot)
-	end, { touch = ClientState.isTouch })
+	end, { touch = ClientState.isTouchOnly() })
 	trove:Add(function()
 		widgets.destroy()
 	end)

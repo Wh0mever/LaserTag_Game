@@ -98,13 +98,14 @@ MobileControlsController.Priority = 11
 	Fire is the largest: it is held down through a whole firefight by a thumb
 	that is also dragging to aim, so it must stay under the thumb while the hand
 	moves. The other three are deliberately smaller — they must not be hittable
-	by accident.
+	by accident — but not smaller than a thumb: 0.15 of a 294-pixel-tall phone
+	is 44 pixels, the least a finger can hit reliably.
 ]]
 local LAYOUT = {
 	{ id = "Fire", diameter = 0.175, right = 0.42, bottom = 0.35, icon = "crosshair" },
-	{ id = "Reload", diameter = 0.14, right = 0.62, bottom = 0.25, icon = "reload" },
-	{ id = "Switch", diameter = 0.14, right = 0.55, bottom = 0.53, icon = "swap" },
-	{ id = "View", diameter = 0.14, right = 0.23, bottom = 0.52, icon = "eye" },
+	{ id = "Reload", diameter = 0.15, right = 0.62, bottom = 0.25, icon = "reload" },
+	{ id = "Switch", diameter = 0.15, right = 0.55, bottom = 0.53, icon = "swap" },
+	{ id = "View", diameter = 0.15, right = 0.23, bottom = 0.52, icon = "eye" },
 }
 
 local BACKGROUND = Color3.fromRGB(18, 22, 32)
@@ -114,6 +115,9 @@ local TEXT = Color3.fromRGB(232, 238, 248)
 local player = Players.LocalPlayer
 local trove = Trove.new()
 local enabled = false
+-- Whether the player is using the touchscreen right now. Always true on a phone;
+-- on a device that also has a mouse or keyboard it follows what they last used.
+local touchInUse = false
 local shown = false
 local root: Frame? = nil
 local controls: { [string]: GuiObject } = {}
@@ -126,9 +130,25 @@ local fireTouch: InputObject? = nil
 -- Helpers
 --------------------------------------------------------------------------------
 
-local function nextSlot(): number
-	local slots = #Constants.SLOTS
-	return slots > 0 and (ClientState.currentSlot % slots) + 1 or Constants.DEFAULT_SLOT
+--[[
+	Whether the touch cluster should be on screen for what the player is holding.
+
+	A phone has a touchscreen and nothing else, so it is a touch device for good.
+	A Surface, a touchscreen Chromebook or a tablet with a keyboard case has a
+	touchscreen AND a pointer or keys, and shows the phone cluster over the arena
+	to someone who is aiming with a mouse — so those follow the last input the
+	player used: desktop until a finger actually touches the glass, desktop again
+	the moment a key or the mouse is used. MouseLockController makes the same
+	distinction for the cursor (touch and no mouse).
+]]
+local function usesTouchNow(lastInput: Enum.UserInputType?): boolean
+	if not UserInputService.TouchEnabled then
+		return false
+	end
+	if not UserInputService.MouseEnabled and not UserInputService.KeyboardEnabled then
+		return true
+	end
+	return lastInput == Enum.UserInputType.Touch
 end
 
 --[[
@@ -275,7 +295,9 @@ local function build()
 
 	local switch = controls.Switch :: TextButton
 	trove:Connect(switch.Activated, function()
-		InputController.SlotPressed:Fire(nextSlot())
+		-- Stepped from the weapon on screen, not from the server's echo of it,
+		-- so a second tap inside one round trip reaches the third slot.
+		InputController.cycleSlot(1)
 	end)
 
 	local view = controls.View :: TextButton
@@ -324,7 +346,7 @@ local function refresh()
 	if not enabled then
 		return
 	end
-	setShown(ClientState.isInMatch() and not UIController.isAnyMenuOpen())
+	setShown(touchInUse and ClientState.isInMatch() and not UIController.isAnyMenuOpen())
 end
 
 --------------------------------------------------------------------------------
@@ -337,6 +359,14 @@ end
 ]]
 function MobileControlsController.isActive(): boolean
 	return enabled
+end
+
+--[[
+	Whether the touchscreen is what the player is using at the moment. Differs
+	from isActive() only on a device with a touchscreen and a mouse or keyboard.
+]]
+function MobileControlsController.isTouchInUse(): boolean
+	return touchInUse
 end
 
 function MobileControlsController.areButtonsBound(): boolean
@@ -367,7 +397,17 @@ function MobileControlsController.init()
 		return
 	end
 
+	touchInUse = usesTouchNow(UserInputService:GetLastInputType())
 	build()
+
+	trove:Connect(UserInputService.LastInputTypeChanged, function(lastInput: Enum.UserInputType)
+		local now = usesTouchNow(lastInput)
+		if now == touchInUse then
+			return
+		end
+		touchInUse = now
+		refresh()
+	end)
 
 	--[[
 		The fire control. `gameProcessed` is the whole mechanism: it is false
@@ -424,6 +464,7 @@ end
 function MobileControlsController.stop()
 	trove:Clean()
 	enabled = false
+	touchInUse = false
 	shown = false
 	root = nil
 	controls = {}
