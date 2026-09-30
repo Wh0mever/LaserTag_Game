@@ -1166,6 +1166,174 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- A slider inside a scrolling panel
+--
+-- Every slider sits in the vertical ScrollingFrame of the settings panel, and on
+-- a phone a large share of that surface is slider track. Setting the value on
+-- touch-down meant a drag started on the ГРОМКОСТЬ track to scroll the panel
+-- set the volume where the thumb landed, and the release saved it to the
+-- profile. A touch now only becomes a drag once it has moved sideways.
+--------------------------------------------------------------------------------
+
+heading("Slider and scrolling")
+
+do
+	local UserInputEvents = Env.service("UserInputService")
+	local SliderModule = Env.load("src/client/UI/Components/Slider")
+	local Config = Env.load("src/shared/Config/SettingsConfig")
+
+	local changes: { number } = {}
+	local commits: { number } = {}
+	local holder = roblox.Instance.new("ScreenGui")
+	local scrolled = SliderModule.create({
+		settingId = "Volume",
+		value = 0.5,
+		parent = holder,
+		onChanged = function(value: number)
+			table.insert(changes, value)
+		end,
+		onCommitted = function(value: number)
+			table.insert(commits, value)
+		end,
+	})
+	-- A 400 px track from x = 100: a finger at x = 300 is 50%.
+	Env.placeGui(scrolled._track, 100, 200, 400, 32)
+
+	local function touch(x: number, y: number)
+		return {
+			UserInputType = roblox.Enum.UserInputType.Touch,
+			UserInputState = roblox.Enum.UserInputState.Begin,
+			Position = roblox.Vector3.new(x, y, 0),
+		}
+	end
+
+	local function down(input: any)
+		Env.instanceEvent(scrolled._track, "InputBegan"):Fire(input)
+	end
+
+	local function move(input: any, x: number, y: number)
+		input.UserInputState = roblox.Enum.UserInputState.Change
+		input.Position = roblox.Vector3.new(x, y, 0)
+		UserInputEvents.InputChanged:Fire(input, false)
+	end
+
+	local function up(input: any)
+		input.UserInputState = roblox.Enum.UserInputState.End
+		UserInputEvents.InputEnded:Fire(input, false)
+	end
+
+	local function reset()
+		table.clear(changes)
+		table.clear(commits)
+		scrolled:setValue(0.5)
+	end
+
+	-- A scroll: the finger lands on the track and goes up the screen.
+	reset()
+	local scroll = touch(420, 216)
+	down(scroll)
+	check(#changes == 0 and scrolled:getValue() == 0.5, "touching the track does not move the slider on touch-down")
+	move(scroll, 421, 190)
+	move(scroll, 423, 120)
+	move(scroll, 480, 60)
+	up(scroll)
+	check(#changes == 0, `a vertical drag across a slider changes nothing (saw {#changes} changes)`)
+	check(#commits == 0, `and saves nothing (saw {#commits} commits)`)
+	check(scrolled:getValue() == 0.5, `the value is where it was (got {scrolled:getValue()})`)
+
+	-- A drag: the finger moves along the track.
+	reset()
+	local drag = touch(300, 216)
+	down(drag)
+	move(drag, 304, 217)
+	check(#changes == 0, "a few pixels of jitter do not start a drag")
+	move(drag, 340, 218)
+	check(#changes > 0, "moving sideways starts the drag")
+	check(
+		math.abs(scrolled:getValue() - Config.fromFraction("Volume", 0.6)) < 1e-6,
+		`the value follows the finger to x = 340 (got {scrolled:getValue()})`
+	)
+	move(drag, 460, 260)
+	check(
+		math.abs(scrolled:getValue() - Config.fromFraction("Volume", 0.9)) < 1e-6,
+		`and keeps following once the drag has begun, even off the track (got {scrolled:getValue()})`
+	)
+	check(#commits == 0, "nothing is saved while the finger is down")
+	up(drag)
+	check(#commits == 1, `lifting the finger saves once (saw {#commits})`)
+	check(commits[1] == scrolled:getValue(), "and saves what the slider shows")
+
+	-- A tap on the track still goes to that point, once, on release.
+	reset()
+	local tap = touch(200, 216)
+	down(tap)
+	check(#changes == 0, "a tap has not done anything while the finger is down")
+	up(tap)
+	check(
+		math.abs(scrolled:getValue() - Config.fromFraction("Volume", 0.25)) < 1e-6,
+		`a tap moves the slider to the finger (got {scrolled:getValue()})`
+	)
+	check(#commits == 1, `and saves it (saw {#commits})`)
+
+	-- A tap that drifted a few pixels is still a tap.
+	reset()
+	local drifting = touch(400, 216)
+	down(drifting)
+	move(drifting, 403, 219)
+	up(drifting)
+	check(#commits == 1, "a finger that wobbled by a few pixels and lifted is a tap")
+
+	-- A scroll gesture ends the round: the same finger moving sideways later
+	-- (the panel is being flicked) does not turn into a drag.
+	reset()
+	local flick = touch(300, 216)
+	down(flick)
+	move(flick, 300, 150)
+	move(flick, 480, 150)
+	up(flick)
+	check(#changes == 0 and #commits == 0, "a touch that went vertical first stays a scroll")
+
+	-- Another finger elsewhere on the screen is not this slider's.
+	reset()
+	local mine = touch(300, 216)
+	local other = touch(50, 50)
+	down(mine)
+	move(mine, 360, 216)
+	local seen = scrolled:getValue()
+	move(other, 480, 50)
+	check(scrolled:getValue() == seen, "a second finger does not steer the slider")
+	up(other)
+	check(#commits == 0, "and lifting it does not save")
+	up(mine)
+	check(#commits == 1, "the finger that dragged is the one that saves")
+
+	-- The mouse keeps jump-to-point: there is no scrolling by dragging with it.
+	reset()
+	local click = {
+		UserInputType = roblox.Enum.UserInputType.MouseButton1,
+		UserInputState = roblox.Enum.UserInputState.Begin,
+		Position = roblox.Vector3.new(400, 216, 0),
+	}
+	down(click)
+	check(
+		math.abs(scrolled:getValue() - Config.fromFraction("Volume", 0.75)) < 1e-6,
+		`a mouse press goes to the pointer at once (got {scrolled:getValue()})`
+	)
+	local hover = {
+		UserInputType = roblox.Enum.UserInputType.MouseMovement,
+		UserInputState = roblox.Enum.UserInputState.Change,
+		Position = roblox.Vector3.new(500, 216, 0),
+	}
+	UserInputEvents.InputChanged:Fire(hover, false)
+	check(scrolled:getValue() == Config.fromFraction("Volume", 1), "and follows the pointer while it is held")
+	click.UserInputState = roblox.Enum.UserInputState.End
+	UserInputEvents.InputEnded:Fire(click, false)
+	check(#commits == 1, "and saves on release")
+
+	scrolled:destroy()
+end
+
+--------------------------------------------------------------------------------
 -- The spin button says what a spin costs
 --
 -- It read КРУТИТЬ in every state, so once the free spin was used the same tap
