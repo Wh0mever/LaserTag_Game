@@ -251,11 +251,13 @@ local function makeImpact(index: number)
 	light.Enabled = false
 	light.Parent = part
 
-	return { part = part, sparks = sparks, light = light, sound = VFXSound.positional(part, 6, 140) }
+	return { part = part, sparks = sparks, light = light, scorch = true, sound = VFXSound.positional(part, 6, 140) }
 end
 
 local function stepImpact(item, alpha: number)
-	item.part.Transparency = SCORCH_TRANSPARENCY + (1 - SCORCH_TRANSPARENCY) * alpha
+	if item.scorch then
+		item.part.Transparency = SCORCH_TRANSPARENCY + (1 - SCORCH_TRANSPARENCY) * alpha
+	end
 
 	if alpha < IMPACT_FLASH_FRACTION then
 		item.light.Brightness = IMPACT_LIGHT_BRIGHTNESS * (1 - alpha / IMPACT_FLASH_FRACTION)
@@ -270,21 +272,27 @@ local function finishImpact(item)
 end
 
 --[[
-	Spark burst, flash and scorch at a hit position. `normal` only has to point
-	away from the surface; a remote shot passes the direction back to the shooter,
-	which is close enough for a mark that fades in about a second.
+	Spark burst, flash and (unless `scorch` is false) a scorch mark at a hit
+	position. `normal` only has to point away from the surface.
+
+	The mark is a slab laid flat on a surface, so it belongs on walls and floors
+	only. A player is a moving target and the hit point on it is not a surface
+	the slab can sit on: it would hang in the air where the body used to be.
+	Sparks and the flash still say "that connected", so a body hit passes false.
 ]]
-function WorldEffects.impact(position: Vector3, normal: Vector3, color: Color3)
+function WorldEffects.impact(position: Vector3, normal: Vector3, color: Color3, scorch: boolean?)
 	local item = EffectPool.acquire("impact")
 	if not item then
 		return
 	end
 
+	item.scorch = scorch ~= false
+
 	local facing = if normal.Magnitude > 0.01 then normal.Unit else Vector3.yAxis
 	-- Lift the slab a hair off the surface so it cannot z-fight the wall it is
 	-- painted on.
 	item.part.CFrame = CFrame.lookAt(position + facing * 0.03, position + facing)
-	item.part.Transparency = SCORCH_TRANSPARENCY
+	item.part.Transparency = if item.scorch then SCORCH_TRANSPARENCY else 1
 
 	item.sparks.Color = ColorSequence.new(color)
 	item.sparks:Emit(IMPACT_PARTICLES)

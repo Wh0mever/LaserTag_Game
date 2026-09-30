@@ -294,6 +294,139 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- A scorch mark only goes on something solid
+--
+-- Every impact used to leave a dark slab, and the slab is painted flat against
+-- "the surface" — which for a body hit is a moving player, and for another
+-- player's miss is empty air at the end of the range. Both left black squares
+-- hanging in mid-air. Sparks and the flash still belong to a body hit; the mark
+-- does not.
+--------------------------------------------------------------------------------
+
+heading("Scorch marks stay on walls")
+
+-- Freshly booted VFX plus the two things a ray can find.
+local function vfxSession()
+	boot("desktop")
+	local player = Env.service("Players").LocalPlayer
+	Env.load("src/client/ClientState").init()
+	local VFXController = Env.load("src/client/Controllers/VFXController")
+	VFXController.init()
+	VFXController.start()
+	player.Character = makeCharacter(nil)
+
+	local wall = roblox.Instance.new("Part")
+	wall.Name = "Wall"
+	wall.Parent = Env.workspace()
+
+	local enemy = roblox.Instance.new("Model")
+	enemy.Name = "Enemy"
+	local enemyHumanoid = roblox.Instance.new("Humanoid")
+	enemyHumanoid.Parent = enemy
+	local torso = roblox.Instance.new("Part")
+	torso.Name = "UpperTorso"
+	torso.Parent = enemy
+	enemy.Parent = Env.workspace()
+
+	return VFXController, wall, torso, Env.workspace():FindFirstChild("LaserTagVFX")
+end
+
+-- The impact slabs that are lit and whether a mark is showing on them.
+local function impactsOf(folder: any): { { scorch: boolean, facing: any } }
+	local found = {}
+	for _, child in folder:GetChildren() do
+		local light = child:FindFirstChildOfClass("PointLight")
+		if child.Name:match("^Impact") and light and light.Enabled then
+			table.insert(found, { scorch = child.Transparency < 1, facing = child.CFrame.LookVector })
+		end
+	end
+	return found
+end
+
+do
+	local muzzleAt = V3.new(0, 5, 0)
+	local color = roblox.Color3.new(0, 1, 1)
+
+	-- Another player's shot into a wall: the mark goes on, facing out of it.
+	local VFX, wall, torso, folder = vfxSession()
+	local probes = {}
+	Env.raycast = function(origin, direction)
+		table.insert(probes, { origin = origin, direction = direction })
+		return { Instance = wall, Position = V3.new(0, 5, -30), Normal = V3.new(1, 0, 0), Distance = 1 }
+	end
+	VFX.playRemoteShot(2, "Rifle", muzzleAt, V3.new(0, 5, -30), color)
+	local hits = impactsOf(folder)
+	check(#hits == 1, `a shot into a wall bursts once (got {#hits})`)
+	if hits[1] then
+		check(hits[1].scorch, "a shot into a wall leaves a scorch mark")
+		check(hits[1].facing:Dot(V3.new(1, 0, 0)) > 0.99, "the mark faces out of the wall along its normal")
+	end
+	check(#probes == 1, `the surface is probed once (got {#probes})`)
+	if probes[1] then
+		-- The probe has to cover the reported hit point, or it would find a
+		-- different surface than the one the server hit.
+		local along = probes[1].direction.Unit
+		local toHit = V3.new(0, 5, -30) - probes[1].origin
+		local across = (toHit - along * toHit:Dot(along)).Magnitude
+		check(
+			across < 0.01 and toHit:Dot(along) > 0 and toHit.Magnitude < probes[1].direction.Magnitude,
+			"the probe spans the hit point"
+		)
+	end
+	VFX.stop()
+
+	-- Into a player: sparks, no mark.
+	VFX, wall, torso, folder = vfxSession()
+	Env.raycast = function()
+		return { Instance = torso, Position = V3.new(0, 5, -30), Normal = V3.new(0, 0, 1), Distance = 1 }
+	end
+	VFX.playRemoteShot(2, "Rifle", muzzleAt, V3.new(0, 5, -30), color)
+	hits = impactsOf(folder)
+	check(#hits == 1 and not hits[1].scorch, "a shot into a player sparks but leaves no mark")
+	VFX.stop()
+
+	-- Nothing under the reported point: a player who has already moved on. The
+	-- sparks still tell the viewer someone was hit; there is no wall for a mark.
+	VFX, wall, torso, folder = vfxSession()
+	Env.raycast = nil
+	VFX.playRemoteShot(2, "Rifle", muzzleAt, V3.new(0, 5, -30), color)
+	hits = impactsOf(folder)
+	check(#hits == 1 and not hits[1].scorch, "a hit on something that has moved sparks without a mark")
+	VFX.stop()
+
+	-- The end of the range: nothing was hit at all.
+	VFX, wall, torso, folder = vfxSession()
+	Env.raycast = function()
+		return { Instance = wall, Position = V3.new(0, 5, -400), Normal = V3.new(0, 0, 1), Distance = 1 }
+	end
+	VFX.playRemoteShot(2, "Rifle", muzzleAt, V3.new(0, 5, -400), color)
+	check(#livingBeams(folder) == 1, "a miss still draws its beam")
+	check(#impactsOf(folder) == 0, "a miss at the end of the range bursts nowhere")
+	VFX.stop()
+
+	-- The local player's own shots.
+	VFX, wall, torso, folder = vfxSession()
+	Env.raycast = function()
+		return { Instance = wall, Position = V3.new(0, 5, -20), Normal = V3.new(0, 0, 1), Distance = 20 }
+	end
+	VFX.playLocalShot("Rifle", muzzleAt, V3.new(0, 0, -1))
+	hits = impactsOf(folder)
+	check(#hits == 1 and hits[1].scorch, "your own shot into a wall leaves a mark")
+	VFX.stop()
+
+	VFX, wall, torso, folder = vfxSession()
+	Env.raycast = function()
+		return { Instance = torso, Position = V3.new(0, 5, -20), Normal = V3.new(0, 0, 1), Distance = 20 }
+	end
+	VFX.playLocalShot("Rifle", muzzleAt, V3.new(0, 0, -1))
+	hits = impactsOf(folder)
+	check(#hits == 1 and not hits[1].scorch, "your own shot into a player sparks but leaves no mark")
+	VFX.stop()
+
+	Env.raycast = nil
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 

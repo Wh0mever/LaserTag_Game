@@ -95,6 +95,11 @@ local SOUNDS = {
 
 local FALLBACK_BEAM_COLOR = Color3.fromRGB(0, 229, 255)
 
+-- A miss is reported as the point `range` studs along the server's ray from the
+-- eye. The muzzle is a few studs off the eye, so "at the end of the range" has
+-- to allow for that; a real hit this close to the limit loses only its sparks.
+local MISS_SLACK = 8
+
 local player = Players.LocalPlayer
 local trove = Trove.new()
 
@@ -143,6 +148,15 @@ local function worldMuzzle(weaponId: string): Vector3?
 end
 
 --[[
+	Whether a ray hit part of a player rather than the world. Walks up to the
+	nearest Model, which skips an Accessory and lands on the character.
+]]
+local function isBody(instance: Instance): boolean
+	local model = instance:FindFirstAncestorOfClass("Model")
+	return model ~= nil and model:FindFirstChildOfClass("Humanoid") ~= nil
+end
+
+--[[
 	The local player's own shot, drawn on the frame the trigger was pulled.
 
 	The raycast here is COSMETIC ONLY. It decides where the beam stops and
@@ -169,14 +183,16 @@ function VFXController.playLocalShot(weaponId: string, origin: Vector3, directio
 	local from = ViewmodelController.getMuzzlePosition() or worldMuzzle(weaponId) or origin
 	WorldEffects.beam(from, hitPos, color, weapon.beamWidth, nil)
 	if result then
-		WorldEffects.impact(hitPos, result.Normal, color)
+		WorldEffects.impact(hitPos, result.Normal, color, not isBody(result.Instance))
 	end
 	VFXSound.playLocal(weaponId)
 end
 
 --[[
 	Another player's shot, replayed from ShotFired. Both endpoints and the skin
-	colour come from the server, so nothing here has to be re-derived.
+	colour come from the server, so the beam needs nothing re-derived. Only the
+	burst asks the world a question (what surface is at the hit point?), because
+	the wire carries no normal and no word on whether the shot hit anything.
 ]]
 function VFXController.playRemoteShot(
 	_shooterUserId: number,
@@ -192,8 +208,32 @@ function VFXController.playRemoteShot(
 
 	local tint = if typeof(color) == "Color3" then color else FALLBACK_BEAM_COLOR
 	WorldEffects.beam(muzzlePos, hitPos, tint, weapon.beamWidth, weaponId)
-	-- No surface normal on the wire, so the burst faces back at the shooter.
-	WorldEffects.impact(hitPos, muzzlePos - hitPos, tint)
+
+	local span = hitPos - muzzlePos
+	if span.Magnitude < 0.1 or span.Magnitude >= weapon.range - MISS_SLACK then
+		-- The shot hit nothing: its endpoint is empty air, and a burst there
+		-- would float.
+		return
+	end
+
+	-- No surface normal on the wire, so find the surface the server hit with a
+	-- short probe across the reported point. Only the local character is
+	-- excluded: what the server hit was in the world, not the viewer.
+	local direction = span.Unit
+	-- (A dead viewer has no character; the list is then empty and the probe
+	-- still works, which is when the death camera is watching other people's
+	-- shots.)
+	filterList[1] = player.Character
+	raycastParams.FilterDescendantsInstances = filterList
+	local probe = workspace:Raycast(hitPos - direction, direction * 2, raycastParams)
+
+	if probe then
+		WorldEffects.impact(hitPos, probe.Normal, tint, not isBody(probe.Instance))
+	else
+		-- Nothing under the point any more: the target has moved on, or it is
+		-- this viewer being hit. Sparks say someone was hit; a mark needs a wall.
+		WorldEffects.impact(hitPos, -direction, tint, false)
+	end
 end
 
 --------------------------------------------------------------------------------
