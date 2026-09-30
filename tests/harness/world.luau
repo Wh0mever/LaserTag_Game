@@ -312,6 +312,88 @@ local function coplanarTops(built: any)
 	return pairsFound
 end
 
+--------------------------------------------------------------------------------
+-- Sight lines
+--
+-- There is no renderer here, but "can the eye see that sign" is a segment
+-- against boxes, and every part in these maps is one. A part hides what is
+-- behind it whether or not it collides or answers raycasts, so unlike a
+-- gameplay raycast this counts everything that draws.
+--------------------------------------------------------------------------------
+
+-- Standing eye above the HumanoidRootPart height that spawns are placed at.
+local EYE_ABOVE_SPAWN = 1.5
+
+local function segmentHitsPart(part: any, from: any, to: any): boolean
+	local cf = part.CFrame
+	local a = cf:PointToObjectSpace(from)
+	local b = cf:PointToObjectSpace(to)
+	local half = part.Size / 2
+	local tMin, tMax = 0, 1
+	for _, axis in { "X", "Y", "Z" } do
+		local origin, delta, extent = a[axis], b[axis] - a[axis], half[axis]
+		if math.abs(delta) < 1e-9 then
+			if math.abs(origin) > extent then
+				return false
+			end
+		else
+			local t1, t2 = (-extent - origin) / delta, (extent - origin) / delta
+			if t1 > t2 then
+				t1, t2 = t2, t1
+			end
+			tMin, tMax = math.max(tMin, t1), math.min(tMax, t2)
+			if tMin > tMax then
+				return false
+			end
+		end
+	end
+	return true
+end
+
+-- Anything that draws and is big enough to matter: studs are decoration on top
+-- of blocks (and cylinders, which a box test would over-count).
+local function occluders(built: any, ignore: { [any]: boolean }): { any }
+	local list = {}
+	for _, node in built.model:GetDescendants() do
+		if
+			node:IsA("BasePart")
+			and node.Transparency < 0.5
+			and node.Name ~= "Stud"
+			and node.Name ~= "CeilingTile"
+			and not ignore[node]
+		then
+			table.insert(list, node)
+		end
+	end
+	return list
+end
+
+--[[
+	The share of a sign face a viewer at `eye` can see: a 5 x 3 grid of points
+	half a stud in front of the face, each tested against everything that draws.
+]]
+local function visibleShare(eye: any, face: any, blockers: { any }): number
+	local half = face.Size / 2
+	local seen, total = 0, 0
+	for _, u in { -0.9, -0.45, 0, 0.45, 0.9 } do
+		for _, v in { -0.8, 0, 0.8 } do
+			total += 1
+			local point = face.CFrame * roblox.Vector3.new(u * half.X, v * half.Y, -(half.Z + 0.5))
+			local hidden = false
+			for _, blocker in blockers do
+				if segmentHitsPart(blocker, eye, point) then
+					hidden = true
+					break
+				end
+			end
+			if not hidden then
+				seen += 1
+			end
+		end
+	end
+	return seen / total
+end
+
 local results = {}
 
 for _, entry in MAPS do
@@ -462,6 +544,60 @@ for _, entry in MAPS do
 						.. `(dot {string.format("%.2f", node.CFrame.LookVector:Dot(toPlaza))})`
 				)
 			end
+		end
+
+		----------------------------------------------------------------------
+		-- Can a player standing in the lobby read the hub's signs?
+		--
+		-- The leaderboard and the portals' names are the only things that tell
+		-- a new player what to do in this room. Each one used to stand behind
+		-- another portal, a planter or the gateway sign: present, correctly
+		-- lettered, facing the right way and unreadable. So every sign is
+		-- measured from every lobby spawn, and each must be mostly in view from
+		-- most of them.
+		----------------------------------------------------------------------
+		local eyes = {}
+		for _, cf in built.spawns.Lobby do
+			table.insert(eyes, cf.Position + roblox.Vector3.new(0, EYE_ABOVE_SPAWN, 0))
+		end
+
+		local targets = {}
+		for _, portal in built.portals do
+			table.insert(targets, { label = `the {portal.mapId} portal sign`, face = portal.gui.Parent })
+		end
+		if built.boards.TopKills then
+			table.insert(targets, { label = "the Top Kills board", face = built.boards.TopKills.Parent })
+		end
+
+		for _, target in targets do
+			local ignore = { [target.face] = true }
+			-- A board is a screen plus its own frame and glow; those are the
+			-- sign, not something in front of it.
+			if target.face.Name == "BoardScreen" then
+				for _, sibling in target.face.Parent:GetChildren() do
+					if sibling.Name == "BoardFrame" or sibling.Name == "BoardGlow" then
+						ignore[sibling] = true
+					end
+				end
+			end
+			local blockers = occluders(built, ignore)
+
+			local wellSeen, sum = 0, 0
+			for _, eye in eyes do
+				local share = visibleShare(eye, target.face, blockers)
+				sum += share
+				if share >= 0.6 then
+					wellSeen += 1
+				end
+			end
+			print(
+				`  {target.label}: {string.format("%.0f", sum / #eyes * 100)}% visible on average, `
+					.. `readable from {wellSeen}/{#eyes} spawns`
+			)
+			check(
+				wellSeen >= math.ceil(#eyes * 0.75),
+				`{target.label} is mostly in view from the lobby (readable from {wellSeen} of {#eyes} spawns)`
+			)
 		end
 
 		for _, portal in built.portals do

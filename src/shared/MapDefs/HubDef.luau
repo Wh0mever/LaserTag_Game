@@ -82,11 +82,15 @@ end
 -- tied by an assertion in tests/MapDefs.spec.luau rather than by a require.
 add({
 	kind = "sign",
-	pos = { x = 0, y = 17.5, z = -20 },
+	pos = { x = 0, y = 23.5, z = -20 },
 	size = { x = 36, y = 9, z = 1.2 },
 	facing = "+z",
-	-- Posts reach the ground: 17.5 - 4.5 - 13 = 0.
-	postHeight = 13,
+	-- Posts reach the ground: 23.5 - 4.5 - 19 = 0. The sign is this high so it
+	-- clears the line of sight from the landing area to the middle portal's
+	-- name and to the leaderboard behind it: hung at head-and-a-bit height, as
+	-- it first was, it stood squarely in front of both and hid two thirds of
+	-- the one and most of the other. tests/harness/world.luau measures it.
+	postHeight = 19,
 	lines = { "SKILLANDIA", "LASERTAG" },
 })
 
@@ -116,12 +120,15 @@ add({
 	padSize = { x = 20, y = 1.2, z = 20 },
 })
 
--- Top Kills board, mounted flat against the north wall facing the plaza.
+-- Top Kills board, mounted flat against the north wall facing the plaza. It
+-- stands in the gap between the Dust and Mirage portals rather than on the
+-- centre line: every portal is a 29-stud-wide frame, and the one at x = 0 hides
+-- all but a sliver of a wall-wide board behind it from anywhere in the lobby.
 add({
 	kind = "board",
 	boardId = "TopKills",
-	pos = { x = 0, y = 17, z = -94 },
-	size = { x = 56, y = 28, z = 1.6 },
+	pos = { x = -36, y = 17, z = -94 },
+	size = { x = 26, y = 28, z = 1.6 },
 	facing = "+z",
 	title = "ЛУЧШИЕ СТРЕЛКИ",
 })
