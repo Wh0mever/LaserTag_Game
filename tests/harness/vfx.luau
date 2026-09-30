@@ -21,6 +21,7 @@
 ]]
 
 local Env = require("./env")
+local realTask = require("@lune/task")
 local roblox = require("@lune/roblox")
 
 --------------------------------------------------------------------------------
@@ -142,12 +143,15 @@ local function makeCharacter(gunId: string?, gunAt: any?)
 	local root = roblox.Instance.new("Part")
 	root.Name = "HumanoidRootPart"
 	root.Size = V3.new(2, 2, 1)
+	-- Runtime-only properties the data model has no default for.
+	root.AssemblyLinearVelocity = V3.zero
 	root.Parent = character
 	character.PrimaryPart = root
 
 	local humanoid = roblox.Instance.new("Humanoid")
 	humanoid.MaxHealth = 100
 	humanoid.Health = 100
+	humanoid.FloorMaterial = roblox.Enum.Material.Plastic
 	humanoid.Parent = character
 
 	if gunId then
@@ -700,6 +704,208 @@ do
 		`a wall right behind the target still leaves a view of it, no closer than 1.5 studs (got {tight})`
 	)
 	Env.raycast = nil
+end
+
+--------------------------------------------------------------------------------
+-- The first-person gun stays out of walls
+--
+-- The viewmodel is real geometry in the world, drawn with the same depth buffer
+-- as the map. At full size the rifle's barrel reached four studs in front of
+-- the camera and the Lance's five, so standing against a wall pushed the gun
+-- through it. Shrunk about its pivot and brought in by the same factor it is
+-- the same picture on screen, and nothing in it is more than a stud or two from
+-- the eye.
+--------------------------------------------------------------------------------
+
+heading("Viewmodel geometry")
+
+do
+	boot("desktop")
+	local player = Env.service("Players").LocalPlayer
+	local ClientState = Env.load("src/client/ClientState")
+	ClientState.init()
+	local Perspective = Env.load("src/client/Controllers/PerspectiveController")
+	local Viewmodel = Env.load("src/client/Controllers/ViewmodelController")
+	local Recoil = Env.load("src/client/Controllers/RecoilController")
+	local WeaponConfig = Env.load("src/shared/Config/WeaponConfig")
+	Perspective.set(Perspective.FIRST)
+	Recoil.init()
+	Viewmodel.init()
+
+	player.Character = makeCharacter(nil)
+	ClientState.isDead = false
+	player:SetAttribute("InMatch", "Dust")
+	Viewmodel.start()
+
+	-- Farthest any corner of the gun gets from the camera, which sits at the origin.
+	local function reach(model: any): number
+		local farthest = 0
+		for _, part in partsOf(model) do
+			local half = part.Size / 2
+			for _, sx in { -1, 1 } do
+				for _, sy in { -1, 1 } do
+					for _, sz in { -1, 1 } do
+						local corner = part.CFrame * V3.new(half.X * sx, half.Y * sy, half.Z * sz)
+						farthest = math.max(farthest, corner.Magnitude)
+					end
+				end
+			end
+		end
+		return farthest
+	end
+
+	-- Real seconds: the raise animation runs off os.clock. Each weapon is given
+	-- time to finish it, so the pose measured is the pose at rest.
+	local function settled(weaponId: string): any
+		Viewmodel.setWeapon(weaponId)
+		realTask.wait(0.4)
+		local errors = Env.stepRender()
+		check(#errors == 0, `the viewmodel renders cleanly{if errors[1] then ": " .. errors[1].err else ""}`)
+		return Viewmodel.getModel()
+	end
+
+	local expectedDirection = {
+		Rifle = V3.new(0.95, -0.95, -1.15).Unit,
+		Pistol = V3.new(0.78, -0.82, -1.0).Unit,
+	}
+	local holds = {}
+
+	for _, weaponId in { "Rifle", "Pistol", "Lance" } do
+		local model = settled(weaponId)
+		check(model ~= nil, `{weaponId} has a viewmodel in first person`)
+		if not model then
+			continue
+		end
+
+		local farthest = reach(model)
+		check(farthest <= 1.75, `{weaponId} reaches no further than 1.75 studs from the camera (reaches {farthest})`)
+
+		local handle = model.PrimaryPart.CFrame.Position
+		-- Where the gun sits in the units it was designed in, whatever it was scaled to.
+		holds[weaponId] = handle / model:GetScale()
+
+		if expectedDirection[weaponId] then
+			check(
+				handle.Unit:Dot(expectedDirection[weaponId]) > 0.9999,
+				`{weaponId} sits in the same place on screen as before (direction {tostring(handle.Unit)})`
+			)
+		end
+
+		-- The beam of a local shot starts here, so it must be the barrel tip of
+		-- the shrunk gun and not of the full-size one.
+		local tip = Viewmodel.getMuzzlePosition()
+		local barrelTip = model.PrimaryPart.CFrame
+			* V3.new(0, 0, WeaponConfig.get(weaponId).muzzleOffset.z * model:GetScale())
+		check(
+			tip ~= nil and (tip - barrelTip).Magnitude < 0.01,
+			`{weaponId}'s muzzle is at the barrel tip of the gun on screen (at {tostring(tip)}, tip {tostring(barrelTip)})`
+		)
+	end
+
+	-- The longer gun is held further back than the generic pose (0.9, -0.9, -1.1),
+	-- or its stock ends up in the near plane.
+	if holds.Lance then
+		check(holds.Lance.Z < -1.2, `the Lance is held further back than the default pose (hold z {holds.Lance.Z})`)
+	end
+
+	-- A reload dips the gun by the same proportion of its distance as before.
+	Viewmodel.setWeapon("Rifle")
+	realTask.wait(0.4)
+	Env.stepRender()
+	local restY = Viewmodel.getModel().PrimaryPart.CFrame.Position.Y
+	Viewmodel.playReload(0.5)
+	realTask.wait(0.25)
+	Env.stepRender()
+	local dipped = Viewmodel.getModel().PrimaryPart.CFrame.Position
+	local proportion = (restY - dipped.Y) / -dipped.Z
+	check(
+		math.abs(proportion - 0.55 / 1.15) < 0.03,
+		`the reload dip keeps its proportion on screen (dropped {proportion} of the distance, wanted {0.55 / 1.15})`
+	)
+end
+
+--------------------------------------------------------------------------------
+-- The first-person beam and flash keep their size on screen
+--
+-- Shrinking the gun brings its muzzle to a stud or so from the eye. A beam a
+-- quarter of a stud wide and a half-stud flash, unchanged, would then fill a
+-- quarter of the view for a tenth of a second instead of the sliver they were
+-- at four studs. The near end of the effect scales with the gun; the far end
+-- of a beam, which is far away either way, does not.
+--------------------------------------------------------------------------------
+
+heading("First-person beam scale")
+
+do
+	boot("desktop")
+	local player = Env.service("Players").LocalPlayer
+	local ClientState = Env.load("src/client/ClientState")
+	ClientState.init()
+	local Perspective = Env.load("src/client/Controllers/PerspectiveController")
+	local Viewmodel = Env.load("src/client/Controllers/ViewmodelController")
+	local VFXController = Env.load("src/client/Controllers/VFXController")
+	local EffectPool = Env.load("src/client/Controllers/VFX/EffectPool")
+	local WeaponConfig = Env.load("src/shared/Config/WeaponConfig")
+	Perspective.set(Perspective.FIRST)
+	Env.load("src/client/Controllers/RecoilController").init()
+	Viewmodel.init()
+	VFXController.init()
+	VFXController.start()
+
+	player.Character = makeCharacter(nil)
+	ClientState.isDead = false
+	player:SetAttribute("InMatch", "Dust")
+	Viewmodel.start()
+	Env.stepRender()
+
+	local scale = Viewmodel.getModel():GetScale()
+	local width = WeaponConfig.get("Rifle").beamWidth
+	local folder = Env.workspace():FindFirstChild("LaserTagVFX")
+
+	local function largestFlash(part: any): number
+		local emitter = part:FindFirstChildWhichIsA("ParticleEmitter", true)
+		local largest = 0
+		for _, keypoint in emitter.Size.Keypoints do
+			largest = math.max(largest, keypoint.Value)
+		end
+		return largest
+	end
+
+	VFXController.playLocalShot("Rifle", V3.new(0, 0, 0), V3.new(0, 0, -1))
+	local own = livingBeams(folder)[1]
+	check(own ~= nil, "a local shot in first person draws a beam")
+	if own then
+		local beam = own:FindFirstChildOfClass("Beam")
+		check(
+			math.abs(beam.Width0 - width * scale) < 1e-4,
+			`the beam is thin where it leaves the shrunk gun (near width {beam.Width0}, wanted {width * scale})`
+		)
+		check(math.abs(beam.Width1 - width * 0.45) < 1e-4, `and unchanged at the far end (far width {beam.Width1})`)
+		check(
+			math.abs(largestFlash(own) - 0.55 * scale) < 1e-4,
+			`the muzzle flash is small in proportion (largest {largestFlash(own)}, wanted {0.55 * scale})`
+		)
+	end
+
+	-- The pooled part is reused: the next shot, someone else's, must not inherit
+	-- the small flash.
+	EffectPool.step(os.clock() + 5)
+	VFXController.playRemoteShot(2, "Rifle", V3.new(20, 5, 0), V3.new(20, 5, -50), roblox.Color3.new(1, 0, 0))
+	local other = livingBeams(folder)[1]
+	check(other ~= nil, "another player's shot draws a beam")
+	if other then
+		local beam = other:FindFirstChildOfClass("Beam")
+		check(
+			math.abs(beam.Width0 - width) < 1e-4,
+			`another player's beam is full width at the muzzle (near width {beam.Width0})`
+		)
+		check(
+			math.abs(largestFlash(other) - 0.55) < 1e-4,
+			`and their flash is full size, not the shrunk one left over (largest {largestFlash(other)})`
+		)
+	end
+
+	VFXController.stop()
 end
 
 --------------------------------------------------------------------------------

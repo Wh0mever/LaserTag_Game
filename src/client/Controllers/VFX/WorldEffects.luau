@@ -39,6 +39,8 @@ local BEAM_TAPER = 0.45
 local BEAM_TRANSPARENCY = NumberSequence.new(0.05, 0.4)
 
 local MUZZLE_PARTICLES = 8
+local FLASH_SIZE = 0.55
+local FLASH_SPEED_MIN, FLASH_SPEED_MAX = 6, 14
 local MUZZLE_LIGHT_RANGE, MUZZLE_LIGHT_BRIGHTNESS = 9, 5
 -- The flash must be over well before the beam is; a muzzle lit for the whole
 -- beam reads as a flashlight rather than a discharge.
@@ -113,10 +115,10 @@ local function makeBeam(index: number)
 	local flash = Instance.new("ParticleEmitter")
 	flash.Rate = 0
 	flash.Lifetime = NumberRange.new(0.05, 0.12)
-	flash.Speed = NumberRange.new(6, 14)
+	flash.Speed = NumberRange.new(FLASH_SPEED_MIN, FLASH_SPEED_MAX)
 	flash.SpreadAngle = Vector2.new(18, 18)
 	flash.Size = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.55),
+		NumberSequenceKeypoint.new(0, FLASH_SIZE),
 		NumberSequenceKeypoint.new(1, 0),
 	})
 	flash.Transparency = NumberSequence.new(0.1)
@@ -142,12 +144,40 @@ local function makeBeam(index: number)
 		light = light,
 		sound = VFXSound.positional(part, 8, 240),
 		width = 0.25,
+		startWidth = 0.25,
 	}
+end
+
+-- The flash's size and speed for a given near scale (see WorldEffects.beam).
+-- Remembered per scale: only a couple of values ever occur, and building a
+-- NumberSequence on every shot is allocation for no reason.
+local flashSizes: { [number]: NumberSequence } = {}
+local flashSpeeds: { [number]: NumberRange } = {}
+
+local function flashSizeFor(scale: number): NumberSequence
+	local sequence = flashSizes[scale]
+	if not sequence then
+		sequence = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, FLASH_SIZE * scale),
+			NumberSequenceKeypoint.new(1, 0),
+		})
+		flashSizes[scale] = sequence
+	end
+	return sequence
+end
+
+local function flashSpeedFor(scale: number): NumberRange
+	local range = flashSpeeds[scale]
+	if not range then
+		range = NumberRange.new(FLASH_SPEED_MIN * scale, FLASH_SPEED_MAX * scale)
+		flashSpeeds[scale] = range
+	end
+	return range
 end
 
 local function stepBeam(item, alpha: number)
 	local shrink = 1 - alpha
-	item.beam.Width0 = item.width * shrink
+	item.beam.Width0 = item.startWidth * shrink
 	item.beam.Width1 = item.width * BEAM_TAPER * shrink
 
 	if alpha < MUZZLE_FRACTION then
@@ -166,8 +196,22 @@ end
 	One laser from `from` to `to`, with its muzzle flash at `from`.
 	`soundKey` plays positionally at the muzzle; pass nil for the local player's
 	own shot, whose report is played in 2D instead.
+
+	`nearScale` (default 1) shrinks the END AT THE MUZZLE: its width, and the size
+	and speed of the flash. The first-person gun is drawn small and close to the
+	eye, and a full-size beam or flash that near would fill a large part of the
+	view; scaled by the gun's own factor they keep the size on screen they had
+	when the gun was at full size. The far end is far away either way, so it
+	keeps its width.
 ]]
-function WorldEffects.beam(from: Vector3, to: Vector3, color: Color3, width: number, soundKey: string?)
+function WorldEffects.beam(
+	from: Vector3,
+	to: Vector3,
+	color: Color3,
+	width: number,
+	soundKey: string?,
+	nearScale: number?
+)
 	local distance = (to - from).Magnitude
 	if distance < 0.1 then
 		return
@@ -180,14 +224,20 @@ function WorldEffects.beam(from: Vector3, to: Vector3, color: Color3, width: num
 
 	item.part.CFrame = CFrame.lookAt(from, to)
 	item.target.Position = Vector3.new(0, 0, -distance)
+	local scale = nearScale or 1
 	item.width = width
+	item.startWidth = width * scale
 
 	item.beam.Color = ColorSequence.new(color)
-	item.beam.Width0 = width
+	item.beam.Width0 = item.startWidth
 	item.beam.Width1 = width * BEAM_TAPER
 	item.beam.Enabled = true
 
 	item.flash.Color = ColorSequence.new(color)
+	-- Every shot, not only scaled ones: the part is reused, and the next shot
+	-- must not inherit the last one's small flash.
+	item.flash.Size = flashSizeFor(scale)
+	item.flash.Speed = flashSpeedFor(scale)
 	item.flash:Emit(MUZZLE_PARTICLES)
 
 	item.light.Color = color

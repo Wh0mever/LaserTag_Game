@@ -180,8 +180,12 @@ function VFXController.playLocalShot(weaponId: string, origin: Vector3, directio
 	-- The beam starts at the muzzle of whichever gun is on screen: the
 	-- viewmodel's in first person, the character's own in third. The shot origin
 	-- is only the fallback for a moment with neither, a hub spawn or a rebuild.
-	local from = ViewmodelController.getMuzzlePosition() or worldMuzzle(weaponId) or origin
-	WorldEffects.beam(from, hitPos, color, weapon.beamWidth, nil)
+	local viewmodelMuzzle = ViewmodelController.getMuzzlePosition()
+	local from = viewmodelMuzzle or worldMuzzle(weaponId) or origin
+	-- The first-person gun is small and close to the eye, so the effects at its
+	-- muzzle are scaled with it; a third-person gun is full size.
+	local nearScale = if viewmodelMuzzle then ViewmodelController.getScale() else 1
+	WorldEffects.beam(from, hitPos, color, weapon.beamWidth, nil, nearScale)
 	if result then
 		WorldEffects.impact(hitPos, result.Normal, color, not isBody(result.Instance))
 	end
