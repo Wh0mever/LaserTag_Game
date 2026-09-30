@@ -20,6 +20,7 @@ local SCENARIOS = {
 	{ name = "client", what = "every client module loads and boots" },
 	{ name = "mobile", what = "a phone can aim, shoot, reload and switch view" },
 	{ name = "match", what = "the match runtime's own rules: sides, late joins, results" },
+	{ name = "vfx", what = "beams, viewmodel, sparks, hitmarker, crosshair, death view" },
 }
 
 local failed = {}

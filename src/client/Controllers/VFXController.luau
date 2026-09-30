@@ -28,6 +28,7 @@ assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.js
 
 local ClientState = require(script.Parent.Parent.ClientState)
 local EffectPool = require(script.Parent.VFX.EffectPool)
+local GunModelFactory = require(Shared.GunModelFactory)
 local ScreenEffects = require(script.Parent.VFX.ScreenEffects)
 local SkinCatalog = require(Shared.Config.SkinCatalog)
 local Trove = require(Shared.Util.Trove)
@@ -114,6 +115,34 @@ local function skinColorFor(weaponId: string): Color3
 end
 
 --[[
+	Where the gun the server welded to the local character has its muzzle, or nil
+	when there is none. This is what everyone else sees the beam leave, and in
+	third person it is what the shooter's own beam has to leave as well: the
+	viewmodel exists only in first person, so without this the beam started at
+	the head.
+
+	Same search as the server's ShotResolver.muzzlePosition, so both ends of a
+	shot agree on which gun is the one in hand.
+]]
+local function worldMuzzle(weaponId: string): Vector3?
+	local character = player.Character
+	if not character then
+		return nil
+	end
+
+	for _, child in character:GetChildren() do
+		if child:IsA("Model") and child:GetAttribute("WeaponId") == weaponId then
+			local muzzle = GunModelFactory.getMuzzle(child)
+			if muzzle then
+				return muzzle.WorldPosition
+			end
+		end
+	end
+
+	return nil
+end
+
+--[[
 	The local player's own shot, drawn on the frame the trigger was pulled.
 
 	The raycast here is COSMETIC ONLY. It decides where the beam stops and
@@ -134,10 +163,11 @@ function VFXController.playLocalShot(weaponId: string, origin: Vector3, directio
 	local hitPos = if result then result.Position else origin + direction * weapon.range
 	local color = skinColorFor(weaponId)
 
-	-- The beam starts at the viewmodel muzzle so it lines up with the gun on
-	-- screen; the camera position is only the fallback for a frame where the
-	-- model has not been built yet.
-	WorldEffects.beam(ViewmodelController.getMuzzlePosition() or origin, hitPos, color, weapon.beamWidth, nil)
+	-- The beam starts at the muzzle of whichever gun is on screen: the
+	-- viewmodel's in first person, the character's own in third. The shot origin
+	-- is only the fallback for a moment with neither, a hub spawn or a rebuild.
+	local from = ViewmodelController.getMuzzlePosition() or worldMuzzle(weaponId) or origin
+	WorldEffects.beam(from, hitPos, color, weapon.beamWidth, nil)
 	if result then
 		WorldEffects.impact(hitPos, result.Normal, color)
 	end
