@@ -36,13 +36,25 @@ local SpectatorController = {}
 -- Last of the controllers: it only reacts to state the others have already set.
 SpectatorController.Priority = 10
 
-local CARD_WIDTH, CARD_HEIGHT = 420, 178
-local DIM_TRANSPARENCY = 0.58
+-- A strip, not a panel. The death camera puts the killer in the middle of the
+-- view, so the card hangs from the top edge (over the clock and the score,
+-- which mean nothing for three seconds) and stays small enough that a phone
+-- held sideways, about 294 studs tall, still shows the person who shot you.
+-- The width is a ceiling: a narrower window gets a narrower card.
+local CARD_WIDTH, CARD_HEIGHT = 300, 104
+-- The line under the bar only has something to say while the killer is being
+-- watched; without it the card gives that row back rather than leaving a
+-- blank band at the bottom.
+local FOOTER_HEIGHT = 16
+local CARD_TOP = 12
+-- Barely a dim: the killer and the map have to stay readable.
+local DIM_TRANSPARENCY = 0.8
 
 local trove = Trove.new()
 local countdownTrove = Trove.new()
 
 local root: Frame? = nil
+local cardFrame: Frame? = nil
 local dim: Frame? = nil
 local eyebrowLabel: TextLabel? = nil
 local killerLabel: TextLabel? = nil
@@ -59,9 +71,17 @@ local killer: Player? = nil
 -- Construction
 --------------------------------------------------------------------------------
 
-local function centeredLabel(text: string, size: number, color: Color3, font: Enum.Font): TextLabel
+local function alignedLabel(
+	name: string,
+	text: string,
+	size: number,
+	color: Color3,
+	font: Enum.Font,
+	alignment: Enum.TextXAlignment
+): TextLabel
 	local label = UITheme.label(text, size, color, font)
-	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.Name = name
+	label.TextXAlignment = alignment
 	label.TextTruncate = Enum.TextTruncate.AtEnd
 	return label
 end
@@ -101,60 +121,82 @@ local function ensureGui(): boolean
 
 	local card = Instance.new("Frame")
 	card.Name = "Card"
-	card.AnchorPoint = Vector2.new(0.5, 0.5)
-	-- Above centre: the death camera frames the killer in the lower two thirds
-	-- of the screen, so the card must not sit on top of them.
-	card.Position = UDim2.fromScale(0.5, 0.3)
-	card.Size = UDim2.fromOffset(CARD_WIDTH, CARD_HEIGHT)
+	card.AnchorPoint = Vector2.new(0.5, 0)
+	card.Position = UDim2.new(0.5, 0, 0, CARD_TOP)
+	card.Size = UDim2.new(0.9, 0, 0, CARD_HEIGHT - FOOTER_HEIGHT)
 	card.BackgroundColor3 = UITheme.Colors.Panel
 	card.BorderSizePixel = 0
 	card.Parent = overlay
+	cardFrame = card
 	UITheme.corner(UITheme.Radius.Large).Parent = card
 	UITheme.stroke(UITheme.Colors.Negative, 2).Parent = card
-	UITheme.padding(18, 16).Parent = card
+	UITheme.padding(14, 10).Parent = card
 
-	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Vertical
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, 4)
-	layout.Parent = card
+	local limit = Instance.new("UISizeConstraint")
+	-- Width only: the height is set by whether the footer line is showing.
+	limit.MaxSize = Vector2.new(CARD_WIDTH, math.huge)
+	limit.Parent = card
 
-	local eyebrow =
-		centeredLabel("ВЫ УБИТЫ", UITheme.TextSizes.Small, UITheme.Colors.TextDim, UITheme.Fonts.Bold)
-	eyebrow.Size = UDim2.new(1, 0, 0, 16)
-	eyebrow.LayoutOrder = 1
+	-- Two columns over a bar: who did it on the left, how long to wait on the
+	-- right. Positioned by hand so the strip's height never depends on layout.
+	local eyebrow = alignedLabel(
+		"Eyebrow",
+		"ВЫ УБИТЫ",
+		UITheme.TextSizes.Small,
+		UITheme.Colors.TextDim,
+		UITheme.Fonts.Bold,
+		Enum.TextXAlignment.Left
+	)
+	eyebrow.Size = UDim2.new(0.54, 0, 0, 16)
 	eyebrow.Parent = card
 	eyebrowLabel = eyebrow
 
-	local name = centeredLabel("", UITheme.TextSizes.Title, UITheme.Colors.Text, UITheme.Fonts.Heading)
-	name.Size = UDim2.new(1, 0, 0, 30)
-	name.LayoutOrder = 2
+	local name = alignedLabel(
+		"Killer",
+		"",
+		UITheme.TextSizes.Heading,
+		UITheme.Colors.Text,
+		UITheme.Fonts.Heading,
+		Enum.TextXAlignment.Left
+	)
+	name.Position = UDim2.fromOffset(0, 18)
+	name.Size = UDim2.new(0.54, 0, 0, 28)
 	name.Parent = card
 	killerLabel = name
 
-	local respawn = centeredLabel(
-		"ВОЗРОЖДЕНИЕ ЧЕРЕЗ",
+	local respawn = alignedLabel(
+		"RespawnCaption",
+		"ВОЗРОЖДЕНИЕ",
 		UITheme.TextSizes.Small,
 		UITheme.Colors.TextDim,
-		UITheme.Fonts.Bold
+		UITheme.Fonts.Bold,
+		Enum.TextXAlignment.Right
 	)
-	respawn.Size = UDim2.new(1, 0, 0, 16)
-	respawn.LayoutOrder = 3
+	respawn.AnchorPoint = Vector2.new(1, 0)
+	respawn.Position = UDim2.fromScale(1, 0)
+	respawn.Size = UDim2.new(0.44, 0, 0, 16)
 	respawn.Parent = card
 
-	local countdown = centeredLabel("3", UITheme.TextSizes.Display, UITheme.Colors.Accent, UITheme.Fonts.Number)
-	countdown.Size = UDim2.new(1, 0, 0, 40)
-	countdown.LayoutOrder = 4
+	local countdown = alignedLabel(
+		"Countdown",
+		"3",
+		UITheme.TextSizes.Display,
+		UITheme.Colors.Accent,
+		UITheme.Fonts.Number,
+		Enum.TextXAlignment.Right
+	)
+	countdown.AnchorPoint = Vector2.new(1, 0)
+	countdown.Position = UDim2.new(1, 0, 0, 14)
+	countdown.Size = UDim2.new(0.44, 0, 0, 38)
 	countdown.Parent = card
 	countdownLabel = countdown
 
 	local barTrack = Instance.new("Frame")
 	barTrack.Name = "BarTrack"
+	barTrack.Position = UDim2.fromOffset(0, 58)
 	barTrack.Size = UDim2.new(1, 0, 0, 6)
 	barTrack.BackgroundColor3 = UITheme.Colors.PanelDark
 	barTrack.BorderSizePixel = 0
-	barTrack.LayoutOrder = 5
 	barTrack.Parent = card
 	UITheme.corner(UITheme.Radius.Pill).Parent = barTrack
 
@@ -167,9 +209,16 @@ local function ensureGui(): boolean
 	UITheme.corner(UITheme.Radius.Pill).Parent = fill
 	barFill = fill
 
-	local footer = centeredLabel("", UITheme.TextSizes.Tiny, UITheme.Colors.TextMuted, UITheme.Fonts.Body)
-	footer.Size = UDim2.new(1, 0, 0, 14)
-	footer.LayoutOrder = 6
+	local footer = alignedLabel(
+		"Watching",
+		"",
+		UITheme.TextSizes.Small,
+		UITheme.Colors.TextMuted,
+		UITheme.Fonts.Body,
+		Enum.TextXAlignment.Center
+	)
+	footer.Position = UDim2.fromOffset(0, 68)
+	footer.Size = UDim2.new(1, 0, 0, 16)
 	footer.Parent = card
 	footerLabel = footer
 
@@ -197,6 +246,11 @@ local function onCountdownStep()
 	if footerLabel then
 		local watching = killer and killer.Parent ~= nil and CameraController.isDeathCamActive()
 		footerLabel.Text = if watching then `НАБЛЮДЕНИЕ: {killer.DisplayName}` else ""
+
+		local height = if watching then CARD_HEIGHT else CARD_HEIGHT - FOOTER_HEIGHT
+		if cardFrame and cardFrame.Size.Y.Offset ~= height then
+			cardFrame.Size = UDim2.new(0.9, 0, 0, height)
+		end
 	end
 end
 

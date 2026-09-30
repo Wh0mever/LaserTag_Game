@@ -909,6 +909,105 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- The death card fits a phone
+--
+-- It was a 420x178 panel in the middle of the screen: on a phone held sideways
+-- (640x294 as Roblox reports it) that is over half the view, sitting on top of
+-- the very player who just killed you, under a heavy dim. It is now a compact
+-- strip pinned to the top edge, over the clock and score, which the death view
+-- has no use for.
+--------------------------------------------------------------------------------
+
+heading("Death card on a phone")
+
+do
+	boot("phone")
+	local camera = Env.workspace().CurrentCamera
+	camera.ViewportSize = roblox.Vector2.new(640, 294)
+	local player = Env.service("Players").LocalPlayer
+	local ClientState = Env.load("src/client/ClientState")
+	ClientState.init()
+	local UIController = Env.load("src/client/UI/UIController")
+	local Spectator = Env.load("src/client/Controllers/SpectatorController")
+	-- The death view has to be running for the card to say who is being watched.
+	Env.load("src/client/Controllers/CameraController").init()
+	Spectator.init()
+	player.Character = makeCharacter(nil)
+
+	ClientState.isDead = true
+	ClientState.Died:Fire(nil, 3)
+
+	local gui = player.PlayerGui:FindFirstChild("Spectator")
+	local card = gui and gui:FindFirstChild("Card", true)
+	local dim = gui and gui:FindFirstChild("Dim", true)
+	check(card ~= nil, "dying puts the card up")
+
+	if card then
+		local scale = UIController.computeScale(camera.ViewportSize)
+		local limit = card:FindFirstChildOfClass("UISizeConstraint")
+		local width = if limit then limit.MaxSize.X else card.Size.X.Offset
+		local height = card.Size.Y.Offset
+
+		check(
+			height * scale / camera.ViewportSize.Y <= 0.35,
+			`the card takes a third of the phone's height at most (takes {height * scale / camera.ViewportSize.Y})`
+		)
+		check(
+			width * scale / camera.ViewportSize.X <= 0.5,
+			`and half its width at most (takes {width * scale / camera.ViewportSize.X})`
+		)
+		check(
+			card.AnchorPoint.Y == 0 and card.Position.Y.Scale == 0 and card.Position.Y.Offset >= 0,
+			"the card hangs from the top edge, so its top can never be off screen"
+		)
+		check(dim ~= nil and dim.BackgroundTransparency >= 0.75, "the dim leaves the killer visible")
+
+		local function textOf(name: string): string?
+			local label = card:FindFirstChild(name, true)
+			return label and label.Text
+		end
+		check(
+			textOf("Countdown") == "3",
+			`the countdown starts at the respawn time (shows {tostring(textOf("Countdown"))})`
+		)
+		check(
+			textOf("Killer") == "ВНЕ ИГРЫ",
+			`an unattributed death says so (shows {tostring(textOf("Killer"))})`
+		)
+		local bare = card.Size.Y.Offset
+
+		-- Killed by someone: the card names them and the line under the bar
+		-- says the view is theirs.
+		local killer = {
+			DisplayName = "Nurik",
+			UserId = 77,
+			Parent = Env.service("Players"),
+			GetAttribute = function()
+				return "A"
+			end,
+		}
+		Env.service("Players").GetPlayerByUserId = function()
+			return killer
+		end
+		ClientState.Died:Fire(77, 3)
+
+		check(
+			textOf("Eyebrow") == "ВАС УБИЛ",
+			`a kill is attributed (eyebrow shows {tostring(textOf("Eyebrow"))})`
+		)
+		check(textOf("Killer") == "NURIK", `the killer is named in capitals (shows {tostring(textOf("Killer"))})`)
+		check(
+			textOf("Watching") == "НАБЛЮДЕНИЕ: Nurik",
+			`and the card says whose view this is (shows {tostring(textOf("Watching"))})`
+		)
+		check(
+			card.Size.Y.Offset > bare and card.Size.Y.Offset * scale / camera.ViewportSize.Y <= 0.35,
+			"the line under the bar makes room for itself and the card is still compact"
+		)
+	end
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 
