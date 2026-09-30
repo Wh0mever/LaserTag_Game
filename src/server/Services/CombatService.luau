@@ -448,6 +448,11 @@ function CombatService.init()
 		Validator = ShootValidation.validateEquip,
 		RateLimit = EQUIP_RATE,
 		WindowSeconds = EQUIP_WINDOW,
+		-- The switch button and the pad's bumpers can be pressed as fast as a
+		-- thumb goes and the client does not slow them. The server already ignores
+		-- a switch to the weapon in hand and charges the real cost through the
+		-- swap lockout, so past the limit the requests are dropped, never a kick.
+		KickAfterViolations = 0,
 	})
 
 	-- One sample per frame of where every character is. Physics has run by
