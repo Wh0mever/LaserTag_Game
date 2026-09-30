@@ -32,6 +32,7 @@ local SCENARIOS = {
 	{ name = "economy", what = "analytics, profiles, leaderboard and friends against strict stand-ins" },
 	{ name = "friends", what = "the friends panel lists who is online elsewhere, and says so when it cannot tell" },
 	{ name = "combat", what = "fire rate, reloads, swaps, hit resolution and who hears a shot" },
+	{ name = "combatnet", what = "the combat remotes through the real pipeline: mashing the switch is never a kick" },
 	{ name = "weapon", what = "the client's firing loop at 30 to 240 fps, reloads and server syncs" },
 	{ name = "uiscale", what = "the phone UIScale host, its calibration, and the chrome that depends on it" },
 }

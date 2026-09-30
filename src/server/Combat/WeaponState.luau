@@ -31,7 +31,12 @@ local WeaponState = {}
 export type Entry = {
 	mag: number,
 	reloadingUntil: number,
+	-- Where the fire-rate schedule stands: the slot the last accepted shot
+	-- occupied. Not when it arrived (see MAX_LATE).
 	lastShotAt: number,
+	-- When the last accepted shot actually arrived, which is what the spray
+	-- reset measures its pause against.
+	lastArrivalAt: number,
 	sprayIndex: number,
 	lastSeq: number,
 	reloadToken: number,
@@ -50,12 +55,34 @@ local NEVER = -math.huge
 	Two frames covers it.
 
 	The slack is not a faster weapon. The gate is anchored to the cadence, not to
-	when packets happened to arrive: an accepted shot is booked at the later of
-	its arrival and the moment it was due, so an early one borrows from the next
-	interval instead of shifting the schedule earlier. However the arrivals are
-	spaced, the rate that can be sustained never exceeds one shot per fireRate.
+	when packets happened to arrive: an accepted shot occupies the slot it was
+	due in, so an early one borrows from the next interval instead of shifting the
+	schedule earlier. However the arrivals are spaced, the rate that can be
+	sustained never exceeds one shot per fireRate.
 ]]
 local FIRE_RATE_GRACE = 0.04
+
+--[[
+	How far behind the schedule a shot may arrive before the schedule moves for
+	it.
+
+	A phone's connection holds a packet up now and then, and the next one, sent on
+	time, lands closer behind it than a rifle's interval. If a late shot were
+	booked where it arrived, the honest shot after it would be early against that
+	booking and refused; at 60 to 100 ms of delay that was one shot in five. So a
+	shot that arrives late still occupies the slot it was due in, and only
+	lateness beyond this pushes the schedule later.
+
+	It also bounds the catch-up. A shot due long ago (the client sat quiet, or the
+	link stalled and delivered what it had queued) is booked this far before its
+	arrival, so the shots behind it may arrive that much ahead of the cadence.
+	Together with FIRE_RATE_GRACE no shot lands more than 0.19 s before its slot:
+	for the rifle that is one extra round at the start of a burst, and a stalled
+	link's queue is honoured only that far. Keep the sum under twice the rifle's
+	interval or it gains a second one. The rate itself is untouched: a slot is a
+	full interval wide.
+]]
+local MAX_LATE = 0.15
 
 -- Extra time past a weapon's sprayResetTime before the server treats a pause as
 -- a real one. The client resets on its own gap between shots; the server sees
@@ -88,6 +115,7 @@ local function freshEntry(weaponId: string): Entry
 		mag = if weapon then weapon.magSize else 0,
 		reloadingUntil = 0,
 		lastShotAt = NEVER,
+		lastArrivalAt = NEVER,
 		sprayIndex = 0,
 		lastSeq = 0,
 		reloadToken = 0,
@@ -231,13 +259,15 @@ function WeaponState.consumeShot(player: Player, weaponId: string, now: number):
 		return false, 0
 	end
 
-	-- Never negative: `lastShotAt` may sit a little ahead of the clock (see
-	-- FIRE_RATE_GRACE), and a negative gap would read as "fired in the past".
-	local sinceLastShot = math.max(now - entry.lastShotAt, 0)
+	-- The pause is measured between arrivals, as the client measures its own
+	-- between shots. The schedule's slot would overstate it by up to MAX_LATE.
+	-- Never negative: a clock that steps back would read as "fired in the past".
+	local sinceLastShot = math.max(now - entry.lastArrivalAt, 0)
 	entry.sprayIndex =
 		SprayPatterns.nextIndex(weaponId, entry.sprayIndex, sinceLastShot, weapon.sprayResetTime, SPRAY_RESET_GRACE)
 	entry.mag -= 1
-	entry.lastShotAt = math.max(now, dueAt)
+	entry.lastArrivalAt = now
+	entry.lastShotAt = math.max(dueAt, now - MAX_LATE)
 
 	return true, entry.sprayIndex
 end

@@ -37,6 +37,7 @@ local GunModelFactory = require(Shared.GunModelFactory)
 local MathUtil = require(Shared.Util.MathUtil)
 local SprayPatterns = require(Shared.Config.SprayPatterns)
 local TeamService = require(script.Parent.Parent.Services.TeamService)
+local Validators = require(script.Parent.Parent.Net.Validators)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local ShotResolver = {}
@@ -226,7 +227,16 @@ function ShotResolver.resolve(
 			continue
 		end
 
+		-- Where a character stands is its client's word until the tracker has
+		-- vetted it, and the tracker drops a sample that is not a number. The live
+		-- root has no such filter, and NaN fails every comparison, so it would sail
+		-- through the broad phase below and become the origin of a ray. A target
+		-- that is nowhere cannot be hit; it must not cost the others their shots.
 		local standing = root.Position
+		if not Validators.isFiniteVector3(standing) then
+			continue
+		end
+
 		local was = CharacterTracker.rootPositionAgo(other, rewind, now)
 		local offset = if was then standing - was else Vector3.new(0, 0, 0)
 

@@ -113,7 +113,9 @@ do
 
 	-- 2. Someone pacing shots just inside the old floor. Whatever the slack, the
 	-- sustained rate must not beat the weapon's own: 20 seconds at 0.1 s is 200
-	-- shots, plus the one that opens the burst.
+	-- shots, plus the one that opens the burst, plus the single round of catch-up
+	-- a client is owed after a quiet spell (WeaponState.MAX_LATE). Pacing at 87 ms
+	-- and being let through would be 229.
 	WeaponState.clear(player)
 	local pacing = 0.087
 	local sustained = 0
@@ -125,8 +127,8 @@ do
 		end
 	end
 	check(
-		sustained <= 20 / rifle.fireRate + 1,
-		`shots paced just under the interval cannot beat the weapon's fire rate ({sustained} accepted in 20 s, cap {20 / rifle.fireRate + 1})`
+		sustained <= 20 / rifle.fireRate + 2,
+		`shots paced just under the interval cannot beat the weapon's fire rate ({sustained} accepted in 20 s, cap {20 / rifle.fireRate + 2})`
 	)
 
 	-- 3. And a real burst: ten shots at exactly the cadence all land.
@@ -138,6 +140,155 @@ do
 		end
 	end
 	check(burst == 10, `ten shots at exactly the fire rate all land ({burst}/10)`)
+end
+
+--------------------------------------------------------------------------------
+-- WeaponState: the fire-rate gate on a phone's connection
+--
+-- The checks above jitter each arrival around its own slot. A mobile link does
+-- not behave like that: a packet is held up, and the next one, sent on time, is
+-- then closer behind it than a rifle's interval. Remote events are ordered, so
+-- nothing overtakes; what changes is the gap between arrivals. A gate that
+-- books each shot where it ARRIVED takes the late packet's word for when the
+-- burst is running, and refuses the honest shot behind it.
+--------------------------------------------------------------------------------
+
+heading("Fire-rate gate on a phone's connection")
+
+do
+	local rifle = WeaponConfig.Weapons.Rifle
+	local player = {}
+
+	-- A perfect client at the weapon's own rate, whose packets each take
+	-- `delay()` seconds to arrive and are delivered in the order they were sent.
+	local function heldTrigger(shots: number, delay: () -> number, from: number): { number }
+		local arrivals = {}
+		local previous = -math.huge
+		for shot = 0, shots - 1 do
+			local arrival = math.max(from + shot * rifle.fireRate + delay(), previous)
+			previous = arrival
+			table.insert(arrivals, arrival)
+		end
+		return arrivals
+	end
+
+	local function accepted(arrivals: { number }): number
+		WeaponState.clear(player)
+		local count = 0
+		for _, arrival in arrivals do
+			WeaponState.get(player, "Rifle").mag = rifle.magSize
+			if WeaponState.consumeShot(player, "Rifle", arrival) then
+				count += 1
+			end
+		end
+		return count
+	end
+
+	local function uniformDelay(seed: number, longest: number): () -> number
+		local source = jitterSource(seed)
+		return function()
+			return (source() + 1) * 0.5 * longest
+		end
+	end
+
+	local function exponentialDelay(seed: number, mean: number): () -> number
+		local source = jitterSource(seed)
+		return function()
+			return -math.log(1 - (source() + 1) * 0.5) * mean
+		end
+	end
+
+	-- Half a minute of a held trigger is 300 shots; every one of these is a
+	-- client doing exactly what it should.
+	local total = 300
+
+	for _, longest in { 0.020, 0.060, 0.100, 0.150 } do
+		local got = accepted(heldTrigger(total, uniformDelay(3, longest), 1000))
+		check(
+			got == total,
+			`a steady 600 RPM client is never dropped with 0-{longest * 1000} ms of delivery delay ({got}/{total} accepted)`
+		)
+	end
+
+	local mean30 = accepted(heldTrigger(total, exponentialDelay(5, 0.030), 1000))
+	check(
+		mean30 >= total * 0.99,
+		`at most a shot in a hundred is lost to exponentially distributed delay with a 30 ms mean ({mean30}/{total} accepted)`
+	)
+	local mean50 = accepted(heldTrigger(total, exponentialDelay(9, 0.050), 1000))
+	check(mean50 >= total * 0.95, `and at most one in twenty at a 50 ms mean ({mean50}/{total} accepted)`)
+
+	-- A stall: the link goes quiet for half a second and delivers everything
+	-- queued behind it at once. Five shots were sent in that time. The gate may
+	-- not honour all five (that would be a rifle that fires five in an instant),
+	-- but it must not throw all but one away either: the player held the trigger
+	-- for a tenth of a second per shot, and a little of that is owed back.
+	local stallAt = 2000
+	local queued = {}
+	for shot = 0, 4 do
+		queued[shot + 1] = stallAt + 0.5
+	end
+	local landedFromStall = accepted(queued)
+	check(
+		landedFromStall >= 2,
+		`a half-second stall delivering five queued shots at once honours more than one ({landedFromStall}/5 accepted)`
+	)
+	check(
+		landedFromStall <= 3,
+		`but not the whole queue: a stall is not a way to bank a magazine ({landedFromStall}/5 accepted)`
+	)
+
+	-- And the shots the client went on sending, on time, behind the burst.
+	local behind = {}
+	for shot = 0, 4 do
+		behind[shot + 1] = stallAt + 0.5
+	end
+	for shot = 1, 20 do
+		table.insert(behind, stallAt + 0.5 + shot * rifle.fireRate)
+	end
+	local landedBehind = accepted(behind) - landedFromStall
+	check(
+		landedBehind >= 19,
+		`the stream behind a stall is served: at most one of the next twenty shots is lost ({landedBehind}/20 accepted)`
+	)
+
+	-- None of it is a rate. However long a client sat quiet, or however hard it
+	-- floods, the gate hands out no more than one shot per interval beyond a
+	-- fixed, small allowance.
+	local idle = {}
+	for _ = 1, 30 do
+		table.insert(idle, 3000)
+	end
+	local fromIdle = accepted(idle)
+	check(
+		fromIdle <= 3,
+		`thirty shots in one instant after a long quiet spell land at most three ({fromIdle} accepted)`
+	)
+
+	local flood = {}
+	for step = 0, 60 * 1000 do
+		table.insert(flood, 4000 + step / 1000)
+	end
+	WeaponState.clear(player)
+	local early, late = 0, 0
+	for _, arrival in flood do
+		WeaponState.get(player, "Rifle").mag = rifle.magSize
+		if WeaponState.consumeShot(player, "Rifle", arrival) then
+			if arrival < 4020 then
+				early += 1
+			else
+				late += 1
+			end
+		end
+	end
+	check(
+		late <= 40 / rifle.fireRate + 1,
+		`a thousand requests a second for a minute settle at the weapon's rate ({late} accepted in the last 40 s, cap {40 / rifle.fireRate + 1})`
+	)
+	check(
+		early <= 20 / rifle.fireRate + 3,
+		`and the first 20 s hold only the opening shot and a little catch-up ({early} accepted, cap {20 / rifle.fireRate + 3})`
+	)
 end
 
 --------------------------------------------------------------------------------
@@ -693,6 +844,15 @@ end
 local function castRay(origin: any, direction: any, params: any)
 	table.insert(rays, { origin = origin, direction = direction })
 
+	-- Whether the engine raises or quietly misses for a ray that starts nowhere
+	-- is not something to lean on. This stand-in raises, the worse of the two: a
+	-- shot that reached it would take the whole request down with it.
+	for _, axis in { "X", "Y", "Z" } do
+		if origin[axis] ~= origin[axis] or math.abs(origin[axis]) == math.huge then
+			error("Raycast: origin is not finite")
+		end
+	end
+
 	local reach, unit = direction.Magnitude, direction.Unit
 	local hitPart, hitAt = nil, math.huge
 	for _, instance in world:GetDescendants() do
@@ -919,6 +1079,75 @@ do
 		"a shot that meets a teammate first stops there and does not reach the enemy behind"
 	)
 	check(lastMessage("HitConfirmed", shooter) == nil, "and confirms no hit")
+end
+
+--------------------------------------------------------------------------------
+-- A target that is nowhere
+--
+-- A character's position belongs to its client, and a position that is not a
+-- number is not something the shooter's rewind can be built from. It has to cost
+-- the shooter nothing: one such player in a match must not stop every other
+-- shot in it from resolving, after the round has already been spent.
+--------------------------------------------------------------------------------
+
+heading("A target whose position is not a number")
+
+do
+	clearField()
+	Env.raycastHandler = castRay
+
+	local shooter = newPlayer("Marksman", "Dust", "A")
+	local glitched = newPlayer("Glitched", "Dust", "B")
+	local enemy = newPlayer("Enemy", "Dust", "B")
+	for _, player in { shooter, glitched, enemy } do
+		join(player)
+	end
+	spawnPlayer(shooter, Vector3.new(0, 3, 0))
+	local glitchedBody = spawnPlayer(glitched, Vector3.new(3, 3, -20))
+	local _, enemyHumanoid = spawnPlayer(enemy, Vector3.new(0, 3, -40))
+	Env.advance(5)
+	frames(0.5)
+
+	local function castFromNowhere(): number
+		local count = 0
+		for _, ray in rays do
+			for _, axis in { "X", "Y", "Z" } do
+				if ray.origin[axis] ~= ray.origin[axis] then
+					count += 1
+					break
+				end
+			end
+		end
+		return count
+	end
+
+	local function aimAtEnemy(): boolean
+		Env.advance(1)
+		enemyHumanoid.Health = 100
+		table.clear(rays)
+		clearSent()
+		return shootAt(shooter, "Rifle", Vector3.new(0, 4.5, -40))
+	end
+
+	-- A player whose history is long and finite, and whose root then goes bad.
+	-- The rewound position still sits beside the line of fire, so only the live
+	-- one can give the game away.
+	moveTo(glitchedBody, Vector3.new(0 / 0, 3, -20))
+	local handled = aimAtEnemy()
+	check(handled, "a shot in a match with a player whose root is NaN is still handled")
+	check(
+		lastMessage("HitConfirmed", shooter) ~= nil and enemyHumanoid.Health < 100,
+		"and still hits the enemy it was aimed at"
+	)
+	check(castFromNowhere() == 0, `no ray is cast from a position that is not a number ({castFromNowhere()} were)`)
+
+	-- One that spawned that way has no history to rewind to at all.
+	moveTo(glitchedBody, Vector3.new(3, 3, -20))
+	spawnPlayer(glitched, Vector3.new(3, 0 / 0, -20))
+	handled = aimAtEnemy()
+	check(handled, "and so is one in a match with a player who spawned NaN")
+	check(lastMessage("HitConfirmed", shooter) ~= nil and enemyHumanoid.Health < 100, "which also still hits the enemy")
+	check(castFromNowhere() == 0, `and casts no ray from nowhere either ({castFromNowhere()} were)`)
 end
 
 --------------------------------------------------------------------------------
