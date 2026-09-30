@@ -28,6 +28,8 @@ local SCENARIOS = {
 	{ name = "queue", what = "the portal sign reads a match in its last minute as ending, not going" },
 	{ name = "results", what = "the results screen says whether the player won, lost or drew, and why" },
 	{ name = "net", what = "the remote pipeline: who is kicked, and what a client can make the log say" },
+	{ name = "economy", what = "analytics, profiles, leaderboard and friends against strict stand-ins" },
+	{ name = "friends", what = "the friends panel lists who is online elsewhere, and says so when it cannot tell" },
 }
 
 local failed = {}

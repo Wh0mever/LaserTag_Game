@@ -1,19 +1,22 @@
 --!nonstrict
 --[[
 	FriendsService.luau
-	Answers GetFriendsRequest with the player's friends split two ways:
+	Answers GetFriendsRequest with the player's friends who are in this server:
 
-		{inServer: {FriendEntry}, online: {FriendEntry}}
+		{inServer: {FriendEntry}}
 		FriendEntry = {userId: number, name: string, displayName: string}
 
-	Those three fields are the whole payload. Players:GetFriendsAsync hands back
-	more than that per friend, and none of the rest belongs on a client that only
-	needs to render a list and offer a join.
+	Those three fields are the whole payload. Friends who are online somewhere
+	else are not the server's to report: the engine's Player:GetFriendsOnlineAsync
+	answers for the LocalPlayer only, so FriendsScreen asks it directly. The
+	server used to build that list from the IsOnline field of
+	Players:GetFriendsAsync, which the engine no longer fills in. It was always
+	empty, and cost up to four pages of web calls every time the panel opened.
 
-	Every call here is a web call: GetFriendsAsync and IsFriendsWith both yield
-	and both fail under load or when the service is down. Each is wrapped, and a
-	failure degrades to a shorter list rather than an error crossing the wire —
-	a friends panel is not worth breaking a session over.
+	IsFriendsWith yields and fails under load or when the service is down. Each
+	call is wrapped, and a failure degrades to a shorter list rather than an
+	error crossing the wire: a friends panel is not worth breaking a session
+	over.
 
 	Results are cached per player for GameConfig.FRIENDS_CACHE_SECONDS. Combined
 	with the remote's rate limit, that bounds how much friend traffic one player
@@ -40,11 +43,6 @@ FriendsService.Priority = 6
 
 -- Rate limit from the network contract.
 local FRIENDS_RATE, FRIENDS_WINDOW = 2, 10
-
--- A panel nobody scrolls past does not justify paging the whole friends list of
--- an account with thousands of them, so the walk stops at either bound.
-local MAX_ONLINE = 50
-local MAX_PAGES = 4
 
 local cache: { [Player]: { expiresAt: number, payload: any } } = {}
 local serviceTrove = Trove.new()
@@ -82,69 +80,8 @@ local function friendsInServer(player: Player): { any }
 	return entries
 end
 
---[[
-	Friends who are online somewhere other than this server. `exclude` holds the
-	user ids already reported as in-server (plus the player's own) so nobody is
-	listed twice.
-]]
-local function friendsOnline(player: Player, exclude: { [number]: boolean }): { any }
-	local entries = {}
-
-	local ok, pages = pcall(function()
-		return Players:GetFriendsAsync(player.UserId)
-	end)
-
-	if not ok or not pages then
-		warn(`[FriendsService] GetFriendsAsync failed for {player.Name}: {tostring(pages)}`)
-		return entries
-	end
-
-	for _ = 1, MAX_PAGES do
-		local readOk, items = pcall(function()
-			return pages:GetCurrentPage()
-		end)
-
-		if not readOk or type(items) ~= "table" then
-			break
-		end
-
-		for _, item in items do
-			if #entries >= MAX_ONLINE then
-				return entries
-			end
-
-			local userId = tonumber(item.Id)
-			if item.IsOnline and userId and not exclude[userId] then
-				exclude[userId] = true
-				local name = tostring(item.Username or userId)
-				table.insert(entries, entryFor(userId, name, tostring(item.DisplayName or name)))
-			end
-		end
-
-		if pages.IsFinished then
-			break
-		end
-
-		local advanced = pcall(function()
-			pages:AdvanceToNextPageAsync()
-		end)
-		if not advanced then
-			break
-		end
-	end
-
-	return entries
-end
-
 local function buildPayload(player: Player)
-	local inServer = friendsInServer(player)
-
-	local exclude = { [player.UserId] = true }
-	for _, entry in inServer do
-		exclude[entry.userId] = true
-	end
-
-	return { inServer = inServer, online = friendsOnline(player, exclude) }
+	return { inServer = friendsInServer(player) }
 end
 
 local function onGetFriendsRequest(player: Player)
