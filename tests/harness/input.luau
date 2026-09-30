@@ -247,6 +247,16 @@ heading("Menus on a controller")
 -- for GUI selection: with a pad, the first stick movement auto-selects the
 -- first selectable thing on screen, and a selected full-screen button draws a
 -- selection box round the whole view and swallows the pad's A press.
+--[[
+	The Select button is bound to the scoreboard hold, and GuiService's automatic
+	selection makes that same button pick a GUI object (gameProcessed = true),
+	which would swallow the hold whenever a Selectable HUD button exists. So
+	automatic selection is off while nothing is open and comes back with a panel,
+	where navigating is the point.
+]]
+local GuiService = Env.service("GuiService")
+check(GuiService.AutoSelectGuiEnabled == false, "with no menu open, the Select button is left to the scoreboard")
+
 local shopOpen = false
 UIController.registerMenu("Shop", {
 	open = function()
@@ -261,6 +271,8 @@ UIController.registerMenu("Shop", {
 })
 UIController.openMenu("Shop")
 check(MouseLockController.isUnlocked(), "opening a menu frees the cursor manager on a pad too")
+check(GuiService.AutoSelectGuiEnabled == true, "a panel gets GUI selection back so the pad can navigate it")
+GuiService.SelectedObject = roblox.Instance.new("TextButton")
 check(not InputController.isFireHeld(), "and the trigger is not live behind it")
 local modalScreen = UIController.getScreenRoot("CursorModal")
 local modal = modalScreen and modalScreen:FindFirstChild("ModalCapture")
@@ -289,6 +301,26 @@ check(#openedWhileOpen == 0, `the D-pad opens no menu while one is open (opened 
 padUp(padDown("ButtonY"))
 check(not shopOpen, "Y closes the open menu")
 check(not MouseLockController.isUnlocked(), "and the view is back")
+check(GuiService.AutoSelectGuiEnabled == false, "and the Select button belongs to the scoreboard again")
+check(GuiService.SelectedObject == nil, "and nothing stays selected behind the HUD")
+
+--------------------------------------------------------------------------------
+-- The invisible touch padding is not a stop for the pad
+--------------------------------------------------------------------------------
+
+heading("Button hit padding")
+
+do
+	local Button = Env.load("src/client/UI/Components/Button")
+	local holder = roblox.Instance.new("ScreenGui")
+	local padded = Button.create({ text = "X", parent = holder, hitPadding = roblox.Rect.new(8, 11, 14, 11) })
+	check(padded.hit ~= nil, "a padded button has a hit area")
+	if padded.hit then
+		check(not padded.hit.Selectable, "the padding is not something GUI selection can land on")
+	end
+	check(padded.instance.Selectable, "the button itself can still be selected")
+	padded:destroy()
+end
 
 --------------------------------------------------------------------------------
 -- The controls list tells a pad player what their pad does

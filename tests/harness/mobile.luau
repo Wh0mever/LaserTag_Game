@@ -1066,6 +1066,70 @@ end)
 check(clusterOk, `the touchscreen laptop fire cluster runs: {tostring(clusterErr)}`)
 
 --------------------------------------------------------------------------------
+-- Touchscreen laptop: a brushed screen does not cut the mouse's burst
+--
+-- The cluster hiding releases the trigger the CLUSTER holds. The left mouse
+-- button shares InputController's one trigger, and a finger that grazes the
+-- glass mid-spray shows the cluster, then the next mouse delta hides it again:
+-- that must not end a burst the mouse is still holding.
+--------------------------------------------------------------------------------
+
+heading("Touchscreen laptop: mouse and glass share one trigger")
+
+Env.setDevice("touchLaptop")
+Env.reset()
+
+local sharedOk, sharedErr = pcall(function()
+	Env.enableClientRuntime()
+	local State = Env.load("src/client/ClientState")
+	local Perspective = Env.load("src/client/Controllers/PerspectiveController")
+	local Settings = Env.load("src/client/Controllers/SettingsController")
+	local MouseLock = Env.load("src/client/Controllers/MouseLockController")
+
+	State.init()
+	Perspective.init()
+	Settings.init()
+	MouseLock.init()
+
+	local Input = Env.load("src/client/Controllers/InputController")
+	local UI = Env.load("src/client/UI/UIController")
+	local Touch = Env.load("src/client/Controllers/MobileControlsController")
+	Input.init()
+	UI.init()
+	Touch.init()
+	Env.service("Players").LocalPlayer:SetAttribute("InMatch", "Dust")
+
+	local UIS = Env.service("UserInputService")
+	local mouseButton = {
+		UserInputType = roblox.Enum.UserInputType.MouseButton1,
+		UserInputState = roblox.Enum.UserInputState.Begin,
+	}
+	UIS.InputBegan:Fire(mouseButton, false)
+	check(Input.isFireHeld(), "the left mouse button holds the trigger")
+
+	Env.setLastInputType("Touch")
+	check(Touch.areButtonsBound(), "a finger brushing the glass brings the cluster up")
+	check(Input.isFireHeld(), "the cluster appearing does not touch the mouse's burst")
+	Env.setLastInputType("MouseMovement")
+	check(not Touch.areButtonsBound(), "the next mouse movement hides it again")
+	check(Input.isFireHeld(), "and the mouse, still held, keeps firing")
+
+	mouseButton.UserInputState = roblox.Enum.UserInputState.End
+	UIS.InputEnded:Fire(mouseButton, false)
+	check(not Input.isFireHeld(), "releasing the button ends the burst")
+
+	-- The finger's own trigger is still let go when the cluster leaves.
+	Env.setLastInputType("Touch")
+	Env.placeGui(Touch.controls().Fire, 100, 100, 100, 100)
+	local finger = Env.touchBegan(150, 150)
+	check(Input.isFireHeld() and Touch.isTriggerHeld(), "a finger on the fire circle holds the trigger")
+	Env.setLastInputType("MouseMovement")
+	check(not Input.isFireHeld() and not Touch.isTriggerHeld(), "the finger's trigger goes with its cluster")
+	Env.touchEnded(finger)
+end)
+check(sharedOk, `the shared trigger scenario runs: {tostring(sharedErr)}`)
+
+--------------------------------------------------------------------------------
 -- Facing on a phone
 --
 -- The body follows the camera in third person on every device, but a phone has

@@ -542,6 +542,82 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- The crosshair is drawn in the HUD's scaled units
+--
+-- The cone is worked out in real pixels (viewport height and field of view) and
+-- the bars sit inside the scaled HUD host, where every offset is multiplied by
+-- the UI scale on its way to the glass. Written unconverted, a phone's
+-- crosshair was drawn 18% tighter than the cone it stands for and shots landed
+-- outside the box.
+--------------------------------------------------------------------------------
+
+heading("Crosshair scale")
+
+do
+	boot("phone")
+	local camera = Env.service("Workspace").CurrentCamera
+	camera.ViewportSize = roblox.Vector2.new(640, 294)
+	local player = Env.service("Players").LocalPlayer
+	-- The sandbox's RenderStepped never fires; this one is driven by hand.
+	local renderStepped = Env.liveSignal()
+	Env.service("RunService").RenderStepped = renderStepped
+	local State = Env.load("src/client/ClientState")
+	State.init()
+	local UIController = Env.load("src/client/UI/UIController")
+	local RecoilController = Env.load("src/client/Controllers/RecoilController")
+	local HUDScreen = Env.load("src/client/UI/Screens/HUDScreen")
+	UIController.init()
+	RecoilController.init()
+	HUDScreen.init()
+	player:SetAttribute("InMatch", "Dust")
+	check(math.abs(UIController.scale - 0.82) < 1e-6, `the phone viewport is at scale 0.82 (got {UIController.scale})`)
+
+	-- A rifle spray far enough in to be a wide cone.
+	local now = os.clock()
+	for shot = 1, 20 do
+		RecoilController.onShot("Rifle", now - (21 - shot) * 0.001)
+	end
+	State.ammo.weaponId = "Rifle"
+	local spreadDeg = RecoilController.getBloomDeg("Rifle")
+	check(spreadDeg > 1, `the test spray is a real cone (got {spreadDeg} degrees)`)
+
+	local hud = player.PlayerGui:FindFirstChild("HUD")
+	local up = hud and hud:FindFirstChild("Up", true)
+	check(up ~= nil, "the crosshair has an upper bar")
+	if up then
+		renderStepped:Fire(1 / 60)
+		local hostGap = -up.Position.Y.Offset
+		local focal = (294 * 0.5) / math.tan(math.rad(70 * 0.5))
+		-- The bars also carry 0.45 of the accumulated camera kick.
+		local pitch, yaw = RecoilController.getOffset()
+		local coneDeg = RecoilController.getBloomDeg("Rifle") + math.sqrt(pitch * pitch + yaw * yaw) * 0.45
+		local edge = focal * math.tan(math.rad(coneDeg))
+		local realGap = hostGap * UIController.scale - 4 * UIController.scale
+		check(
+			math.abs(realGap - edge) <= 1,
+			`the drawn gap matches the cone edge on the glass: {realGap} vs {edge} real pixels`
+		)
+
+		-- The loosest cone in the game (a Lance past its fourth round, 4.5
+		-- degrees) must fit under the ceiling on the smallest phone rather than
+		-- being clamped into a lie. The kick may push the bars to the ceiling;
+		-- the cone itself must never need more than that.
+		RecoilController.resetSpray()
+		State.ammo.weaponId = "Lance"
+		for shot = 1, 5 do
+			RecoilController.onShot("Lance", os.clock() - (6 - shot) * 0.001)
+		end
+		renderStepped:Fire(1 / 60)
+		local lanceGap = -up.Position.Y.Offset
+		local lanceEdge = focal * math.tan(math.rad(4.5))
+		check(
+			lanceGap * UIController.scale >= lanceEdge,
+			`the box still holds the loosest shots ({lanceGap * UIController.scale} vs {lanceEdge} pixels)`
+		)
+	end
+end
+
+--------------------------------------------------------------------------------
 -- Recoil is softened for a thumb, not for a touchscreen
 --
 -- The softening exists because correcting recoil with a thumb on glass is
@@ -1000,6 +1076,63 @@ do
 			"the line under the bar makes room for itself and the card is still compact"
 		)
 	end
+end
+
+--------------------------------------------------------------------------------
+-- The death card does not outlive the match
+--
+-- A player killed in the last seconds has their respawn cancelled when the
+-- match leaves InProgress, and nothing sent them back to the hub for the whole
+-- Results hold: the card sat there with a "..." counter under the results
+-- overlay, and the dead-body camera with it.
+--------------------------------------------------------------------------------
+
+heading("Death card at the end of a match")
+
+do
+	boot("desktop")
+	local player = Env.service("Players").LocalPlayer
+	local ClientState = Env.load("src/client/ClientState")
+	ClientState.init()
+	local Spectator = Env.load("src/client/Controllers/SpectatorController")
+	local CameraController = Env.load("src/client/Controllers/CameraController")
+	CameraController.init()
+	Spectator.init()
+	player.Character = makeCharacter(nil)
+
+	local function phase(name: string)
+		ClientState.match.phase = name
+		ClientState.MatchChanged:Fire(ClientState.match)
+	end
+
+	phase("InProgress")
+	ClientState.isDead = true
+	ClientState.Died:Fire(nil, 3)
+	check(Spectator.isVisible() and CameraController.isDeathCamActive(), "a death in a match shows the card and view")
+
+	-- The 1 Hz tick repeats the phase it is already in and must change nothing.
+	phase("InProgress")
+	check(Spectator.isVisible() and CameraController.isDeathCamActive(), "a tick inside the match leaves them up")
+
+	phase("Results")
+	check(not Spectator.isVisible(), "the results hide the death card")
+	check(not CameraController.isDeathCamActive(), "and end the dead-body camera")
+
+	-- Hub spawn after the Results: alive again, and nothing comes back.
+	ClientState.isDead = false
+	ClientState.Respawned:Fire()
+	phase("Idle")
+	check(not Spectator.isVisible() and not CameraController.isDeathCamActive(), "the hub spawn brings nothing back")
+
+	-- A fall in the hub is an ordinary death with its own card and respawn.
+	ClientState.isDead = true
+	ClientState.Died:Fire(nil, 3)
+	check(Spectator.isVisible() and CameraController.isDeathCamActive(), "a death in the hub still shows the card")
+	phase("Idle")
+	check(Spectator.isVisible(), "a repeated Idle does not cut a hub death short")
+	ClientState.isDead = false
+	ClientState.Respawned:Fire()
+	check(not Spectator.isVisible(), "and the respawn hides it as before")
 end
 
 --------------------------------------------------------------------------------

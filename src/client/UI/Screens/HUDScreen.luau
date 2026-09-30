@@ -232,9 +232,13 @@ local function updateCrosshair()
 
 	-- Degrees of cone -> pixels on this viewport, through the camera's focal
 	-- length, so the same spread reads the same on any screen or field of view.
+	-- Those are REAL pixels, and the bars live in the scaled HUD host, where an
+	-- offset is multiplied by the UI scale on its way to the glass: dividing the
+	-- cone by it makes the drawn gap come back out as the true one. The resting
+	-- hole and the ceiling are design sizes and stay in host units.
 	local focal = (camera.ViewportSize.Y * 0.5) / math.tan(math.rad(camera.FieldOfView * 0.5))
-	local gap =
-		MathUtil.clamp(CROSSHAIR_MIN_GAP + focal * math.tan(math.rad(spreadDeg)), CROSSHAIR_MIN_GAP, CROSSHAIR_MAX_GAP)
+	local cone = focal * math.tan(math.rad(spreadDeg)) / UIController.scale
+	local gap = MathUtil.clamp(CROSSHAIR_MIN_GAP + cone, CROSSHAIR_MIN_GAP, CROSSHAIR_MAX_GAP)
 
 	for _, entry in widgets.crosshairBars do
 		entry.bar.Position = UDim2.new(0.5, entry.dx * gap, 0.5, entry.dy * gap)
