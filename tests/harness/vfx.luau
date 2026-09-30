@@ -587,6 +587,53 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- Mashing the view button saves once
+--
+-- Every tap of the view button applied the new perspective AND sent the whole
+-- settings table to the server. The save remote is rate limited and every
+-- refused call counts against the sender, so a player playing with the button
+-- could talk themselves into a kick. The view changes at once; the save waits
+-- for the taps to stop.
+--------------------------------------------------------------------------------
+
+heading("View button saves once")
+
+do
+	boot("desktop")
+	local ClientState = Env.load("src/client/ClientState")
+	ClientState.init()
+	local Perspective = Env.load("src/client/Controllers/PerspectiveController")
+	Perspective.init()
+	-- What turns the stored setting into the live perspective.
+	Env.load("src/client/Controllers/SettingsController").init()
+
+	local saves = {}
+	ClientState.saveSettings = function()
+		table.insert(saves, ClientState.settings.Perspective)
+	end
+
+	local before = Perspective.get()
+	for _ = 1, 5 do
+		Perspective.toggle()
+		Env.advance(0.2)
+	end
+	check(Perspective.get() ~= before, "five taps leave the view flipped (odd number of toggles)")
+	check(#saves == 0, `nothing is sent while the button is still being pressed (sent {#saves})`)
+
+	Env.advance(1.0)
+	check(#saves == 0, "nothing is sent before the taps have been quiet for a moment")
+
+	Env.advance(1.0)
+	check(#saves == 1, `one save goes out once they stop (sent {#saves})`)
+	check(saves[1] == Perspective.get(), "and it carries the perspective the player ended on")
+
+	-- A lone tap still saves: the choice must survive to the next session.
+	Perspective.toggle()
+	Env.advance(3)
+	check(#saves == 2 and saves[2] == Perspective.get(), "a single tap is saved too")
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 
