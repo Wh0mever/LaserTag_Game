@@ -76,7 +76,8 @@ function MatchRuntime.new(mapId: string)
 		-- everyone dealt in at the start. The end-of-match payout is scaled by
 		-- how long they were actually there.
 		placedAt = {} :: { [Player]: number },
-		-- Kills per killer and victim, for the ones that stop paying.
+		-- Kills per killer and victim, for the ones that stop paying. Keyed by
+		-- UserId: a player who leaves and comes back is a new Player object.
 		killPairs = PairLimiter.new(EconomyConfig.MAX_PAID_KILLS_PER_PAIR),
 		pending = {} :: { { [string]: any } }, -- events raised while one is dispatching
 		dispatching = false,
@@ -93,6 +94,22 @@ end
 
 local function isPresent(player: Player): boolean
 	return player ~= nil and player:IsDescendantOf(Players)
+end
+
+--[[
+	Whether a player is dead or waiting on a respawn. The pad sample is up to a
+	poll old and only ever counts living characters, so such a player is a leftover
+	of it and not somebody standing there. They are dealt in on a later pass if
+	they are back on the pad; seating them now would put a character into the
+	match while the respawn they are waiting on is still pending.
+]]
+local function isDown(player: Player): boolean
+	if PlayerService.isRespawning(player) then
+		return true
+	end
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	return humanoid ~= nil and humanoid.Health <= 0
 end
 
 function MatchRuntime:getPhase(): string
@@ -376,11 +393,19 @@ end
 	Never fills a side that is empty. That is a forfeit running its grace, and
 	dragging a teammate across would turn the win into a fight nobody asked for.
 
+	Not in the last minute (the cutoff for seating a joiner). The payout follows
+	the side a player finishes on, whatever they did on the other, so a move that
+	late is either a way onto the winning side or a win taken from someone who
+	played for it.
+
 	Returns the new team id if the player was moved.
 ]]
 function MatchRuntime:rebalanceOnRespawn(player: Player): string?
 	local from = self.roster[player]
 	if not from or not self:isInProgress() then
+		return nil
+	end
+	if self.state.timeLeft < GameConfig.LATE_JOIN_CUTOFF_SECONDS then
 		return nil
 	end
 
@@ -413,7 +438,7 @@ end
 function MatchRuntime:_startMatch()
 	local entrants = {}
 	for _, player in self.queued do
-		if isPresent(player) and #entrants < GameConfig.MAX_PLAYERS_PER_MATCH then
+		if isPresent(player) and not isDown(player) and #entrants < GameConfig.MAX_PLAYERS_PER_MATCH then
 			table.insert(entrants, player)
 		end
 	end
@@ -514,6 +539,9 @@ function MatchRuntime:_returnToHub()
 	table.clear(self.kills)
 	table.clear(self.sideDeadline)
 	table.clear(self.placedAt)
+	-- Nothing of a finished match is carried into the next one, whichever way
+	-- that one starts.
+	PairLimiter.reset(self.killPairs)
 
 	for _, player in leaving do
 		if isPresent(player) then
@@ -595,7 +623,12 @@ function MatchRuntime:_joinMidMatch(candidates: { Player })
 		if size >= GameConfig.MAX_PLAYERS_PER_MATCH then
 			break
 		end
-		if not self.roster[player] and isPresent(player) and (player:GetAttribute("InMatch") or "") == "" then
+		if
+			not self.roster[player]
+			and isPresent(player)
+			and not isDown(player)
+			and (player:GetAttribute("InMatch") or "") == ""
+		then
 			local teamId = TeamService.smallestTeamIn(self.roster)
 			self.roster[player] = teamId
 			self.kills[player] = 0
@@ -627,8 +660,9 @@ end
 
 	Returns whether the kill should PAY: false for a kill that does not score
 	(a self-kill, a team kill) and for one of a victim the killer has already
-	killed the paid number of times this match. The caller that pays coins
-	(CombatService, through DataService.recordKill) skips the payout on false.
+	killed the paid number of times this match while there were other enemies to
+	take instead. The caller that pays coins (CombatService, through
+	DataService.recordKill) skips the payout on false.
 
 	The kill feed is NOT published here — CombatService owns KillFeedEvent, and
 	firing it from both sides would double every entry. The weapon and headshot
@@ -653,8 +687,12 @@ function MatchRuntime:registerKill(victim: Player, killer: Player?, _weaponId: s
 			-- hundreds of times an hour. It is reported once at match end.
 			AnalyticsService.killScored(killer)
 			-- The kill scores whatever this says; it only decides whether the
-			-- killer is paid for it. See PairLimiter.
-			paid = PairLimiter.record(self.killPairs, killer, victim)
+			-- killer is paid for it. See PairLimiter, which also says why a
+			-- killer facing a single enemy is always paid. The enemies are
+			-- counted off the roster as it is now, the victim included.
+			local a, b = self:_countTeams()
+			local enemies = if victimTeam == "A" then a elseif victimTeam == "B" then b else nil
+			paid = PairLimiter.record(self.killPairs, killer.UserId, victim.UserId, enemies)
 			self:_dispatch({ type = "kill", teamId = killerTeam })
 		end
 	end

@@ -485,6 +485,68 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- Who is dealt in
+--
+-- The pad sample can be half a second old. A player who died in the hub inside
+-- that window is no longer standing on it, and seating them left the respawn
+-- timer of the hub to pull them back out of a match they were listed in.
+--------------------------------------------------------------------------------
+
+heading("Dealing in the fallen")
+
+-- A player with a character whose Humanoid has `health`.
+local function withHealth(name: string, health: number)
+	local player = fakePlayer(name)
+	player.Character = {
+		FindFirstChildOfClass = function(_self, className)
+			return if className == "Humanoid" then { Health = health } else nil
+		end,
+	}
+	return player
+end
+
+do
+	table.clear(respawning)
+	local runtime = MatchRuntime.new("Dust")
+	local up1, up2 = fakePlayer("up1"), withHealth("up2", 100)
+	local waiting, dead = fakePlayer("waiting"), withHealth("dead", 0)
+	respawning[waiting] = true
+	runtime.queued = { up1, waiting, dead, up2 }
+	runtime:_startMatch()
+
+	check(runtime.roster[up1] ~= nil and runtime.roster[up2] ~= nil, "the players standing there are dealt in")
+	check(runtime.roster[waiting] == nil, "a player waiting on a respawn is not")
+	check(runtime.roster[dead] == nil, "nor one whose character is dead")
+	check(
+		(waiting:GetAttribute("InMatch") or "") == "" and (dead:GetAttribute("InMatch") or "") == "",
+		"and neither is marked as playing"
+	)
+	table.clear(respawning)
+end
+
+do
+	table.clear(respawning)
+	local runtime = runningMatch()
+	runtime.state.timeLeft = 500
+	local waiting, dead, up = fakePlayer("waiting2"), withHealth("dead2", 0), fakePlayer("up3")
+	for _, player in { waiting, dead, up } do
+		player:SetAttribute("InMatch", "")
+	end
+	respawning[waiting] = true
+	runtime:_joinMidMatch({ waiting, dead, up })
+
+	check(runtime.roster[waiting] == nil, "a player waiting on a respawn is not seated into a running match")
+	check(runtime.roster[dead] == nil, "nor one whose character is dead")
+	check(runtime.roster[up] ~= nil, "a live one beside them still is")
+
+	-- Back on their feet, they are seated on the next pass.
+	respawning[waiting] = nil
+	dead.Character = nil
+	runtime:_joinMidMatch({ waiting, dead })
+	check(runtime.roster[waiting] ~= nil and runtime.roster[dead] ~= nil, "and so are they once they are up again")
+end
+
+--------------------------------------------------------------------------------
 -- Lopsided teams are evened out as players come back from a death
 --
 -- A match that lost three players from one side stayed lopsided for the rest of
@@ -557,6 +619,22 @@ do
 	if type(runtime.rebalanceOnRespawn) == "function" then
 		check(runtime:rebalanceOnRespawn(onA[1]) == nil, "one player apart is as level as an odd number allows")
 	end
+end
+
+do
+	-- Moving sides changes who is paid the win: the payout follows the side a
+	-- player ends on, and playing time is counted from when they were seated. In
+	-- the last minute that is a way onto the winning side, or onto a losing one
+	-- for a player who did nothing to earn it. Nobody is seated in that minute
+	-- either (LATE_JOIN_CUTOFF_SECONDS).
+	local runtime, onA = lopsided(3, 1)
+	runtime.state.timeLeft = GameConfig.LATE_JOIN_CUTOFF_SECONDS - 1
+	check(runtime:rebalanceOnRespawn(onA[1]) == nil, "nobody is moved in the last minute of a match")
+	check(runtime.roster[onA[1]] == "A", "and the roster stays as it was")
+	check(onA[1]:GetAttribute("TeamId") == "A", "as does their team")
+
+	runtime.state.timeLeft = GameConfig.LATE_JOIN_CUTOFF_SECONDS + 1
+	check(runtime:rebalanceOnRespawn(onA[1]) == "B", "but a minute and a second before the end still is")
 end
 
 do
@@ -637,22 +715,107 @@ end
 
 heading("Paid kills")
 
+local PairLimiter = Env.load("src/server/Match/PairLimiter")
+
 do
-	local runtime, a1, b1 = runningMatch()
+	-- 2v2: the killer has two enemies to spread kills over, so taking the same
+	-- one again and again is the pattern the limit exists for.
+	local runtime, onA, onB = lopsided(2, 2)
+	local killer, victim = onA[1], onB[1]
 	local limit = EconomyConfig.MAX_PAID_KILLS_PER_PAIR
 	local firstUnpaid = nil
 	for kill = 1, limit + 3 do
-		local paidKill = runtime:registerKill(b1, a1, "Rifle", false)
+		local paidKill = runtime:registerKill(victim, killer, "Rifle", false)
 		if not paidKill and not firstUnpaid then
 			firstUnpaid = kill
 		end
 	end
 	check(firstUnpaid == limit + 1, `the same victim stops paying after {limit} kills (first unpaid: {firstUnpaid})`)
 	check(runtime.state.scores.A == limit + 3, "but every kill still scores for the team")
+	check(runtime:registerKill(onB[2], killer, "Rifle", false) == true, "another victim of the same killer is paid")
 
-	local other = runtime:registerKill(a1, b1, "Rifle", false)
+	local other = runtime:registerKill(killer, victim, "Rifle", false)
 	check(other == true, "the victim killing back is paid")
-	check(runtime:registerKill(b1, b1, "Rifle", false) == false, "a suicide pays nothing")
+	check(runtime:registerKill(victim, victim, "Rifle", false) == false, "a suicide pays nothing")
+end
+
+do
+	-- 1v1: every kill of the match is the same pair. The winner takes as many as
+	-- the score limit says (18) and is paid for every one.
+	local runtime, onA, onB = lopsided(1, 1)
+	local duelLimit = MatchStateMachine.scoreLimitFor(1, GameConfig.SCORE_LIMIT_PER_PLAYER)
+	runtime.state.scoreLimit = duelLimit
+	local unpaid = 0
+	for _ = 1, duelLimit do
+		if not runtime:registerKill(onB[1], onA[1], "Rifle", false) then
+			unpaid += 1
+		end
+	end
+	check(duelLimit > EconomyConfig.MAX_PAID_KILLS_PER_PAIR, "the score limit of a 1v1 is above the pair limit")
+	check(runtime.state.scores.A == duelLimit, `the duel was played to its score limit ({runtime.state.scores.A})`)
+	check(unpaid == 0, `a 1v1 winner is paid for all {duelLimit} kills ({unpaid} were not)`)
+	check(runtime.kills[onA[1]] == duelLimit, "and every one is on their tally")
+end
+
+do
+	-- 3v3 is a team match like any other.
+	local runtime, onA, onB = lopsided(3, 3)
+	local limit = EconomyConfig.MAX_PAID_KILLS_PER_PAIR
+	local lastPaid = 0
+	for kill = 1, limit + 1 do
+		if runtime:registerKill(onB[2], onA[3], "Rifle", false) then
+			lastPaid = kill
+		end
+	end
+	check(lastPaid == limit, `the {limit + 1}th kill of the same victim in a 3v3 is not paid (last paid: {lastPaid})`)
+end
+
+do
+	-- Leaving and coming back is a new Player object with the same UserId, and
+	-- must not be a way to start the count again.
+	local runtime, onA, onB = lopsided(2, 2)
+	local limit = EconomyConfig.MAX_PAID_KILLS_PER_PAIR
+	for _ = 1, limit do
+		runtime:registerKill(onB[1], onA[1], "Rifle", false)
+	end
+	check(runtime:registerKill(onB[1], onA[1], "Rifle", false) == false, "the limit is reached")
+
+	local userId = onA[1].UserId
+	runtime:onPlayerRemoving(onA[1])
+	local back = fakePlayer("A1 again")
+	back.UserId = userId
+	back:SetAttribute("InMatch", "")
+	runtime:_joinMidMatch({ back })
+	check(runtime.roster[back] == "A", "the returning killer is seated on the smaller side")
+	check(runtime:registerKill(onB[1], back, "Rifle", false) == false, "and the same victim is still not paid")
+
+	-- The same goes for the victim.
+	local victimId = onB[1].UserId
+	runtime:onPlayerRemoving(onB[1])
+	local victimBack = fakePlayer("B1 again")
+	victimBack.UserId = victimId
+	victimBack:SetAttribute("InMatch", "")
+	runtime:_joinMidMatch({ victimBack })
+	check(runtime.roster[victimBack] == "B", "the returning victim is seated on the smaller side")
+	check(
+		runtime:registerKill(victimBack, back, "Rifle", false) == false,
+		"and coming back as the victim does not reset it"
+	)
+end
+
+do
+	-- Nothing about a finished match is carried into the next one.
+	local runtime, onA, onB = lopsided(2, 2)
+	local limit = EconomyConfig.MAX_PAID_KILLS_PER_PAIR
+	for _ = 1, limit + 1 do
+		runtime:registerKill(onB[1], onA[1], "Rifle", false)
+	end
+	check(PairLimiter.count(runtime.killPairs, onA[1].UserId, onB[1].UserId) == limit + 1, "the pair was counted")
+	runtime:_returnToHub()
+	check(
+		PairLimiter.count(runtime.killPairs, onA[1].UserId, onB[1].UserId) == 0,
+		"sending the match back to the hub forgets the counts"
+	)
 end
 
 --------------------------------------------------------------------------------
