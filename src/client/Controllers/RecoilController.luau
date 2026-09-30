@@ -178,13 +178,16 @@ function RecoilController.peekIndex(weaponId: string, now: number?): number
 end
 
 --[[
-	Crosshair bloom in degrees: the server's inaccuracy cone for where the spray
-	currently sits, floored at the weapon's base spread so a resting crosshair is
-	never drawn as a perfect point.
+	Crosshair bloom in degrees: the server's inaccuracy cone for the shot the
+	trigger would fire NEXT, floored at the weapon's base spread so a resting
+	crosshair is never drawn as a perfect point.
 
-	The reset is applied here as well as in nextIndex because a player who has
-	stopped firing must see the crosshair tighten immediately, even though no shot
-	has advanced the stored index.
+	The next shot rather than the last, because the cone is rolled from a shot's
+	place in the spray: the round just fired is already gone, and the Lance
+	(0.04 degrees on its first round, 1.4 on its second) would read as
+	pin-accurate in exactly the moment it is not. peekIndex applies the reset
+	window as well, so a player who has stopped firing sees the crosshair
+	tighten at once, without another shot to advance the stored index.
 ]]
 function RecoilController.getBloomDeg(weaponId: string): number
 	local weapon = WeaponConfig.get(weaponId)
@@ -192,12 +195,10 @@ function RecoilController.getBloomDeg(weaponId: string): number
 		return 0
 	end
 
-	local entry = entryFor(weaponId)
-	if os.clock() - entry.lastShotAt > weapon.sprayResetTime then
-		return weapon.baseSpreadDeg
-	end
-
-	return math.max(weapon.baseSpreadDeg, SprayPatterns.getServerSpreadDeg(weaponId, entry.index))
+	return math.max(
+		weapon.baseSpreadDeg,
+		SprayPatterns.getServerSpreadDeg(weaponId, RecoilController.peekIndex(weaponId))
+	)
 end
 
 --[[

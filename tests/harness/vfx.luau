@@ -481,6 +481,68 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- The crosshair shows the NEXT shot's spread
+--
+-- The server rolls a shot's cone from that shot's place in the spray. The
+-- bloom used to read the place of the shot already fired, so a Lance (pin
+-- accurate on its first round, ten times looser on the second) showed a
+-- perfect point in the instant after firing, exactly when the next round would
+-- go wide. What the player needs to see is what pulling the trigger now costs.
+--------------------------------------------------------------------------------
+
+heading("Crosshair bloom")
+
+do
+	boot("desktop")
+	Env.load("src/client/ClientState").init()
+	local RecoilController = Env.load("src/client/Controllers/RecoilController")
+	local SprayPatterns = Env.load("src/shared/Config/SprayPatterns")
+	local WeaponConfig = Env.load("src/shared/Config/WeaponConfig")
+	RecoilController.init()
+
+	local lance = WeaponConfig.get("Lance")
+	check(
+		RecoilController.getBloomDeg("Lance") == lance.baseSpreadDeg,
+		`a weapon that has not fired rests at its base spread (got {RecoilController.getBloomDeg("Lance")})`
+	)
+
+	RecoilController.onShot("Lance", os.clock())
+	local second = SprayPatterns.getServerSpreadDeg("Lance", 2)
+	check(
+		math.abs(RecoilController.getBloomDeg("Lance") - second) < 1e-6,
+		`right after a Lance shot the crosshair shows the second round's cone, {second} (got {RecoilController.getBloomDeg(
+			"Lance"
+		)})`
+	)
+
+	-- Hold the rifle. Eight rounds is the last of the second tier, so the
+	-- crosshair has to already be showing the third.
+	local rifle = WeaponConfig.get("Rifle")
+	for shot = 1, 8 do
+		RecoilController.onShot("Rifle", os.clock() - (9 - shot) * 0.001)
+	end
+	local expected = math.max(rifle.baseSpreadDeg, SprayPatterns.getServerSpreadDeg("Rifle", 9))
+	check(
+		expected > SprayPatterns.getServerSpreadDeg("Rifle", 8),
+		"the ninth rifle round really is in a wider tier than the eighth"
+	)
+	check(
+		math.abs(RecoilController.getBloomDeg("Rifle") - expected) < 1e-6,
+		`after eight rifle rounds the crosshair shows the ninth's cone, {expected} (got {RecoilController.getBloomDeg(
+			"Rifle"
+		)})`
+	)
+
+	-- Stop firing and it tightens again, without waiting for another shot.
+	RecoilController.resetSpray()
+	RecoilController.onShot("Lance", os.clock() - lance.sprayResetTime - 1)
+	check(
+		RecoilController.getBloomDeg("Lance") == lance.baseSpreadDeg,
+		"the crosshair tightens once the spray reset time has passed"
+	)
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 
