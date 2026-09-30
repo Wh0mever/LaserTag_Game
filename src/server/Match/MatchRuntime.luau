@@ -77,7 +77,7 @@ function MatchRuntime.new(mapId: string)
 		-- how long they were actually there.
 		placedAt = {} :: { [Player]: number },
 		-- Kills per killer and victim, for the ones that stop paying.
-		pairs = PairLimiter.new(EconomyConfig.MAX_PAID_KILLS_PER_PAIR),
+		killPairs = PairLimiter.new(EconomyConfig.MAX_PAID_KILLS_PER_PAIR),
 		pending = {} :: { { [string]: any } }, -- events raised while one is dispatching
 		dispatching = false,
 		idle = IdleTracker.new({
@@ -423,7 +423,7 @@ function MatchRuntime:_startMatch()
 	table.clear(self.kills)
 	table.clear(self.sideDeadline)
 	table.clear(self.placedAt)
-	PairLimiter.reset(self.pairs)
+	PairLimiter.reset(self.killPairs)
 
 	for player, teamId in TeamService.balanceAssign(entrants) do
 		self.roster[player] = teamId
@@ -654,7 +654,7 @@ function MatchRuntime:registerKill(victim: Player, killer: Player?, _weaponId: s
 			AnalyticsService.killScored(killer)
 			-- The kill scores whatever this says; it only decides whether the
 			-- killer is paid for it. See PairLimiter.
-			paid = PairLimiter.record(self.pairs, killer, victim)
+			paid = PairLimiter.record(self.killPairs, killer, victim)
 			self:_dispatch({ type = "kill", teamId = killerTeam })
 		end
 	end
