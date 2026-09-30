@@ -14,6 +14,12 @@ GameConfig.RESULTS_DURATION = 10
 GameConfig.MIN_PLAYERS = 2
 GameConfig.MAX_PLAYERS_PER_MATCH = 16
 
+-- A match with less than this left on the clock takes no more joiners. Anyone
+-- seated later could not have played long enough to share in the result (see
+-- EconomyConfig.MATCH_BONUS_MIN_SECONDS), and would only be dropped into the
+-- last few seconds of somebody else's game.
+GameConfig.LATE_JOIN_CUTOFF_SECONDS = 60
+
 -- If one team is emptied by disconnects, the other side wins after this grace
 -- period rather than the match dragging on against nobody.
 GameConfig.EMPTY_TEAM_GRACE = 30

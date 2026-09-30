@@ -159,6 +159,11 @@ return function(t)
 	t.equal(ended and ended.aborted, false, "a played-out match is not aborted")
 	t.equal(ended and ended.reason, nil, "and a match played to the clock is not a forfeit")
 	t.equal(
+		ended and ended.elapsed,
+		CONFIG.matchDuration,
+		"endMatch says how long the match ran, which is what a payout is scaled by"
+	)
+	t.equal(
 		broadcastFor(effects, "Results"),
 		nil,
 		"the Results broadcast is left to the runtime, which knows the rewards"
@@ -174,6 +179,40 @@ return function(t)
 	t.expect(findEffect(effects, "returnToHub") ~= nil, "returning to Idle sends the roster to the hub")
 	t.expect(findEffect(effects, "resetQueue") ~= nil, "returning to Idle drops the queue")
 	t.equal(effects[1].type, "broadcast", "the Idle broadcast goes out before the roster is emptied")
+
+	--------------------------------------------------------------------------
+	-- How long the match has run
+	--------------------------------------------------------------------------
+
+	local clocked = startedMatch(2)
+	t.equal(MatchStateMachine.elapsed(clocked), 0, "a match that has just started has run for no time")
+	MatchStateMachine.handle(clocked, { type = "tick", dt = 7 })
+	t.equal(MatchStateMachine.elapsed(clocked), 7, "elapsed follows the match clock")
+	t.equal(
+		MatchStateMachine.elapsed(MatchStateMachine.new(CONFIG)),
+		0,
+		"a match that is not running has no elapsed time"
+	)
+
+	MatchStateMachine.handle(clocked, { type = "playerLeft", remainingA = 1, remainingB = 1 })
+	MatchStateMachine.handle(clocked, { type = "playerLeft", remainingA = 1, remainingB = 0 })
+	_, effects = MatchStateMachine.handle(clocked, { type = "tick", dt = CONFIG.emptyTeamGrace })
+	local forfeitEnd = findEffect(effects, "endMatch")
+	t.equal(
+		forfeitEnd and forfeitEnd.elapsed,
+		7 + CONFIG.emptyTeamGrace,
+		"a forfeit reports the time up to the moment the grace ran out, not the whole match"
+	)
+
+	local limited = startedMatch(2)
+	MatchStateMachine.handle(limited, { type = "playerLeft", remainingA = 1, remainingB = 1 })
+	MatchStateMachine.handle(limited, { type = "tick", dt = 9 })
+	local limitEffects = nil
+	for _ = 1, limited.scoreLimit do
+		_, limitEffects = MatchStateMachine.handle(limited, { type = "kill", teamId = "A" })
+	end
+	local limitEnd = findEffect(limitEffects, "endMatch")
+	t.equal(limitEnd and limitEnd.elapsed, 9, "a match ended by the score limit reports when that was")
 
 	--------------------------------------------------------------------------
 	-- Countdown aborts when the queue drops below MIN_PLAYERS

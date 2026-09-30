@@ -196,13 +196,18 @@ end
 	Called by CombatService once a kill is final. Routing is by the victim, then
 	the killer: the victim is always in the match the kill happened in, whereas a
 	killer could in principle have already left it.
+
+	Returns false when the kill scored but must not pay (the killer has already
+	been paid for the maximum number of kills of this victim this match), true
+	when it pays, and nil when no match claimed it. The caller pays only when the
+	answer is not false.
 ]]
 function MatchService.registerKill(victim: Player, killer: Player?, weaponId: string?, isHeadshot: boolean)
 	local runtime = runtimeForPlayer(victim) or runtimeForPlayer(killer)
 	if not runtime then
-		return
+		return nil
 	end
-	runtime:registerKill(victim, killer, weaponId, isHeadshot == true)
+	return runtime:registerKill(victim, killer, weaponId, isHeadshot == true)
 end
 
 --[[
@@ -223,6 +228,16 @@ end
 function MatchService.getPhase(mapId: string): string
 	local runtime = runtimes[mapId]
 	return if runtime then runtime:getPhase() else MatchStateMachine.States.Idle
+end
+
+--[[
+	Whether someone standing on `mapId`'s pad right now would be seated: a match
+	in progress with more than the late-join cutoff left. QueueService reads this
+	to tell a sign that says "going" from one that says "ending".
+]]
+function MatchService.acceptsJoiners(mapId: string): boolean
+	local runtime = runtimes[mapId]
+	return runtime ~= nil and runtime:acceptsJoiners()
 end
 
 function MatchService.isInProgress(mapId: string): boolean

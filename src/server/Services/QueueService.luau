@@ -113,11 +113,13 @@ end
 
 local States = MatchStateMachine.States
 
-local function statusText(phase: string, count: number, needed: number, countdown: number?): string
+local function statusText(phase: string, count: number, needed: number, countdown: number?, closing: boolean): string
 	if phase == States.Countdown and countdown then
 		return `СТАРТ ЧЕРЕЗ {countdown}`
 	elseif phase == States.InProgress then
-		return "МАТЧ ИДЁТ"
+		-- In its last minute a match takes nobody new. Saying it is still going
+		-- would leave a player on the pad wondering why nothing happens.
+		return if closing then "МАТЧ ЗАВЕРШАЕТСЯ" else "МАТЧ ИДЁТ"
 	elseif phase == States.Results then
 		return "МАТЧ ЗАВЕРШАЕТСЯ"
 	elseif count > 0 then
@@ -159,7 +161,8 @@ local function publish(mapId: string, current: { Player }, previous: { Player },
 	local count = #current
 	local needed = GameConfig.MIN_PLAYERS
 
-	updateSigns(mapId, statusText(phase, count, needed, countdown))
+	local closing = phase == States.InProgress and not MatchService.acceptsJoiners(mapId)
+	updateSigns(mapId, statusText(phase, count, needed, countdown, closing))
 
 	-- Two reasons to send: the numbers on the HUD moved, or somebody stepped off
 	-- the pad and is owed a final update even though the numbers did not.

@@ -93,11 +93,18 @@ Env.provide("src/server/Services/TeamService", {
 	end,
 })
 
+-- What the match paid each player and what it wrote to their record.
+local paid: { [any]: { amount: number, reason: string } } = {}
+local results: { [any]: { won: boolean, kills: number } } = {}
+
 Env.provide("src/server/Services/DataService", {
-	addCoins = function()
+	addCoins = function(player, amount, reason)
+		paid[player] = { amount = amount, reason = reason }
 		return true
 	end,
-	recordMatchResult = function() end,
+	recordMatchResult = function(player, won, kills)
+		results[player] = { won = won, kills = kills }
+	end,
 })
 
 local noop = setmetatable({}, {
@@ -146,6 +153,9 @@ local MatchRuntime = Env.load("src/server/Match/MatchRuntime")
 local MatchStateMachine = Env.load("src/server/Match/MatchStateMachine")
 local SideAssignment = Env.load("src/server/Match/SideAssignment")
 local Constants = Env.load("src/shared/Constants")
+local EconomyConfig = Env.load("src/shared/Config/EconomyConfig")
+local GameConfig = Env.load("src/shared/Config/GameConfig")
+local R = EconomyConfig.REWARDS
 
 local InProgress = MatchStateMachine.States.InProgress
 
@@ -157,9 +167,14 @@ local function runningMatch()
 	table.clear(protectedFor)
 	table.clear(fired)
 
+	table.clear(paid)
+	table.clear(results)
+
 	local runtime = MatchRuntime.new("Dust")
 	local a1, b1, a2 = fakePlayer("a1"), fakePlayer("b1"), fakePlayer("a2")
 	runtime.state.phase = InProgress
+	-- A match that has just begun: the clock is what a payout is scaled by.
+	runtime.state.timeLeft = runtime.state.config.matchDuration
 	runtime.state.scoreLimit = 54
 	for player, teamId in { [a1] = "A", [b1] = "B", [a2] = "A" } do
 		runtime.roster[player] = teamId
@@ -381,6 +396,115 @@ do
 		end
 	end
 	check(payload ~= nil and payload.reason == nil, "a match played out carries no forfeit reason")
+end
+
+--------------------------------------------------------------------------------
+-- Who is let in late, and what they are paid
+--
+-- The payout depended on the scoreline alone: a player seated five seconds
+-- before the end, or left alone thirty seconds after an alt account
+-- disconnected, was paid the full win.
+--------------------------------------------------------------------------------
+
+heading("Late joiners and the payout")
+
+do
+	local runtime = runningMatch()
+	local late = fakePlayer("toolate")
+	late:SetAttribute("InMatch", "")
+	runtime.state.timeLeft = GameConfig.LATE_JOIN_CUTOFF_SECONDS - 1
+	runtime:_joinMidMatch({ late })
+	check(runtime.roster[late] == nil, "nobody is seated in the last minute of a match")
+	check((late:GetAttribute("InMatch") or "") == "", "and they are not marked as playing it")
+
+	local early = fakePlayer("justintime")
+	early:SetAttribute("InMatch", "")
+	runtime.state.timeLeft = GameConfig.LATE_JOIN_CUTOFF_SECONDS + 1
+	runtime:_joinMidMatch({ early })
+	check(runtime.roster[early] ~= nil, "but a minute and a second before the end is still worth joining")
+end
+
+do
+	local runtime, a1, b1, a2 = runningMatch()
+	runtime.state.timeLeft = 500
+	local late = fakePlayer("late")
+	late:SetAttribute("InMatch", "")
+	runtime:_joinMidMatch({ late })
+	check(runtime.roster[late] == "B", "the joiner takes the smaller side")
+
+	-- The score limit ends the match five seconds after they arrive.
+	runtime.state.timeLeft = 495
+	runtime:_endMatch({ winnerTeam = "B", scores = { A = 3, B = 9 }, elapsed = 105 })
+	check(
+		paid[late] ~= nil and paid[late].amount == R.MATCH_PARTICIPATION,
+		`five seconds in the match is paid as taking part (got {tostring(paid[late] and paid[late].amount)})`
+	)
+	check(results[late] ~= nil and results[late].won == false, "and is not written down as a win")
+	check(
+		paid[b1] ~= nil and paid[b1].amount == R.MATCH_WIN,
+		`while the player who played all of it is paid the win (got {tostring(paid[b1] and paid[b1].amount)})`
+	)
+	check(results[b1] ~= nil and results[b1].won == true, "and it is a win on their record")
+	check(paid[a1] ~= nil and paid[a1].amount == R.MATCH_PARTICIPATION, "the losing side is paid for taking part")
+	check(paid[a2] ~= nil and paid[a2].amount == R.MATCH_PARTICIPATION, "all of it")
+end
+
+do
+	local runtime, a1 = runningMatch()
+	-- The other side left after 10 seconds and the survivors waited out the grace.
+	runtime:_endMatch({
+		winnerTeam = "A",
+		scores = { A = 0, B = 0 },
+		reason = "forfeit",
+		elapsed = 10 + GameConfig.EMPTY_TEAM_GRACE,
+	})
+	check(
+		paid[a1] ~= nil and paid[a1].amount == R.MATCH_PARTICIPATION,
+		`a win by the opponent leaving straight away pays the ordinary award (got {tostring(
+			paid[a1] and paid[a1].amount
+		)})`
+	)
+	check(results[a1] ~= nil and results[a1].won == false, "and is not a win on their record")
+end
+
+do
+	local runtime, a1 = runningMatch()
+	runtime:_endMatch({
+		winnerTeam = "A",
+		scores = { A = 4, B = 9 },
+		reason = "forfeit",
+		elapsed = GameConfig.MATCH_DURATION / 2,
+	})
+	local expected = R.MATCH_PARTICIPATION + math.floor((R.MATCH_WIN - R.MATCH_PARTICIPATION) / 2)
+	check(
+		paid[a1] ~= nil and paid[a1].amount == expected,
+		`a forfeit halfway through pays half way between the two (got {tostring(paid[a1] and paid[a1].amount)})`
+	)
+	check(results[a1] ~= nil and results[a1].won == true, "and does count as a win")
+end
+
+--------------------------------------------------------------------------------
+-- Paid kills
+--------------------------------------------------------------------------------
+
+heading("Paid kills")
+
+do
+	local runtime, a1, b1 = runningMatch()
+	local limit = EconomyConfig.MAX_PAID_KILLS_PER_PAIR
+	local firstUnpaid = nil
+	for kill = 1, limit + 3 do
+		local paidKill = runtime:registerKill(b1, a1, "Rifle", false)
+		if not paidKill and not firstUnpaid then
+			firstUnpaid = kill
+		end
+	end
+	check(firstUnpaid == limit + 1, `the same victim stops paying after {limit} kills (first unpaid: {firstUnpaid})`)
+	check(runtime.state.scores.A == limit + 3, "but every kill still scores for the team")
+
+	local other = runtime:registerKill(a1, b1, "Rifle", false)
+	check(other == true, "the victim killing back is paid")
+	check(runtime:registerKill(b1, b1, "Rifle", false) == false, "a suicide pays nothing")
 end
 
 --------------------------------------------------------------------------------

@@ -14,7 +14,7 @@
 	Effect kinds, in the order the runtime must apply them:
 	  broadcast    {phase, data}                     -> MatchStateChanged
 	  startMatch   {queued}                          -> pick teams and spawn
-	  endMatch     {winnerTeam, scores, aborted, reason}
+	  endMatch     {winnerTeam, scores, aborted, reason, elapsed}
 	                                                 -> pay rewards, show Results
 	               reason is "forfeit" when a side left and the other was given
 	               the win, nil for a match played to a score or the clock
@@ -183,11 +183,26 @@ local function enterInProgress(state: State, effects: { Effect })
 end
 
 --[[
+	Seconds the match has been running, 0 when it is not. Payouts are scaled by
+	this, and by the time the runtime sees the end of a match the clock has been
+	reset for the Results screen, so it is read here and carried on the effect.
+]]
+function MatchStateMachine.elapsed(state: State): number
+	if state.phase ~= States.InProgress then
+		return 0
+	end
+	return math.clamp(state.config.matchDuration - state.timeLeft, 0, state.config.matchDuration)
+end
+
+--[[
 	Finish a played-out match. The Results broadcast is deliberately NOT emitted
 	here: its payload carries the per-player coin rewards, which only the runtime
 	knows once it has actually paid them.
 ]]
 local function enterResults(state: State, effects: { Effect }, winnerTeam: string?, reason: string?)
+	-- Before the clock is reused for the Results screen.
+	local elapsed = MatchStateMachine.elapsed(state)
+
 	state.phase = States.Results
 	state.timeLeft = state.config.resultsDuration
 	state.emptyTeamTimeLeft = nil
@@ -199,6 +214,7 @@ local function enterResults(state: State, effects: { Effect }, winnerTeam: strin
 		scores = copyScores(state),
 		aborted = false,
 		reason = reason,
+		elapsed = elapsed,
 	})
 end
 
