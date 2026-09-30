@@ -46,7 +46,8 @@ local NEVER = -math.huge
 	Slack on the fire-rate gate. A client schedules shots on its own render loop
 	and the network adds jitter on top, so consecutive requests arrive a frame
 	early about as often as a frame late; with the slack under one 60 Hz frame
-	the server ate roughly one honest rifle shot in five. Two frames covers it.
+	the server dropped about one honest rifle shot in five at 20 ms of jitter.
+	Two frames covers it.
 
 	The slack is not a faster weapon. The gate is anchored to the cadence, not to
 	when packets happened to arrive: an accepted shot is booked at the later of

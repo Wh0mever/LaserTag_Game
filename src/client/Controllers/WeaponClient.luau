@@ -100,8 +100,9 @@ local predicted: {
 		magSize: number,
 		reloading: boolean,
 		reloadUntil: number,
-		-- The last shot sent before this client asked for its current reload.
-		reloadSeq: number,
+		-- The last shot sent with this weapon, numbered as the server's per-weapon
+		-- acknowledgement (AmmoSync's ackSeq) is.
+		lastSeq: number,
 		lastShotAt: number,
 	},
 } =
@@ -147,7 +148,7 @@ local function stateFor(weaponId: string)
 			magSize = if weapon then weapon.magSize else 0,
 			reloading = false,
 			reloadUntil = 0,
-			reloadSeq = 0,
+			lastSeq = 0,
 			lastShotAt = NEVER,
 		}
 		predicted[weaponId] = state
@@ -291,9 +292,6 @@ function WeaponClient.reload(): boolean
 	local now = os.clock()
 	state.reloading = true
 	state.reloadUntil = now + weapon.reloadTime
-	-- Remembered so a sync sent before the server read this request can be told
-	-- from one sent after it (see reconcile).
-	state.reloadSeq = seq
 
 	if reloadRemote then
 		reloadRemote:FireServer(currentWeaponId)
@@ -348,6 +346,7 @@ local function tryFire(now: number)
 	local inherited = if late < weapon.fireRate then math.min(late, FIRE_CARRY) else 0
 
 	seq += 1
+	state.lastSeq = seq
 	state.mag -= 1
 	state.lastShotAt = now - inherited
 	lastLocalShotAt = now
@@ -445,13 +444,15 @@ local function reconcile(ammo)
 	-- answering those when the client is already reloading; each of them would
 	-- cancel the reload and the HUD would flick reload, empty, reload as the
 	-- server caught up. A sync that has not yet accounted for the reload request
-	-- (`ackSeq` no later than the last shot sent before it) and shows a magazine
-	-- that is not full cannot be the reload finishing, so it is not allowed to
-	-- end one. The completion sync carries a full magazine and still does.
+	-- (`ackSeq` no later than the last shot this weapon fired, which is what the
+	-- request was sent behind: nothing fires while it reloads) and shows a
+	-- magazine that is not full cannot be the reload finishing, so it is not
+	-- allowed to end one. The completion sync carries a full magazine and still
+	-- does.
 	local predatesReload = wasReloading
 		and not serverReloading
 		and type(ammo.ackSeq) == "number"
-		and ammo.ackSeq <= state.reloadSeq
+		and ammo.ackSeq <= state.lastSeq
 		and ammo.mag < state.magSize
 
 	if not predatesReload then

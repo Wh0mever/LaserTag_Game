@@ -91,6 +91,26 @@ do
 		`a steady 600 RPM client with +/-20 ms of arrival jitter is never dropped ({accepted}/{total} accepted)`
 	)
 
+	-- 1b. The client's own schedule leans on a little carried lateness (see
+	-- WeaponClient.FIRE_CARRY): the shortest gap it sends is 12 ms under the
+	-- interval, alternating with a longer one. On top of 10 ms of jitter that must
+	-- still never be refused.
+	WeaponState.clear(player)
+	local leaning = jitterSource(11)
+	local leanAccepted, leanTotal, sentAt = 0, 300, 400
+	for shot = 0, leanTotal - 1 do
+		local entry = WeaponState.get(player, "Rifle")
+		entry.mag = rifle.magSize
+		sentAt += rifle.fireRate + (if shot % 2 == 0 then -0.012 else 0.012)
+		if WeaponState.consumeShot(player, "Rifle", sentAt + leaning() * 0.010) then
+			leanAccepted += 1
+		end
+	end
+	check(
+		leanAccepted == leanTotal,
+		`shots at the client's shortest gap, with jitter, are never dropped ({leanAccepted}/{leanTotal} accepted)`
+	)
+
 	-- 2. Someone pacing shots just inside the old floor. Whatever the slack, the
 	-- sustained rate must not beat the weapon's own: 20 seconds at 0.1 s is 200
 	-- shots, plus the one that opens the burst.
