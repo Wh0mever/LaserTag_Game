@@ -14,9 +14,14 @@
 	Effect kinds, in the order the runtime must apply them:
 	  broadcast    {phase, data}                     -> MatchStateChanged
 	  startMatch   {queued}                          -> pick teams and spawn
-	  endMatch     {winnerTeam, scores, aborted}     -> pay rewards, show Results
+	  endMatch     {winnerTeam, scores, aborted, reason}
+	                                                 -> pay rewards, show Results
+	               reason is "forfeit" when a side left and the other was given
+	               the win, nil for a match played to a score or the clock
 	  returnToHub  {}                                -> send the roster back
 	  resetQueue   {}                                -> drop the pad queue
+	  graceStarted {emptyTeam, seconds}              -> tell the roster a side is empty
+	  graceCancelled {}                              -> tell the roster the match goes on
 
 	Effect ORDER carries meaning and is not incidental: `startMatch` precedes the
 	InProgress broadcast because the roster has to exist before it can be
@@ -182,7 +187,7 @@ end
 	here: its payload carries the per-player coin rewards, which only the runtime
 	knows once it has actually paid them.
 ]]
-local function enterResults(state: State, effects: { Effect }, winnerTeam: string?)
+local function enterResults(state: State, effects: { Effect }, winnerTeam: string?, reason: string?)
 	state.phase = States.Results
 	state.timeLeft = state.config.resultsDuration
 	state.emptyTeamTimeLeft = nil
@@ -193,6 +198,7 @@ local function enterResults(state: State, effects: { Effect }, winnerTeam: strin
 		winnerTeam = winnerTeam,
 		scores = copyScores(state),
 		aborted = false,
+		reason = reason,
 	})
 end
 
@@ -287,7 +293,7 @@ local function applyTick(state: State, dt: number, effects: { Effect })
 				-- Grace expired with a side still empty: whoever is left standing
 				-- takes the win regardless of the scoreline.
 				local survivor = if state.remaining.A > 0 then "A" elseif state.remaining.B > 0 then "B" else nil
-				enterResults(state, effects, survivor)
+				enterResults(state, effects, survivor, "forfeit")
 				return
 			end
 		end
@@ -366,8 +372,19 @@ local function applyRoster(state: State, remainingA: number, remainingB: number,
 		-- keeps losing its last player would never actually run out of time.
 		if not state.emptyTeamTimeLeft then
 			state.emptyTeamTimeLeft = state.config.emptyTeamGrace
+			-- The players still here would otherwise stand in an empty arena for
+			-- the whole grace with no sign of why the match has not ended, and
+			-- then be told they won 3-9.
+			emit(effects, {
+				type = "graceStarted",
+				emptyTeam = if state.remaining.A <= 0 then "A" else "B",
+				seconds = state.emptyTeamTimeLeft,
+			})
 		end
 	else
+		if state.emptyTeamTimeLeft then
+			emit(effects, { type = "graceCancelled" })
+		end
 		state.emptyTeamTimeLeft = nil
 	end
 end

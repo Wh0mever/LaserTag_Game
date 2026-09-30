@@ -43,6 +43,8 @@ SCENARIOS = [
     ("phone", "match", "SideMenu"),
     ("phone", "dead", None),
     ("phone", "results", None),
+    ("phone", "resultsloss", None),
+    ("phone", "resultsforfeit", None),
     ("phone", "notice", None),
     ("phone", "match", "Side"),
     ("phone", "hub", "Shop"),

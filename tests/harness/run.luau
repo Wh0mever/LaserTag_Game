@@ -22,6 +22,7 @@ local SCENARIOS = {
 	{ name = "match", what = "the match runtime's own rules: sides, late joins, results" },
 	{ name = "sides", what = "the side question answers a refusal or a dropped request with a rest and a reason" },
 	{ name = "notice", what = "the notice banner sits above the menus, centred, clear of the controls" },
+	{ name = "results", what = "the results screen says whether the player won, lost or drew, and why" },
 	{ name = "net", what = "the remote pipeline: who is kicked, and what a client can make the log say" },
 }
 

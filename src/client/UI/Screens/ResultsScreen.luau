@@ -1,8 +1,9 @@
 --!nonstrict
 --[[
 	ResultsScreen.luau
-	The end-of-match overlay: who won, both scores, the coins this player earned
-	and how long until the server sends everyone back to the hub.
+	The end-of-match overlay: whether THIS player won, lost or drew (and who beat
+	whom, or that the opponents left), both scores, the coins earned and how long
+	until the server sends everyone back to the hub.
 
 	Driven entirely by MatchStateChanged (through ClientState.MatchChanged). The
 	phase leaving "Results" hides it, so nothing here has to guess when the
@@ -40,6 +41,7 @@ local trove = Trove.new()
 
 local root: Frame? = nil
 local headline: TextLabel? = nil
+local subline: TextLabel? = nil
 local scoreLabels: { [string]: TextLabel } = {}
 local rewardLabel: TextLabel? = nil
 local countdownLabel: TextLabel? = nil
@@ -112,11 +114,12 @@ local function build(gui: Instance)
 	local title =
 		centered("МАТЧ ОКОНЧЕН", UITheme.TextSizes.Display, UITheme.Colors.Text, UITheme.Fonts.Heading)
 	title.Name = "Headline"
-	title.Size = UDim2.new(1, 0, 0.22, 0)
+	title.Size = UDim2.new(1, 0, 0.2, 0)
 	-- Shrinks to fit rather than cutting the end off. On a phone the card is
-	-- 260 px across and "ПОБЕДА — АЛЬФА" at full size needs 340: it read
-	-- "ПОБЕДА —…", which is the one thing this screen exists to say, minus the
-	-- part that says it.
+	-- 260 px across and "ПОРАЖЕНИЕ" at full size needs about 250: one word
+	-- fits, but "ПОБЕДА — АЛЬФА" at full size needed 340 and read "ПОБЕДА —…",
+	-- which is the one thing this screen exists to say, minus the part that
+	-- says it.
 	title.TextScaled = true
 	local titleCap = Instance.new("UITextSizeConstraint")
 	titleCap.MaxTextSize = UITheme.TextSizes.Display
@@ -125,10 +128,19 @@ local function build(gui: Instance)
 	title.Parent = card
 	headline = title
 
+	-- Who beat whom, or why the match ended early. Kept off the headline so the
+	-- headline can stay one short word that fits a phone at full size.
+	local reason = centered("", UITheme.TextSizes.Small, UITheme.Colors.TextDim, UITheme.Fonts.Bold)
+	reason.Name = "Subline"
+	reason.Position = UDim2.fromScale(0, 0.2)
+	reason.Size = UDim2.fromScale(1, 0.1)
+	reason.Parent = card
+	subline = reason
+
 	local scores = Instance.new("Frame")
 	scores.Name = "Scores"
-	scores.Position = UDim2.fromScale(0, 0.24)
-	scores.Size = UDim2.fromScale(1, 0.4)
+	scores.Position = UDim2.fromScale(0, 0.32)
+	scores.Size = UDim2.fromScale(1, 0.32)
 	scores.BackgroundTransparency = 1
 	scores.Parent = card
 
@@ -162,13 +174,48 @@ end
 -- Presentation
 --------------------------------------------------------------------------------
 
-local function winnerText(winnerTeam: string?): (string, Color3)
+--[[
+	Did the player win, lose or draw. Decided from the team on record, so the
+	headline can answer the question the player came to the screen with.
+
+	A viewer on neither playing team (a spectator, or somebody the server has
+	already moved) is "neutral": they get the winning team's name instead, since
+	"you won" would be a claim about someone else.
+]]
+function ResultsScreen.outcomeFor(winnerTeam: string?, myTeam: string?): string
 	if winnerTeam == nil then
-		return "НИЧЬЯ", UITheme.Colors.TextDim
+		return "draw"
+	end
+	if myTeam ~= "A" and myTeam ~= "B" then
+		return "neutral"
+	end
+	return if myTeam == winnerTeam then "win" else "loss"
+end
+
+local function teamName(teamId: string): string
+	local team = Constants.TEAMS[teamId]
+	return TextUtil.upper(team and team.name or teamId)
+end
+
+-- (headline, colour, line under it) for one outcome.
+local function presentation(outcome: string, winnerTeam: string?, reason: string?): (string, Color3, string)
+	-- Only a winner can have been left by the opponents; the other outcomes
+	-- describe the scoreline as it stands.
+	local forfeit = if reason == "forfeit" and outcome ~= "loss"
+		then "СОПЕРНИКИ ПОКИНУЛИ МАТЧ"
+		else nil
+
+	if outcome == "win" then
+		return "ПОБЕДА",
+			UITheme.Colors.Positive,
+			forfeit or `Победила команда {teamName(winnerTeam)}`
+	elseif outcome == "loss" then
+		return "ПОРАЖЕНИЕ", UITheme.Colors.Negative, `Победила команда {teamName(winnerTeam)}`
+	elseif outcome == "draw" then
+		return "НИЧЬЯ", UITheme.Colors.TextDim, "Счёт равный"
 	end
 
-	local team = Constants.TEAMS[winnerTeam]
-	return `ПОБЕДА — {TextUtil.upper(team and team.name or winnerTeam)}`, UITheme.teamColor(winnerTeam)
+	return `ПОБЕДА — {teamName(winnerTeam)}`, UITheme.teamColor(winnerTeam), forfeit or ""
 end
 
 --[[
@@ -191,11 +238,15 @@ local function show(match)
 
 	local data = match.data or {}
 	local scores = data.scores or match.scores or { A = 0, B = 0 }
-	local text, color = winnerText(data.winnerTeam)
+	local outcome = ResultsScreen.outcomeFor(data.winnerTeam, ClientState.getTeamId())
+	local text, color, detail = presentation(outcome, data.winnerTeam, data.reason)
 
 	if headline then
 		headline.Text = text
 		headline.TextColor3 = color
+	end
+	if subline then
+		subline.Text = detail
 	end
 	for _, teamId in Constants.TEAM_IDS do
 		local label = scoreLabels[teamId]
@@ -285,6 +336,7 @@ function ResultsScreen.stop()
 	table.clear(scoreLabels)
 	root = nil
 	headline = nil
+	subline = nil
 	rewardLabel = nil
 	countdownLabel = nil
 end

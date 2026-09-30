@@ -292,6 +292,98 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- A side that empties
+--
+-- The players left used to stand in an empty arena for thirty seconds with no
+-- word, and then be told they had won a match the scoreboard said they were
+-- losing.
+--------------------------------------------------------------------------------
+
+heading("A side empties")
+
+local function noticesTo(player): { string }
+	local lines = {}
+	for _, event in fired do
+		if event.name == "Notice" and event.player == player then
+			table.insert(lines, event.args[1])
+		end
+	end
+	return lines
+end
+
+do
+	local runtime, a1, b1, a2 = runningMatch()
+	runtime.state.timeLeft = 600
+	runtime.state.scores.A, runtime.state.scores.B = 3, 9
+	runtime:_syncRoster()
+	table.clear(fired)
+
+	runtime:onPlayerRemoving(b1)
+
+	local told = noticesTo(a1)
+	check(#told == 1, `a player left alone is told the other side is empty ({#told} notices)`)
+	check(
+		told[1] ~= nil and string.find(told[1], "30", 1, true) ~= nil,
+		`and how long they have to wait (got "{tostring(told[1])}")`
+	)
+	check(#noticesTo(a2) == 1, "and so is their teammate")
+	check(#noticesTo(b1) == 0, "and the one who left is not")
+
+	-- A stray departure while the grace runs does not repeat the announcement.
+	table.clear(fired)
+	runtime:onPlayerRemoving(a2)
+	check(#noticesTo(a1) == 0, "a second departure does not say it again")
+
+	table.clear(fired)
+	runtime:tick(31)
+	check(runtime.state.phase == MatchStateMachine.States.Results, "the grace running out ends the match")
+
+	local payload = nil
+	for _, event in fired do
+		if event.args[2] == MatchStateMachine.States.Results then
+			payload = event.args[3]
+			break
+		end
+	end
+	check(payload ~= nil and payload.winnerTeam == "A", "the players left win")
+	check(
+		payload ~= nil and payload.reason == "forfeit",
+		`and the results say the opponents left (got {tostring(payload and payload.reason)})`
+	)
+end
+
+do
+	local runtime, a1, b1 = runningMatch()
+	runtime.state.timeLeft = 600
+	runtime:_syncRoster()
+	runtime:onPlayerRemoving(b1)
+	table.clear(fired)
+
+	local late = fakePlayer("late2")
+	late:SetAttribute("InMatch", "")
+	runtime:_joinMidMatch({ late })
+	local told = noticesTo(a1)
+	check(#told == 1, `somebody joining the empty side tells the waiting player the match goes on ({#told} notices)`)
+end
+
+do
+	local runtime = runningMatch()
+	runtime.state.timeLeft = 600
+	runtime.state.scores.A = 1
+	runtime:_syncRoster()
+	table.clear(fired)
+	runtime:tick(1)
+	runtime:_endMatch({ winnerTeam = "A", scores = { A = 10, B = 4 } })
+	local payload = nil
+	for _, event in fired do
+		if event.args[2] == MatchStateMachine.States.Results then
+			payload = event.args[3]
+		end
+	end
+	check(payload ~= nil and payload.reason == nil, "a match played out carries no forfeit reason")
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 

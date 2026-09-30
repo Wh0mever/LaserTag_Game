@@ -162,6 +162,16 @@ function MatchRuntime:_audience(): { Player }
 	return list
 end
 
+-- A banner for everyone playing right now. The players on the pad are not told:
+-- what happens inside the match is not their business until they are in it.
+function MatchRuntime:_notifyRoster(message: string, severity: string)
+	for player in self.roster do
+		if isPresent(player) then
+			Remotes.fireClient(RemoteNames.Notice, player, message, severity)
+		end
+	end
+end
+
 function MatchRuntime:_broadcast(phase: string, data: { [string]: any })
 	for _, player in self:_audience() do
 		Remotes.fireClient(RemoteNames.MatchStateChanged, player, self.mapId, phase, data)
@@ -221,6 +231,16 @@ function MatchRuntime:_apply(effect: { [string]: any })
 		self:_returnToHub()
 	elseif kind == "resetQueue" then
 		table.clear(self.queued)
+	elseif kind == "graceStarted" then
+		self:_notifyRoster(
+			`Команда соперника пуста — победа через {effect.seconds} с, если никто не зайдёт`,
+			"warning"
+		)
+	elseif kind == "graceCancelled" then
+		self:_notifyRoster(
+			"В матч зашли новые игроки — игра продолжается",
+			"info"
+		)
 	else
 		warn(`[MatchRuntime] {self.mapId}: unknown effect "{tostring(kind)}"`)
 	end
@@ -397,6 +417,10 @@ function MatchRuntime:_endMatch(effect: { [string]: any })
 		scores = { A = effect.scores.A, B = effect.scores.B },
 		winnerTeam = winnerTeam,
 		rewards = rewards,
+		-- Why the match ended when the scoreline does not say: "forfeit" is a
+		-- win handed to the side that stayed, and the Results screen has to
+		-- explain it or it reads as a bug.
+		reason = effect.reason,
 	})
 end
 
