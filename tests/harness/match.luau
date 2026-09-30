@@ -485,6 +485,68 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- Who is dealt in
+--
+-- The pad sample can be half a second old. A player who died in the hub inside
+-- that window is no longer standing on it, and seating them left the respawn
+-- timer of the hub to pull them back out of a match they were listed in.
+--------------------------------------------------------------------------------
+
+heading("Dealing in the fallen")
+
+-- A player with a character whose Humanoid has `health`.
+local function withHealth(name: string, health: number)
+	local player = fakePlayer(name)
+	player.Character = {
+		FindFirstChildOfClass = function(_self, className)
+			return if className == "Humanoid" then { Health = health } else nil
+		end,
+	}
+	return player
+end
+
+do
+	table.clear(respawning)
+	local runtime = MatchRuntime.new("Dust")
+	local up1, up2 = fakePlayer("up1"), withHealth("up2", 100)
+	local waiting, dead = fakePlayer("waiting"), withHealth("dead", 0)
+	respawning[waiting] = true
+	runtime.queued = { up1, waiting, dead, up2 }
+	runtime:_startMatch()
+
+	check(runtime.roster[up1] ~= nil and runtime.roster[up2] ~= nil, "the players standing there are dealt in")
+	check(runtime.roster[waiting] == nil, "a player waiting on a respawn is not")
+	check(runtime.roster[dead] == nil, "nor one whose character is dead")
+	check(
+		(waiting:GetAttribute("InMatch") or "") == "" and (dead:GetAttribute("InMatch") or "") == "",
+		"and neither is marked as playing"
+	)
+	table.clear(respawning)
+end
+
+do
+	table.clear(respawning)
+	local runtime = runningMatch()
+	runtime.state.timeLeft = 500
+	local waiting, dead, up = fakePlayer("waiting2"), withHealth("dead2", 0), fakePlayer("up3")
+	for _, player in { waiting, dead, up } do
+		player:SetAttribute("InMatch", "")
+	end
+	respawning[waiting] = true
+	runtime:_joinMidMatch({ waiting, dead, up })
+
+	check(runtime.roster[waiting] == nil, "a player waiting on a respawn is not seated into a running match")
+	check(runtime.roster[dead] == nil, "nor one whose character is dead")
+	check(runtime.roster[up] ~= nil, "a live one beside them still is")
+
+	-- Back on their feet, they are seated on the next pass.
+	respawning[waiting] = nil
+	dead.Character = nil
+	runtime:_joinMidMatch({ waiting, dead })
+	check(runtime.roster[waiting] ~= nil and runtime.roster[dead] ~= nil, "and so are they once they are up again")
+end
+
+--------------------------------------------------------------------------------
 -- Lopsided teams are evened out as players come back from a death
 --
 -- A match that lost three players from one side stayed lopsided for the rest of

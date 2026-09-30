@@ -51,7 +51,12 @@ local GRIP_NAME = "WeaponGrip"
 
 local characterTroves: { [Player]: any } = {}
 local weapons: { [Player]: { [string]: Model } } = {}
-local respawning: { [Player]: boolean } = {}
+-- How many characters each player has been given. Bumped by every spawn, so
+-- what a life started (a respawn timer, above all) can tell that it is over.
+local lives: { [Player]: number } = {}
+-- The life that is dead and waiting on its respawn. Never a past one: a spawn
+-- clears it.
+local respawning: { [Player]: number } = {}
 -- Who last hurt each player, for a death that no shot finished.
 local lastDamager: { [Player]: { shooter: Player, weaponId: string?, at: number } } = {}
 
@@ -275,7 +280,7 @@ end
 
 -- True between a death and the respawn it scheduled.
 function PlayerService.isRespawning(player: Player): boolean
-	return respawning[player] == true
+	return respawning[player] ~= nil and respawning[player] == (lives[player] or 0)
 end
 
 local function configureCharacter(player: Player, character: Model, teamId: string)
@@ -344,7 +349,7 @@ end
 	written to the victim's record either way, which a reset used to skip.
 ]]
 local function settleUnclaimedDeath(player: Player, mapId: string)
-	if respawning[player] or mapId == "" then
+	if PlayerService.isRespawning(player) or mapId == "" then
 		return
 	end
 
@@ -401,6 +406,11 @@ local function spawnAt(player: Player, mapId: string, teamId: string, pivot: CFr
 		return nil
 	end
 
+	-- A new life. Whatever was waiting on the last one belongs to a character
+	-- that is gone: a respawn timer must not act on this one.
+	lives[player] = (lives[player] or 0) + 1
+	respawning[player] = nil
+
 	player:SetAttribute("InMatch", mapId)
 	-- A new life owes nothing to the last one's shooter.
 	lastDamager[player] = nil
@@ -456,16 +466,25 @@ end
 	for the same death, and a second timer would spawn the player twice. The first
 	call wins, which is why the kill path (the one carrying `killerUserId`) is the
 	one that runs first.
+
+	The timer belongs to the life that died. If that life has been replaced by the
+	time it fires (the match seated a player who died in the hub, the roster sent
+	them back to it), the timer does nothing: acting would undo the newer spawn,
+	and while it was pending it would have swallowed the newer life's own death.
 ]]
 function PlayerService.scheduleRespawn(player: Player, mapId: string, teamId: string, killerUserId: number?)
-	if respawning[player] then
+	local life = lives[player] or 0
+	if respawning[player] == life then
 		return
 	end
-	respawning[player] = true
+	respawning[player] = life
 
 	Remotes.fireClient(RemoteNames.DeathInfo, player, killerUserId, Constants.RESPAWN_SECONDS)
 
 	task.delay(Constants.RESPAWN_SECONDS, function()
+		if (lives[player] or 0) ~= life then
+			return
+		end
 		respawning[player] = nil
 
 		if not player:IsDescendantOf(Players) then
@@ -502,6 +521,12 @@ function PlayerService.scheduleRespawn(player: Player, mapId: string, teamId: st
 				-- hub has usually spawned them already; step in only if nobody did.
 				PlayerService.spawnInHub(player)
 			end
+			return
+		end
+
+		-- A death in the hub. If the match has claimed them since, it is the
+		-- match that spawns them; the hub must not pull them back out of it.
+		if (player:GetAttribute("InMatch") or "") ~= "" then
 			return
 		end
 
@@ -611,6 +636,7 @@ function PlayerService.onPlayerRemoving(player: Player)
 	end
 
 	respawning[player] = nil
+	lives[player] = nil
 	lastDamager[player] = nil
 	PlayerService.clearWeapons(player)
 

@@ -96,6 +96,22 @@ local function isPresent(player: Player): boolean
 	return player ~= nil and player:IsDescendantOf(Players)
 end
 
+--[[
+	Whether a player is dead or waiting on a respawn. The pad sample is up to a
+	poll old and only ever counts living characters, so such a player is a leftover
+	of it and not somebody standing there. They are dealt in on a later pass if
+	they are back on the pad; seating them now would put a character into the
+	match while the respawn they are waiting on is still pending.
+]]
+local function isDown(player: Player): boolean
+	if PlayerService.isRespawning(player) then
+		return true
+	end
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	return humanoid ~= nil and humanoid.Health <= 0
+end
+
 function MatchRuntime:getPhase(): string
 	return self.state.phase
 end
@@ -414,7 +430,7 @@ end
 function MatchRuntime:_startMatch()
 	local entrants = {}
 	for _, player in self.queued do
-		if isPresent(player) and #entrants < GameConfig.MAX_PLAYERS_PER_MATCH then
+		if isPresent(player) and not isDown(player) and #entrants < GameConfig.MAX_PLAYERS_PER_MATCH then
 			table.insert(entrants, player)
 		end
 	end
@@ -599,7 +615,12 @@ function MatchRuntime:_joinMidMatch(candidates: { Player })
 		if size >= GameConfig.MAX_PLAYERS_PER_MATCH then
 			break
 		end
-		if not self.roster[player] and isPresent(player) and (player:GetAttribute("InMatch") or "") == "" then
+		if
+			not self.roster[player]
+			and isPresent(player)
+			and not isDown(player)
+			and (player:GetAttribute("InMatch") or "") == ""
+		then
 			local teamId = TeamService.smallestTeamIn(self.roster)
 			self.roster[player] = teamId
 			self.kills[player] = 0

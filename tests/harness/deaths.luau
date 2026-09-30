@@ -385,6 +385,100 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- A respawn timer belongs to the life that started it
+--
+-- A death in the hub starts a three second timer that puts the player back in
+-- the hub. If the match seated them inside that window, the timer used to fire
+-- anyway: the character went back to the hub with the lobby team and no match
+-- while the roster still listed them, a ghost that counted for the score limit
+-- and collected the payout. And a timer left over from an earlier life used to
+-- swallow the next death, leaving a corpse for good.
+--------------------------------------------------------------------------------
+
+heading("A stale respawn timer")
+
+do
+	reset()
+	local player = fakePlayer("seated")
+	player:SetAttribute("InMatch", "")
+	PlayerService.spawnInHub(player)
+	resetCharacter(player)
+	check(PlayerService.isRespawning(player), "a death in the hub starts a respawn")
+
+	-- The countdown ends inside the window and the match seats them, the way
+	-- MatchRuntime._place does.
+	Env.advance(1)
+	player:SetAttribute("InMatch", "Dust")
+	PlayerService.spawnInMatch(player, "Dust", "A")
+	check(not PlayerService.isRespawning(player), "the new life is not waiting on the old one's respawn")
+
+	Env.advance(3)
+	check(
+		player:GetAttribute("InMatch") == "Dust",
+		`the hub timer does not take them out of the match (InMatch is "{tostring(player:GetAttribute("InMatch"))}")`
+	)
+	check(
+		player:GetAttribute("TeamId") == "A",
+		`nor put them on the lobby team (got {tostring(player:GetAttribute("TeamId"))})`
+	)
+end
+
+do
+	reset()
+	local player = fakePlayer("seatedFirst")
+	player:SetAttribute("InMatch", "")
+	PlayerService.spawnInHub(player)
+	resetCharacter(player)
+
+	-- Marked as playing, with the spawn itself not started yet.
+	player:SetAttribute("InMatch", "Dust")
+	local corpse = player.Character
+	Env.advance(3.5)
+	check(player.Character == corpse, "a hub timer does not spawn anybody the match has already claimed")
+	check(player:GetAttribute("InMatch") == "Dust", "and leaves them marked as playing")
+end
+
+do
+	reset()
+	local player = fakePlayer("twice")
+	intoMatch(player)
+
+	-- Dies in the match: a respawn on that map is due at 3 s.
+	resetCharacter(player)
+	Env.advance(1)
+
+	-- Moved to the hub before it lands (idle removal, a forfeit), and dies there.
+	player:SetAttribute("InMatch", "")
+	PlayerService.spawnInHub(player)
+	Env.advance(1)
+	local corpse = player.Character
+	resetCharacter(player)
+	check(PlayerService.isRespawning(player), "the second death is waiting on a respawn of its own")
+
+	Env.advance(1.5)
+	Env.advance(3)
+	check(player.Character ~= corpse, "the second death still respawns, whatever timer was pending before it")
+	check(not PlayerService.isRespawning(player), "and is not left marked as dead")
+	check(player:GetAttribute("InMatch") == "", "in the hub")
+end
+
+do
+	reset()
+	local player = fakePlayer("replaced")
+	intoMatch(player)
+	resetCharacter(player)
+	Env.advance(1)
+
+	-- A new life starts before the timer: its own timer, not the old one's, is
+	-- what a later death waits for.
+	PlayerService.spawnInMatch(player, "Dust", "A")
+	Env.advance(0.5)
+	local life = player.Character
+	Env.advance(2)
+	check(player.Character == life, "the timer of a life that is over does not respawn the new one")
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 
