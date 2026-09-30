@@ -37,11 +37,15 @@ local INDICATOR_DURATION = 1.3
 local INDICATOR_RADIUS = 118
 
 local HITMARKER_SIZE = 42
+-- How far the bars travel outward over the hitmarker's life, and where they
+-- start from the crosshair. Both are radii in pixels: each bar sits on a
+-- diagonal, so the distance is what grows, not the frame that holds them.
 local HITMARKER_GROWTH = 14
+local HITMARKER_RADIUS = 13
 
 local root: Frame? = nil
 local hitmarker: Frame? = nil
-local hitmarkerBars: { Frame } = {}
+local hitmarkerBars: { { bar: Frame, dx: number, dy: number } } = {}
 local hitmarkerShownAt = 0
 local hitmarkerLifetime = Constants.HITMARKER_DURATION
 
@@ -102,6 +106,20 @@ end
 -- Hitmarker
 --------------------------------------------------------------------------------
 
+--[[
+	Put every bar `alpha` of the way through its outward travel. The bars are
+	positioned from the frame's CENTRE, and the frame is centred on the
+	crosshair, so resizing the frame moves nothing; each bar's own distance from
+	the centre is what has to change. Offsets are whole pixels (UDim2 stores
+	integers), rounded rather than truncated so all four bars stay symmetric.
+]]
+local function placeHitmarkerBars(alpha: number)
+	local radius = HITMARKER_RADIUS + alpha * HITMARKER_GROWTH * 0.5
+	for _, entry in hitmarkerBars do
+		entry.bar.Position = UDim2.new(0.5, math.round(entry.dx * radius), 0.5, math.round(entry.dy * radius))
+	end
+end
+
 local function buildHitmarker(parent: Frame): Frame
 	local frame = Instance.new("Frame")
 	frame.Name = "Hitmarker"
@@ -122,13 +140,13 @@ local function buildHitmarker(parent: Frame): Frame
 		bar.AnchorPoint = Vector2.new(0.5, 0.5)
 		bar.Size = UDim2.fromOffset(14, 3)
 		bar.Rotation = angle
-		bar.Position = UDim2.new(0.5, math.cos(radians) * 13, 0.5, math.sin(radians) * 13)
 		bar.BackgroundColor3 = UITheme.Colors.Text
 		bar.BorderSizePixel = 0
 		bar.Parent = frame
 
-		table.insert(hitmarkerBars, bar)
+		table.insert(hitmarkerBars, { bar = bar, dx = math.cos(radians), dy = math.sin(radians) })
 	end
+	placeHitmarkerBars(0)
 
 	return frame
 end
@@ -179,14 +197,13 @@ function ScreenEffects.hitmarker(killed: boolean, isHeadshot: boolean)
 		elseif isHeadshot then UITheme.Colors.Coin
 		else UITheme.Colors.Text
 
-	for _, bar in hitmarkerBars do
-		bar.BackgroundColor3 = color
-		bar.BackgroundTransparency = 0
-	end
-
 	hitmarkerLifetime = if killed then Constants.HITMARKER_DURATION * 2 else Constants.HITMARKER_DURATION
 	hitmarkerShownAt = os.clock()
-	hitmarker.Size = UDim2.fromOffset(HITMARKER_SIZE, HITMARKER_SIZE)
+	placeHitmarkerBars(0)
+	for _, entry in hitmarkerBars do
+		entry.bar.BackgroundColor3 = color
+		entry.bar.BackgroundTransparency = 0
+	end
 	hitmarker.Visible = true
 
 	VFXSound.playLocal(if killed then "Kill" else "Hitmarker")
@@ -230,10 +247,9 @@ function ScreenEffects.step(now: number)
 
 	-- Punching outward as it fades is what sells the hit; a static cross reads
 	-- as a UI element rather than as feedback.
-	local size = HITMARKER_SIZE + alpha * HITMARKER_GROWTH
-	hitmarker.Size = UDim2.fromOffset(size, size)
-	for _, bar in hitmarkerBars do
-		bar.BackgroundTransparency = alpha * alpha
+	placeHitmarkerBars(alpha)
+	for _, entry in hitmarkerBars do
+		entry.bar.BackgroundTransparency = alpha * alpha
 	end
 end
 

@@ -427,6 +427,60 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- The hitmarker punches outward
+--
+-- The four bars sit at fixed pixel offsets from the middle of their frame, and
+-- the frame was what grew. A frame anchored at its centre grows around that
+-- centre, so nothing the bars are positioned from ever moved: the "punch" was
+-- an animation of a property that had no visible effect. The distance from the
+-- crosshair is what has to change.
+--------------------------------------------------------------------------------
+
+heading("Hitmarker")
+
+do
+	boot("desktop")
+	local player = Env.service("Players").LocalPlayer
+	Env.load("src/client/ClientState").init()
+	local VFXController = Env.load("src/client/Controllers/VFXController")
+	local ScreenEffects = Env.load("src/client/Controllers/VFX/ScreenEffects")
+	local Constants = Env.load("src/shared/Constants")
+	VFXController.init()
+	VFXController.start()
+
+	VFXController.showHitmarker(false, false)
+	local gui = player.PlayerGui:FindFirstChild("CombatFeedback")
+	local bars = {}
+	for _, descendant in gui:GetDescendants() do
+		if descendant.Name:match("^Bar%d$") then
+			table.insert(bars, descendant)
+		end
+	end
+	check(#bars == 4, `the hitmarker has four bars (got {#bars})`)
+
+	local function radiusOf(bar: any): number
+		local position = bar.Position
+		return math.sqrt(position.X.Offset ^ 2 + position.Y.Offset ^ 2)
+	end
+
+	local now = os.clock()
+	ScreenEffects.step(now)
+	local start = radiusOf(bars[1])
+	ScreenEffects.step(now + Constants.HITMARKER_DURATION * 0.8)
+	local late = radiusOf(bars[1])
+	check(late - start >= 3, `the bars move away from the crosshair as it fades (from {start} to {late})`)
+
+	-- Symmetric: every bar goes out by the same amount, in its own direction.
+	local same = true
+	for _, bar in bars do
+		same = same and math.abs(radiusOf(bar) - late) < 0.01
+	end
+	check(same, "all four bars are at the same distance from the centre")
+
+	VFXController.stop()
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 
