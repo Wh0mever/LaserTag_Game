@@ -334,10 +334,13 @@ local function setShown(value: boolean)
 		root.Visible = value
 	end
 
-	if not value then
+	if not value and fireTouch then
 		-- The control disappears mid-press when a menu opens, so no touch-ended
 		-- ever arrives for it; releasing here is what stops the gun firing
-		-- behind the shop.
+		-- behind the shop. Only when THIS control holds the trigger: on a
+		-- touchscreen laptop the cluster hides on the next mouse movement, and
+		-- the left mouse button, still down, owns the same shared trigger.
+		-- (Menus suppress fire on their own through MouseLockController.)
 		releaseTrigger()
 	end
 end
