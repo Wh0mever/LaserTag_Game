@@ -708,6 +708,8 @@ do
 
 	local function lobby(localKills: number)
 		player:SetAttribute("InMatch", "Dust")
+		-- Entering a match asks which side to take; the board waits for menus.
+		UIController.closeMenu("Side")
 		player:SetAttribute("TeamId", "A")
 		player:SetAttribute("MatchKills", localKills)
 		local roster = { player }
@@ -806,6 +808,55 @@ do
 	player:SetAttribute("InMatch", "")
 	player:SetAttribute("MatchKills", nil)
 end
+
+--------------------------------------------------------------------------------
+-- The scoreboard does not sit on top of a menu
+--
+-- It draws above the menus (its ScreenGui outranks them), so a Tab held with the
+-- shop open put the roster over the shop, and on a phone the tap zone over the
+-- timer stayed live over every panel and opened it from the panel's title bar.
+--------------------------------------------------------------------------------
+
+heading("Scoreboard and menus")
+
+if board and scoreTap then
+	player:SetAttribute("InMatch", "Dust")
+	UIController.closeMenu("Side")
+	InputController.ScoreboardHeld:Fire(false)
+	check(scoreTap.Visible, "in a match with nothing open the score can be tapped")
+
+	UIController.openMenu("Shop")
+	check(UIController.isAnyMenuOpen(), "the shop is open")
+	check(not scoreTap.Visible, "with a menu open the tap zone is out of the way")
+
+	scoreTap.Activated:Fire()
+	check(not board.Visible, "a tap that arrives anyway does not draw the board on an open menu")
+	InputController.ScoreboardHeld:Fire(true)
+	check(not board.Visible, "and neither does Tab held over it")
+	InputController.ScoreboardHeld:Fire(false)
+
+	UIController.closeMenu("Shop")
+	check(scoreTap.Visible, "closing the menu gives the score back its tap")
+	InputController.ScoreboardHeld:Fire(true)
+	check(board.Visible, "and Tab works again")
+	InputController.ScoreboardHeld:Fire(false)
+	check(not board.Visible, "letting go closes it")
+
+	-- The other order was already right, and stays right.
+	InputController.ScoreboardHeld:Fire(true)
+	UIController.openMenu("Shop")
+	check(not board.Visible, "a menu opening takes the board away")
+	UIController.closeMenu("Shop")
+	InputController.ScoreboardHeld:Fire(false)
+
+	-- A panel that closes itself (its own X) says so through notifyClosed, not
+	-- closeMenu; the tap zone has to come back for that path too.
+	UIController.openMenu("Shop")
+	shopOpen = false
+	UIController.notifyClosed("Shop")
+	check(scoreTap.Visible, "a menu that closed itself also gives the tap back")
+end
+player:SetAttribute("InMatch", "")
 
 --------------------------------------------------------------------------------
 -- A touchscreen laptop is not a phone

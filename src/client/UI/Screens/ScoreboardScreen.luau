@@ -337,6 +337,12 @@ local function setOpen(open: boolean)
 	if open and not ClientState.isInMatch() then
 		return
 	end
+	-- The board's ScreenGui outranks the menus, so it would be drawn ON the shop
+	-- with a roster the shop knows nothing about. A menu is opened on purpose;
+	-- the board can wait.
+	if open and UIController.isAnyMenuOpen() then
+		return
+	end
 	if open == isOpen or not root then
 		return
 	end
@@ -395,6 +401,8 @@ function ScoreboardScreen.init()
 
 	trove:Add(InputController.ScoreboardHeld:Connect(setOpen))
 
+	local refreshTap: (() -> ())? = nil
+
 	if ClientState.isTouch then
 		-- An invisible tap target over the timer and the two score chips: the
 		-- score is where a player looks to see how the match is going, so it
@@ -407,7 +415,13 @@ function ScoreboardScreen.init()
 		tap.Size = UDim2.fromOffset(280, 92)
 		tap.BackgroundTransparency = 1
 		tap.Text = ""
-		tap.Visible = ClientState.isInMatch()
+		-- Over the menus it would swallow taps meant for a panel's title bar and
+		-- open the board on top of it.
+		local function refresh()
+			tap.Visible = ClientState.isInMatch() and not UIController.isAnyMenuOpen()
+		end
+		refreshTap = refresh
+		refresh()
 		tap.Parent = gui
 		trove:Add(tap)
 
@@ -423,7 +437,7 @@ function ScoreboardScreen.init()
 
 		trove:Add(ClientState.AttributeChanged:Connect(function(name: string)
 			if name == "InMatch" then
-				tap.Visible = ClientState.isInMatch()
+				refresh()
 				if not ClientState.isInMatch() then
 					setOpen(false)
 				end
@@ -432,10 +446,14 @@ function ScoreboardScreen.init()
 	end
 
 	-- A menu taking the screen closes the board; otherwise it would sit on top
-	-- of the shop with a stale roster.
+	-- of the shop with a stale roster. setOpen refuses to open one over a menu,
+	-- so this is the other half of the same rule.
 	trove:Add(UIController.MenuVisibilityChanged:Connect(function(_name: string, visible: boolean)
 		if visible then
 			setOpen(false)
+		end
+		if refreshTap then
+			refreshTap()
 		end
 	end))
 end
