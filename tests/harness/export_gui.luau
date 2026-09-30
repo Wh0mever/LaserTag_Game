@@ -13,7 +13,7 @@
 
 	Run:  lune run tests/harness/export_gui <device> <scenario> [menu] > gui.json
 	      device:   phone | tablet | desktop
-	      scenario: hub | queue | match | dead | results
+	      scenario: hub | queue | match | dead | results | notice
 	      menu:     optional menu name to open (Shop, Equip, Spin, Friends,
 	                Settings, Welcome, Side)
 ]]
@@ -206,6 +206,15 @@ if scenario ~= "hub" and scenario ~= "queue" then
 			at = index,
 		})
 	end
+end
+
+-- The longest line the server sends today: the idle warning, which is what a
+-- phone player has to read while their thumbs are off the screen.
+if scenario == "notice" then
+	Env.load("src/client/UI/Screens/NoticeScreen").show(
+		"Двигайтесь или ведите бой — иначе через 30 с вернём в хаб",
+		"warning"
+	)
 end
 
 if scenario == "dead" then
