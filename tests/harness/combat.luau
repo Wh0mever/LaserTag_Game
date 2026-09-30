@@ -844,6 +844,15 @@ end
 local function castRay(origin: any, direction: any, params: any)
 	table.insert(rays, { origin = origin, direction = direction })
 
+	-- Whether the engine raises or quietly misses for a ray that starts nowhere
+	-- is not something to lean on. This stand-in raises, the worse of the two: a
+	-- shot that reached it would take the whole request down with it.
+	for _, axis in { "X", "Y", "Z" } do
+		if origin[axis] ~= origin[axis] or math.abs(origin[axis]) == math.huge then
+			error("Raycast: origin is not finite")
+		end
+	end
+
 	local reach, unit = direction.Magnitude, direction.Unit
 	local hitPart, hitAt = nil, math.huge
 	for _, instance in world:GetDescendants() do
@@ -1070,6 +1079,75 @@ do
 		"a shot that meets a teammate first stops there and does not reach the enemy behind"
 	)
 	check(lastMessage("HitConfirmed", shooter) == nil, "and confirms no hit")
+end
+
+--------------------------------------------------------------------------------
+-- A target that is nowhere
+--
+-- A character's position belongs to its client, and a position that is not a
+-- number is not something the shooter's rewind can be built from. It has to cost
+-- the shooter nothing: one such player in a match must not stop every other
+-- shot in it from resolving, after the round has already been spent.
+--------------------------------------------------------------------------------
+
+heading("A target whose position is not a number")
+
+do
+	clearField()
+	Env.raycastHandler = castRay
+
+	local shooter = newPlayer("Marksman", "Dust", "A")
+	local glitched = newPlayer("Glitched", "Dust", "B")
+	local enemy = newPlayer("Enemy", "Dust", "B")
+	for _, player in { shooter, glitched, enemy } do
+		join(player)
+	end
+	spawnPlayer(shooter, Vector3.new(0, 3, 0))
+	local glitchedBody = spawnPlayer(glitched, Vector3.new(3, 3, -20))
+	local _, enemyHumanoid = spawnPlayer(enemy, Vector3.new(0, 3, -40))
+	Env.advance(5)
+	frames(0.5)
+
+	local function castFromNowhere(): number
+		local count = 0
+		for _, ray in rays do
+			for _, axis in { "X", "Y", "Z" } do
+				if ray.origin[axis] ~= ray.origin[axis] then
+					count += 1
+					break
+				end
+			end
+		end
+		return count
+	end
+
+	local function aimAtEnemy(): boolean
+		Env.advance(1)
+		enemyHumanoid.Health = 100
+		table.clear(rays)
+		clearSent()
+		return shootAt(shooter, "Rifle", Vector3.new(0, 4.5, -40))
+	end
+
+	-- A player whose history is long and finite, and whose root then goes bad.
+	-- The rewound position still sits beside the line of fire, so only the live
+	-- one can give the game away.
+	moveTo(glitchedBody, Vector3.new(0 / 0, 3, -20))
+	local handled = aimAtEnemy()
+	check(handled, "a shot in a match with a player whose root is NaN is still handled")
+	check(
+		lastMessage("HitConfirmed", shooter) ~= nil and enemyHumanoid.Health < 100,
+		"and still hits the enemy it was aimed at"
+	)
+	check(castFromNowhere() == 0, `no ray is cast from a position that is not a number ({castFromNowhere()} were)`)
+
+	-- One that spawned that way has no history to rewind to at all.
+	moveTo(glitchedBody, Vector3.new(3, 3, -20))
+	spawnPlayer(glitched, Vector3.new(3, 0 / 0, -20))
+	handled = aimAtEnemy()
+	check(handled, "and so is one in a match with a player who spawned NaN")
+	check(lastMessage("HitConfirmed", shooter) ~= nil and enemyHumanoid.Health < 100, "which also still hits the enemy")
+	check(castFromNowhere() == 0, `and casts no ray from nowhere either ({castFromNowhere()} were)`)
 end
 
 --------------------------------------------------------------------------------
