@@ -211,6 +211,19 @@ function MatchService.registerKill(victim: Player, killer: Player?, weaponId: st
 end
 
 --[[
+	Called by PlayerService as a respawn timer fires, before the player's team is
+	read for the spawn. If their side is two or more ahead they are moved to the
+	other (see MatchRuntime:rebalanceOnRespawn).
+]]
+function MatchService.rebalanceOnRespawn(player: Player): string?
+	local runtime = runtimeForPlayer(player)
+	if runtime then
+		return runtime:rebalanceOnRespawn(player)
+	end
+	return nil
+end
+
+--[[
 	Note that `player` did something only a present player does, so the idle
 	tracker does not mistake them for absent. Called by CombatService on an
 	accepted shot.

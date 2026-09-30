@@ -358,6 +358,58 @@ function MatchRuntime:switchSide(player: Player, teamId: string): (boolean, stri
 	return true, reason
 end
 
+--[[
+	Even out the teams as a player comes back from a death.
+
+	Players who leave are never replaced on their own side, and the side picker
+	only exists at join, so a match that lost three players from one team stayed
+	lopsided until the last second. A death is the one moment a player can change
+	side without it being a teleport in the middle of a fight, so it is the moment
+	this asks: the player about to respawn is moved to the smaller side when their
+	own is two or more ahead.
+
+	Called by PlayerService when a respawn timer fires, so it covers every kind of
+	death, and BEFORE the team is read for the spawn. Not at the moment of the
+	kill: the kill feed is written just after the kill is registered, and would
+	show the victim in their new colours.
+
+	Never fills a side that is empty. That is a forfeit running its grace, and
+	dragging a teammate across would turn the win into a fight nobody asked for.
+
+	Returns the new team id if the player was moved.
+]]
+function MatchRuntime:rebalanceOnRespawn(player: Player): string?
+	local from = self.roster[player]
+	if not from or not self:isInProgress() then
+		return nil
+	end
+
+	local a, b = self:_countTeams()
+	local counts = { A = a, B = b }
+
+	local to = nil
+	for _, teamId in Constants.TEAM_IDS do
+		if teamId ~= from then
+			to = teamId
+		end
+	end
+	if not to or counts[to] < 1 or counts[from] - counts[to] < 2 then
+		return nil
+	end
+
+	self.roster[player] = to
+	TeamService.assignToTeam(player, to)
+	Remotes.fireClient(
+		RemoteNames.Notice,
+		player,
+		`Вы переведены в команду {Constants.TEAMS[to].name} для баланса`,
+		"info"
+	)
+
+	self:_syncRoster()
+	return to
+end
+
 function MatchRuntime:_startMatch()
 	local entrants = {}
 	for _, player in self.queued do

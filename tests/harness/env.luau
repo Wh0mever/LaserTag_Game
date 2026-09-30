@@ -471,6 +471,21 @@ function Handle:FindFirstChild(name: string)
 	return rawget(self, name) or Env.handleFor(self.__dir .. "/" .. name)
 end
 
+--[[
+	Modules ask what a sibling is before requiring it (`module:IsA("ModuleScript")`),
+	which is how a lazy require avoids a load-time cycle. A file is a ModuleScript,
+	a directory a Folder.
+]]
+function Handle:IsA(className: string)
+	if className == "Instance" then
+		return true
+	end
+	if self.__file then
+		return className == "ModuleScript" or className == "LuaSourceContainer"
+	end
+	return className == "Folder"
+end
+
 function Handle:GetChildren()
 	local children = {}
 	local prefix = self.__dir .. "/"

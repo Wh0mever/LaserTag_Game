@@ -484,6 +484,103 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- Lopsided teams are evened out as players come back from a death
+--
+-- A match that lost three players from one side stayed lopsided for the rest of
+-- the game; only a new arrival was ever put on the smaller side.
+--------------------------------------------------------------------------------
+
+heading("Rebalancing")
+
+-- A running match with `a` players on A and `b` on B; returns the runtime and
+-- the two lists.
+local function lopsided(a: number, b: number)
+	local runtime = runningMatch()
+	table.clear(runtime.roster)
+	table.clear(runtime.kills)
+	local onA, onB = {}, {}
+	for index = 1, a do
+		local player = fakePlayer(`A{index}`)
+		runtime.roster[player] = "A"
+		runtime.kills[player] = 0
+		runtime:_place(player, "A")
+		table.insert(onA, player)
+	end
+	for index = 1, b do
+		local player = fakePlayer(`B{index}`)
+		runtime.roster[player] = "B"
+		runtime.kills[player] = 0
+		runtime:_place(player, "B")
+		table.insert(onB, player)
+	end
+	runtime:_syncRoster()
+	table.clear(fired)
+	return runtime, onA, onB
+end
+
+do
+	local runtime, onA = lopsided(3, 1)
+	check(type(runtime.rebalanceOnRespawn) == "function", "the runtime can rebalance a player coming back from a death")
+	if type(runtime.rebalanceOnRespawn) == "function" then
+		local mover = onA[2]
+		local moved = runtime:rebalanceOnRespawn(mover)
+		check(moved == "B", `a player from the side that is two ahead is moved to the other (got {tostring(moved)})`)
+		check(runtime.roster[mover] == "B", "the roster follows")
+		check(mover:GetAttribute("TeamId") == "B", "and so does their team, which is what the respawn reads")
+		local a, b = runtime:_countTeams()
+		check(a == 2 and b == 2, `so the match is level ({a} v {b})`)
+
+		local told = noticesTo(mover)
+		check(
+			#told == 1
+				and string.find(told[1], "Браво", 1, true) ~= nil
+				and string.find(told[1], "баланса", 1, true) ~= nil,
+			`and told which side and why (got "{tostring(told[1])}")`
+		)
+
+		-- Now level, so the next player to die stays where they are.
+		local again = runtime:rebalanceOnRespawn(onA[3])
+		check(again == nil, "once level nobody else is moved")
+	end
+end
+
+do
+	local runtime, _, onB = lopsided(3, 1)
+	if type(runtime.rebalanceOnRespawn) == "function" then
+		check(runtime:rebalanceOnRespawn(onB[1]) == nil, "the smaller side's player is never the one moved")
+	end
+end
+
+do
+	local runtime, onA = lopsided(2, 1)
+	if type(runtime.rebalanceOnRespawn) == "function" then
+		check(runtime:rebalanceOnRespawn(onA[1]) == nil, "one player apart is as level as an odd number allows")
+	end
+end
+
+do
+	-- The other side is EMPTY: that is a forfeit running its grace, not
+	-- something to fix by dragging a teammate over.
+	local runtime, onA = lopsided(2, 0)
+	if type(runtime.rebalanceOnRespawn) == "function" then
+		check(runtime:rebalanceOnRespawn(onA[1]) == nil, "an empty opposing side is left to the forfeit rule")
+	end
+end
+
+do
+	local runtime, onA = lopsided(4, 1)
+	if type(runtime.rebalanceOnRespawn) == "function" then
+		runtime.state.phase = MatchStateMachine.States.Results
+		check(runtime:rebalanceOnRespawn(onA[1]) == nil, "nobody is moved once the match is over")
+		runtime.state.phase = InProgress
+		check(
+			runtime:rebalanceOnRespawn(fakePlayer("stranger")) == nil,
+			"and a player who is not in the match is ignored"
+		)
+	end
+end
+
+--------------------------------------------------------------------------------
 -- Paid kills
 --------------------------------------------------------------------------------
 
