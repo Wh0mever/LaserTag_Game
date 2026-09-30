@@ -15,6 +15,7 @@
 ]]
 
 local Env = require("./env")
+local roblox = require("@lune/roblox")
 
 Env.enableClientRuntime()
 
@@ -578,6 +579,56 @@ do
 			"and a player who is not in the match is ignored"
 		)
 	end
+end
+
+--------------------------------------------------------------------------------
+-- What counts as being there
+--
+-- A shot used to be proof of presence outright, and a weighted mouse button (or
+-- an autoclicker) fires at one fixed direction for as long as it likes.
+--------------------------------------------------------------------------------
+
+heading("Shots and idleness")
+
+do
+	local runtime, a1 = runningMatch()
+	local function lastActive(): number
+		return runtime.idle.entries[a1].lastActiveAt
+	end
+	local function stale()
+		runtime.idle.entries[a1].lastActiveAt = 0
+	end
+	local ahead = roblox.Vector3.new(0, 0, -1)
+
+	stale()
+	runtime:markActivity(a1)
+	check(lastActive() > 0, "a report with no detail still counts, as it always has")
+
+	-- The first burst.
+	runtime:_removeIdle(a1)
+	runtime.roster[a1] = "A"
+	runtime:_place(a1, "A")
+	stale()
+	runtime:markActivity(a1, { damaged = false, sprayIndex = 1, direction = ahead })
+	check(lastActive() > 0, "the first burst counts as somebody being there")
+
+	stale()
+	runtime:markActivity(a1, { damaged = false, sprayIndex = 1, direction = ahead })
+	check(lastActive() == 0, "the same aim again does not")
+
+	runtime:markActivity(a1, { damaged = false, sprayIndex = 3, direction = roblox.Vector3.new(1, 0, 0) })
+	check(lastActive() == 0, "the middle of a held burst does not, wherever it points")
+
+	runtime:markActivity(a1, { damaged = false, sprayIndex = 1, direction = roblox.Vector3.new(0.3, 0, -1) })
+	check(lastActive() > 0, "a burst aimed somewhere new does")
+
+	stale()
+	runtime:markActivity(a1, { damaged = true, sprayIndex = 6, direction = roblox.Vector3.new(0.3, 0, -1) })
+	check(lastActive() > 0, "and so does a shot that hurt an enemy")
+
+	local stranger = fakePlayer("stranger")
+	local ok, err = pcall(runtime.markActivity, runtime, stranger, { damaged = true })
+	check(ok, `a shot from somebody not in the match is ignored quietly ({tostring(err)})`)
 end
 
 --------------------------------------------------------------------------------

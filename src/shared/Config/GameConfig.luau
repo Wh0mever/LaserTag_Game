@@ -67,9 +67,11 @@ GameConfig.TICK_INTERVAL = 1
 	they take the end-of-match payout for standing still — which breaks the
 	economy's assumption that coins come from playing.
 
-	The thresholds are generous on purpose. Firing counts as activity, so a
-	marksman holding a lane with the Arc Lance is not caught; being caught needs
-	both hands off for over a minute of a ten-minute match.
+	The thresholds are generous on purpose. Aiming counts as activity (a shot that
+	hurts an enemy, or a burst aimed somewhere new), so a marksman turning to
+	each target with the Arc Lance is not caught; a held trigger firing at one
+	spot is not aiming. Being caught needs both hands off for over a minute of a
+	ten-minute match.
 ]]
 GameConfig.IDLE_WARN_SECONDS = 45
 GameConfig.IDLE_REMOVE_SECONDS = 75

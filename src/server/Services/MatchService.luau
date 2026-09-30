@@ -226,15 +226,17 @@ end
 --[[
 	Note that `player` did something only a present player does, so the idle
 	tracker does not mistake them for absent. Called by CombatService on an
-	accepted shot.
+	accepted shot; pass the shot's details ({ damaged, sprayIndex, direction }) so
+	that only a shot showing somebody is aiming counts, see
+	MatchRuntime:markActivity.
 
 	Silently does nothing for a player who is not in a match, which is the common
 	case for anything that fires from a shared code path.
 ]]
-function MatchService.markActivity(player: Player)
+function MatchService.markActivity(player: Player, shot: { [string]: any }?)
 	local runtime = runtimeForPlayer(player)
 	if runtime then
-		runtime:markActivity(player)
+		runtime:markActivity(player, shot)
 	end
 end
 

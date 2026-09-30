@@ -720,7 +720,7 @@ function MatchRuntime:_stepIdle()
 			Remotes.fireClient(
 				RemoteNames.Notice,
 				player,
-				`Двигайтесь или стреляйте — иначе через {seconds} с вернём в хаб`,
+				`Двигайтесь или ведите бой — иначе через {seconds} с вернём в хаб`,
 				"warning"
 			)
 		elseif action.action == IdleTracker.Actions.Remove then
@@ -786,11 +786,40 @@ end
 	to be played by holding a lane without moving, and position sampling alone
 	would remove the player for playing the weapon the way it was built to be
 	played.
+
+	But a shot is proof of presence only when somebody is aiming it. Holding the
+	trigger with a weighted mouse button (or an autoclicker) fires at one fixed
+	direction forever, and used to keep an absent player in the match for good. So
+	a caller that has the details passes them:
+
+	  shot = { damaged = boolean, sprayIndex = number, direction = Vector3 }
+
+	and IdleTracker.markShot counts only a shot that hurt an enemy or a new burst
+	aimed somewhere new. A call with no shot is counted outright, as before.
 ]]
-function MatchRuntime:markActivity(player: Player)
-	if self.roster[player] then
-		IdleTracker.markActive(self.idle, player, workspace:GetServerTimeNow())
+function MatchRuntime:markActivity(player: Player, shot: { [string]: any }?)
+	if not self.roster[player] then
+		return
 	end
+
+	local now = workspace:GetServerTimeNow()
+	if shot == nil then
+		IdleTracker.markActive(self.idle, player, now)
+		return
+	end
+
+	-- A Vector3 answers to .X, a plain {x, y, z} table to .x.
+	local aim = shot.direction
+	local direction = nil
+	if type(aim) == "table" or typeof(aim) == "Vector3" then
+		direction = { x = aim.X or aim.x, y = aim.Y or aim.y, z = aim.Z or aim.z }
+	end
+
+	IdleTracker.markShot(self.idle, player, now, {
+		damaged = shot.damaged == true,
+		sprayIndex = shot.sprayIndex,
+		direction = direction,
+	})
 end
 
 --[[
