@@ -62,9 +62,13 @@ local SCREEN_REMOTES: { [string]: boolean } = {
 	[RemoteNames.GetFriendsRequest] = true,
 }
 
--- Longest piece of client-chosen text a log line may carry, and how often one
--- player may write about one remote. See RateLimiterCore.logGate.
-local LOG_TEXT_LIMIT = 32
+-- Longest piece of text a log line may carry, and how often one player may
+-- write about one remote (see RateLimiterCore.logGate). A validation reason is
+-- built from what the client sent, so it is kept short; an error message comes
+-- from our own code and has to keep enough of its location to be found, and is
+-- capped only so that a client-chosen part of it cannot fill the console.
+local LOG_REASON_LIMIT = 96
+local LOG_ERROR_LIMIT = 240
 local LOG_INTERVAL_SECONDS = 5
 
 local CLASS_BY_KIND: { [string]: string } = {
@@ -181,7 +185,7 @@ end
 	console said. The first line in an interval goes out; the rest are counted and
 	summarised on the next one.
 ]]
-local function logRejected(player: Player, name: string, what: string, detail: any)
+local function logRejected(player: Player, name: string, what: string, detail: any, limit: number)
 	local gate = logGates[player]
 	if not gate then
 		gate = RateLimiterCore.newLogGate()
@@ -194,7 +198,7 @@ local function logRejected(player: Player, name: string, what: string, detail: a
 	end
 
 	local more = if suppressed > 0 then ` (+{suppressed} more since)` else ""
-	warn(`[Remotes] {player.Name} {what} "{name}": {RateLimiterCore.cleanForLog(detail, LOG_TEXT_LIMIT)}{more}`)
+	warn(`[Remotes] {player.Name} {what} "{name}": {RateLimiterCore.cleanForLog(detail, limit)}{more}`)
 end
 
 --[[
@@ -217,18 +221,18 @@ local function runPipeline(config: RegisterConfig, limits, cooldownSeconds: numb
 		-- feedback this pipeline exists to withhold.
 		local ran, ok, reason = pcall(config.Validator, player, ...)
 		if not ran then
-			logRejected(player, config.Name, "triggered a validator error on", ok)
+			logRejected(player, config.Name, "triggered a validator error on", ok, LOG_ERROR_LIMIT)
 			return nil
 		end
 		if not ok then
-			logRejected(player, config.Name, "failed validation on", reason or "unspecified")
+			logRejected(player, config.Name, "failed validation on", reason or "unspecified", LOG_REASON_LIMIT)
 			return nil
 		end
 	end
 
 	local packed = table.pack(pcall(config.Handler, player, ...))
 	if packed[1] ~= true then
-		logRejected(player, config.Name, "triggered a handler error on", packed[2])
+		logRejected(player, config.Name, "triggered a handler error on", packed[2], LOG_ERROR_LIMIT)
 		return nil
 	end
 

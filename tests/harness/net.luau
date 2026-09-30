@@ -196,7 +196,7 @@ do
 
 	check(#lines == 1, `fifty rejected requests write one validation line, not fifty ({#lines})`)
 	local line = lines[1] or ""
-	check(#line < 160, `and it is short whatever the client sent ({#line} characters)`)
+	check(#line < 200, `and it is short whatever the client sent ({#line} characters)`)
 	check(not string.find(line, "[\r\n]"), "and the client's text cannot break it into two lines")
 end
 
@@ -223,7 +223,31 @@ do
 		end
 	end
 	check(count == 1, `a handler that keeps erroring is logged once per interval ({count} lines)`)
-	check(longest < 200, `and its message is capped ({longest} characters)`)
+	check(longest < 340, `and its message is capped ({longest} characters)`)
+end
+
+do
+	-- A real bug has to stay findable: the location in our own code is the
+	-- whole point of the line.
+	local realBug = "Services.ShopService:88: attempt to index nil with 'price'"
+	Remotes.register({
+		Name = "ProbeBug",
+		Handler = function()
+			error(realBug, 0)
+		end,
+		RateLimit = 100,
+		WindowSeconds = 5,
+	})
+	table.clear(Env.warnings)
+	made.ProbeBug.OnServerEvent:Fire(fakePlayer("prober3"))
+
+	local kept = false
+	for _, line in Env.warnings do
+		if string.find(line, realBug, 1, true) then
+			kept = true
+		end
+	end
+	check(kept, "an error from our own code is logged with its location intact")
 end
 
 --------------------------------------------------------------------------------

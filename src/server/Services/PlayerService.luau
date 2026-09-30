@@ -482,8 +482,8 @@ function PlayerService.scheduleRespawn(player: Player, mapId: string, teamId: st
 				-- The match gets a say first: a side two players ahead sends
 				-- one of them across as they come back.
 				if type(matchService.rebalanceOnRespawn) == "function" then
-					local moved, err = pcall(matchService.rebalanceOnRespawn, player)
-					if not moved then
+					local ok, err = pcall(matchService.rebalanceOnRespawn, player)
+					if not ok then
 						warn(`[PlayerService] rebalancing {player.Name} failed: {err}`)
 					end
 				end
