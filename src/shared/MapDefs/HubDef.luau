@@ -179,8 +179,11 @@ add({
 
 -- Scenery ----------------------------------------------------------------
 
--- Planters: an orange Lego box with a studded hedge sitting in it.
-for _, spot in { { x = -66, z = -66 }, { x = 66, z = -66 }, { x = -66, z = 66 }, { x = 66, z = 66 } } do
+-- Planters: an orange Lego box with a studded hedge sitting in it. The two on
+-- the portal side stand beside the plaza rather than in its north corners, where
+-- the Dust and Nexus portals (which are yawed toward the centre, so their frames
+-- reach well behind the pads) used to be built through them.
+for _, spot in { { x = -76, z = 4 }, { x = 76, z = 4 }, { x = -66, z = 66 }, { x = 66, z = 66 } } do
 	add({
 		kind = "block",
 		pos = { x = spot.x, y = 3, z = spot.z },
@@ -196,12 +199,13 @@ for _, spot in { { x = -66, z = -66 }, { x = 66, z = -66 }, { x = -66, z = 66 },
 	})
 end
 
--- Low decorative walls flanking the portal approach.
+-- Low decorative walls flanking the portal approach, far enough out to clear the
+-- outer portals' frames.
 for _, sign in { -1, 1 } do
 	add({
 		kind = "wall",
 		from = { x = sign * 20, z = -20 },
-		to = { x = sign * 74, z = -20 },
+		to = { x = sign * 84, z = -20 },
 		height = 7,
 		thickness = 4,
 		color = "Wall",
@@ -210,8 +214,8 @@ for _, sign in { -1, 1 } do
 	})
 	add({
 		kind = "wall",
-		from = { x = sign * 74, z = -20 },
-		to = { x = sign * 74, z = -46 },
+		from = { x = sign * 84, z = -20 },
+		to = { x = sign * 84, z = -46 },
 		height = 7,
 		thickness = 4,
 		color = "Wall",

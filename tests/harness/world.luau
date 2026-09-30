@@ -394,6 +394,44 @@ local function visibleShare(eye: any, face: any, blockers: { any }): number
 	return seen / total
 end
 
+--[[
+	How far two upright boxes sink into each other, in studs, by the separating
+	axis test on their footprints (they may be yawed, as portals are) and an
+	interval test on height. 0 when they only touch or miss.
+]]
+local function penetration(a: any, b: any): number
+	local function corners(part: any)
+		local cf, size = part.CFrame, part.Size
+		local centre = cf.Position
+		local right = roblox.Vector3.new(cf.RightVector.X, 0, cf.RightVector.Z)
+		local look = roblox.Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z)
+		return centre, right * (size.X / 2), look * (size.Z / 2)
+	end
+
+	local aCentre, aRight, aLook = corners(a)
+	local bCentre, bRight, bLook = corners(b)
+
+	local depth = math.huge
+	for _, axis in { aRight.Unit, aLook.Unit, bRight.Unit, bLook.Unit } do
+		local function radius(right: any, look: any)
+			return math.abs(right:Dot(axis)) + math.abs(look:Dot(axis))
+		end
+		local reach = radius(aRight, aLook) + radius(bRight, bLook)
+		local gap = math.abs((bCentre - aCentre):Dot(axis))
+		depth = math.min(depth, reach - gap)
+		if depth <= 0 then
+			return 0
+		end
+	end
+
+	local aY, bY = a.CFrame.Position.Y, b.CFrame.Position.Y
+	local height = math.min(aY + a.Size.Y / 2, bY + b.Size.Y / 2) - math.max(aY - a.Size.Y / 2, bY - b.Size.Y / 2)
+	if height <= 0 then
+		return 0
+	end
+	return math.min(depth, height)
+end
+
 local results = {}
 
 for _, entry in MAPS do
@@ -599,6 +637,42 @@ for _, entry in MAPS do
 				`{target.label} is mostly in view from the lobby (readable from {wellSeen} of {#eyes} spawns)`
 			)
 		end
+
+		----------------------------------------------------------------------
+		-- Portals that stand in the open
+		--
+		-- A portal is a pad, a frame and a sign. Set down where a planter or a
+		-- wall already is, the pad sinks into the hedge and the frame is half
+		-- buried: the Dust and Nexus portals were placed that way, over the
+		-- planters. Nothing solid may overlap any part of a portal by more than
+		-- the half stud two touching faces are allowed.
+		----------------------------------------------------------------------
+		local portalParts = partsNamed(
+			built.model,
+			{ PortalRim = true, PortalPad = true, PortalPost = true, PortalArch = true, PortalSign = true }
+		)
+		local scenery = partsNamed(built.model, { Block = true, Wall = true })
+		local clashes = 0
+		for _, portalPart in portalParts do
+			for _, other in scenery do
+				local depth = penetration(portalPart, other)
+				if depth > 0.5 then
+					clashes += 1
+					local at = portalPart.CFrame.Position
+					check(
+						false,
+						`{portalPart.Name} at ({math.floor(at.X)}, {math.floor(at.Z)}) sinks {string.format(
+							"%.1f",
+							depth
+						)} studs `
+							.. `into a {other.Name} at ({math.floor(other.CFrame.Position.X)}, {math.floor(
+								other.CFrame.Position.Z
+							)})`
+					)
+				end
+			end
+		end
+		check(clashes == 0, "no portal part is buried in scenery")
 
 		for _, portal in built.portals do
 			check(portal.padPart ~= nil, `portal {portal.mapId} has a pad part`)
