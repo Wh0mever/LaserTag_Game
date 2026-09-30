@@ -634,6 +634,75 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- The death camera stays inside the room
+--
+-- It parks a fixed nine studs behind and four and a half above whoever it is
+-- watching, and nothing checked what is there. Killed in a corridor, the view
+-- was inside the ceiling; killed by someone standing against a wall, inside
+-- the wall. The eye is pulled in toward the target until it clears whatever
+-- is in the way.
+--------------------------------------------------------------------------------
+
+heading("Death camera occlusion")
+
+do
+	-- Where the camera ends up after the death view has had time to settle.
+	local function deathEyeDistance(wallDistance: number?): (number, any)
+		boot("desktop")
+		local player = Env.service("Players").LocalPlayer
+		Env.load("src/client/ClientState").init()
+		local ClientState = Env.load("src/client/ClientState")
+		local CameraController = Env.load("src/client/Controllers/CameraController")
+		CameraController.init()
+
+		local character = makeCharacter(nil)
+		character.PrimaryPart.CFrame = CF.new(0, 10, 0)
+		player.Character = character
+		local focus = V3.new(0, 11.5, 0)
+
+		local seen = nil
+		Env.raycast = function(origin, direction, params)
+			if not wallDistance or (origin - focus).Magnitude > 0.01 then
+				return nil
+			end
+			seen = params
+			return {
+				Instance = character.PrimaryPart,
+				Position = origin + direction.Unit * wallDistance,
+				Normal = -direction.Unit,
+				Distance = wallDistance,
+			}
+		end
+
+		ClientState.Died:Fire(nil, 3)
+		check(CameraController.isDeathCamActive(), "the death view starts")
+		for _ = 1, 400 do
+			Env.stepRender()
+		end
+
+		local eye = Env.workspace().CurrentCamera.CFrame.Position
+		return (eye - focus).Magnitude, seen
+	end
+
+	local open = deathEyeDistance(nil)
+	check(open > 9, `with nothing in the way the camera sits back at its full distance (got {open})`)
+
+	local wall, params = deathEyeDistance(5)
+	check(
+		math.abs(wall - 4.5) < 0.05,
+		`a wall five studs away pulls the camera in to just short of it (got {wall}, wanted 4.5)`
+	)
+	check(params ~= nil and #params.FilterDescendantsInstances > 0, "the probe ignores the bodies it is looking at")
+
+	local tight = deathEyeDistance(1)
+	check(
+		math.abs(tight - 1.5) < 0.05,
+		`a wall right behind the target still leaves a view of it, no closer than 1.5 studs (got {tight})`
+	)
+	Env.raycast = nil
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 
