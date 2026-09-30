@@ -43,6 +43,9 @@ local WeaponConfig = require(Shared.Config.WeaponConfig)
 local DataService = {}
 DataService.Priority = 1
 DataService.ProfileLoadedSignal = Signal.new()
+-- (player, lifetimeKills), fired as this server lets a profile go. The player
+-- may already be leaving, so a listener works from the numbers it is handed.
+DataService.ProfileReleasingSignal = Signal.new()
 
 --[[
 	One equipped-skin slot per weapon, derived from WeaponConfig.Order rather
@@ -392,6 +395,13 @@ function DataService.releasePlayer(player: Player)
 
 	if profile then
 		player:SetAttribute("Loaded", false)
+
+		-- Announced before the release because this is the last moment the
+		-- numbers are guaranteed to be there, and announced for every way a
+		-- profile is released so no listener depends on which handler ran first.
+		if profile:IsActive() then
+			DataService.ProfileReleasingSignal:Fire(player, profile.Data.Stats.Kills)
+		end
 		profile:Release()
 	end
 end

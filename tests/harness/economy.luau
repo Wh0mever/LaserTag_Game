@@ -446,6 +446,196 @@ do
 	check(profileOf(player) ~= nil and not profileOf(player).active, "and the session lock is not left behind")
 end
 
+--------------------------------------------------------------------------------
+-- Leaderboard
+--
+-- An OrderedDataStore stand-in that can be told to fail, and counts what it is
+-- asked to do: the request budget is part of what is being checked.
+--------------------------------------------------------------------------------
+
+heading("Leaderboard")
+
+local orderedStore = {
+	data = {} :: { [string]: number },
+	sets = 0,
+	reads = 0,
+	failWrites = 0,
+	failReads = false,
+}
+
+function orderedStore:SetAsync(key: string, value: number)
+	if self.failWrites > 0 then
+		self.failWrites -= 1
+		error("HTTP 429 (too many requests)", 2)
+	end
+	self.sets += 1
+	self.data[key] = value
+end
+
+function orderedStore:GetSortedAsync(_ascending: boolean, count: number)
+	self.reads += 1
+	if self.failReads then
+		error("HTTP 503 (service unavailable)", 2)
+	end
+
+	local items = {}
+	for key, value in self.data do
+		table.insert(items, { key = key, value = value })
+	end
+	table.sort(items, function(a, b)
+		return a.value > b.value
+	end)
+	while #items > count do
+		table.remove(items)
+	end
+	return {
+		IsFinished = true,
+		GetCurrentPage = function()
+			return items
+		end,
+	}
+end
+
+Env.service("DataStoreService").GetOrderedDataStore = function()
+	return orderedStore
+end
+
+local board = roblox.Instance.new("SurfaceGui")
+board.Name = "TopKills"
+local boardRoot = roblox.Instance.new("Frame")
+boardRoot.Name = "Root"
+boardRoot.Parent = board
+local boardContent = roblox.Instance.new("Frame")
+boardContent.Name = "Content"
+boardContent.Parent = boardRoot
+
+Env.provide("src/server/Services/WorldService", {
+	getBoard = function(boardId)
+		return if boardId == "TopKills" then board else nil
+	end,
+})
+
+local LeaderboardService = Env.load("src/server/Services/LeaderboardService")
+LeaderboardService.init()
+
+local function loadedPlayer(name: string, kills: number)
+	local player = fakePlayer(name)
+	DataService.loadPlayer(player)
+	DataService.getData(player).Stats.Kills = kills
+	return player
+end
+
+local function scoreOf(player)
+	return orderedStore.data[tostring(player.UserId)]
+end
+
+-- The score a player reaches after the last periodic write is still theirs
+-- when they go; it must be on the board without waiting for a cycle they will
+-- not be here for.
+do
+	local player = loadedPlayer("closer", 7)
+	leave(player)
+	DataService.releasePlayer(player)
+	check(scoreOf(player) == 7, `a leaving player's kills are written at once (got {tostring(scoreOf(player))})`)
+end
+
+do
+	local player = loadedPlayer("steady", 4)
+	LeaderboardService.flush(player)
+	local before = orderedStore.sets
+	leave(player)
+	DataService.releasePlayer(player)
+	check(scoreOf(player) == 4, "a player whose score was already written keeps it")
+	check(orderedStore.sets == before, "and leaving with nothing new costs no write request")
+
+	local again = loadedPlayer("idle", 0)
+	leave(again)
+	DataService.releasePlayer(again)
+	check(scoreOf(again) == nil, "a player with no kills never gets an entry")
+end
+
+do
+	local player = loadedPlayer("unlucky", 9)
+	orderedStore.failWrites = 2
+	leave(player)
+	DataService.releasePlayer(player)
+	check(
+		not DataService.isLoaded(player),
+		"a throttled write does not hold up the leave path: the profile is already released"
+	)
+	check(scoreOf(player) == nil, "the write is retried in the background, not yet done")
+	Env.advance(10)
+	check(scoreOf(player) == 9, `and lands once the store recovers (got {tostring(scoreOf(player))})`)
+end
+
+do
+	local player = loadedPlayer("abandoned", 5)
+	orderedStore.failWrites = 100
+	leave(player)
+	DataService.releasePlayer(player)
+	Env.advance(30)
+	orderedStore.failWrites = 0
+	check(#Env.spawnErrors == 0, "a write that never succeeds ends quietly, not with a dead thread")
+end
+
+-- Shutdown: BindToClose flushes everyone still online, then releases them. The
+-- release must not write the same scores a second time.
+do
+	local player = loadedPlayer("lastcall", 12)
+	LeaderboardService.flushAll()
+	check(scoreOf(player) == 12, "shutdown writes every player still online")
+	local before = orderedStore.sets
+	DataService.releaseAll()
+	finishReleases()
+	check(orderedStore.sets == before, "and the release that follows does not write them again")
+end
+
+local function rowText(rank: number, column: string): string?
+	local row = boardContent:FindFirstChild(`Row{rank}`)
+	local label = row and row:FindFirstChild(column)
+	return label and label.Text
+end
+
+local EMPTY_TEXT = "Пока нет результатов"
+
+-- The board: rendered from the sorted read, and left alone when a read fails.
+orderedStore.data = { ["5901"] = 30, ["5902"] = 12 }
+userNames[5901] = "alice"
+userNames[5902] = "bob"
+
+local runner = Env.spawn(LeaderboardService.start)
+Env.advance(8)
+check(rowText(1, "PlayerName") == "alice", `the board shows the leader (got {tostring(rowText(1, "PlayerName"))})`)
+check(rowText(2, "Kills") == "12", "and each row's kills")
+
+orderedStore.failReads = true
+orderedStore.data["5903"] = 50
+userNames[5903] = "carol"
+Env.advance(140)
+check(orderedStore.reads > 1, "the board asks again on the next cycle")
+check(
+	rowText(1, "PlayerName") == "alice",
+	`a failed read keeps the last good rows on the board (got {tostring(rowText(1, "PlayerName"))})`
+)
+check(rowText(1, "PlayerName") ~= EMPTY_TEXT, "and does not claim there are no results")
+
+local readsBefore = orderedStore.reads
+orderedStore.failReads = false
+Env.advance(45)
+check(orderedStore.reads > readsBefore, "after a failed read the retry comes well before the next full cycle")
+check(
+	rowText(1, "PlayerName") == "carol",
+	`and the board catches up once the read works (got {tostring(rowText(1, "PlayerName"))})`
+)
+
+orderedStore.data = {}
+Env.advance(130)
+check(
+	rowText(1, "PlayerName") == EMPTY_TEXT,
+	`a successful read of an empty board does say there are no results (got {tostring(rowText(1, "PlayerName"))})`
+)
+check(runner ~= nil, "the board loop is running")
+
 check(#Env.spawnErrors == 0, `no background thread died: {table.concat(Env.spawnErrors, " | ")}`)
 
 --------------------------------------------------------------------------------

@@ -468,6 +468,15 @@ function Handle:FindFirstChild(name: string)
 	return rawget(self, name) or Env.handleFor(self.__dir .. "/" .. name)
 end
 
+-- A file is a ModuleScript and a directory a Folder, which is all the tree the
+-- game reaches through FindFirstChild ever asks about.
+function Handle:IsA(className: string)
+	if className == "Instance" then
+		return true
+	end
+	return className == (if self.__file then "ModuleScript" else "Folder")
+end
+
 function Handle:GetChildren()
 	local children = {}
 	local prefix = self.__dir .. "/"
