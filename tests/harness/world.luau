@@ -755,6 +755,36 @@ for _, entry in MAPS do
 		end
 	end
 
+	-- Floor inlays are paint: thin, non-colliding blocks laid on the arena floor.
+	-- One that spills over a room colours the room's floor with the arena's.
+	local roomFloors = partsNamed(built.model, { RoomFloor = true })
+	local paintedRooms = 0
+	for _, inlay in partsNamed(built.model, { Block = true }) do
+		if inlay.Size.Y <= 0.5 and not inlay.CanCollide then
+			local box = uprightTop(inlay)
+			for _, floor in roomFloors do
+				local room = uprightTop(floor)
+				if box and room then
+					local dx = math.min(box.maxX, room.maxX) - math.max(box.minX, room.minX)
+					local dz = math.min(box.maxZ, room.maxZ) - math.max(box.minZ, room.minZ)
+					if dx > 0.5 and dz > 0.5 then
+						paintedRooms += 1
+						check(
+							false,
+							`a floor inlay at ({math.floor(inlay.CFrame.Position.X - built.origin.X)}, `
+								.. `{math.floor(inlay.CFrame.Position.Z - built.origin.Z)}) spills {string.format(
+									"%.1f",
+									dx
+								)} x `
+								.. `{string.format("%.1f", dz)} studs into a room's floor`
+						)
+					end
+				end
+			end
+		end
+	end
+	check(paintedRooms == 0, "no floor inlay reaches into a room")
+
 	for _, clash in coplanarTops(built) do
 		check(
 			false,

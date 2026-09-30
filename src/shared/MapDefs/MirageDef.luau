@@ -91,10 +91,22 @@ add({
 	color = "Floor",
 })
 
+-- Tiled inlay on the arena floor only. It stops at the spawn rooms (x = +-59)
+-- and at the green rooms (z = +-33), so a room keeps its own floor colour; the
+-- strips between the green rooms carry it out to z = +-48. Laid as pieces that
+-- touch rather than overlap, because two coplanar tops would z-fight.
 add({
 	kind = "block",
 	pos = { x = 0, y = 0.2, z = 0 },
-	size = { x = 120, y = 0.4, z = 96 },
+	size = { x = 118, y = 0.4, z = 66 },
+	color = "FloorTile",
+	canCollide = false,
+})
+
+mirror({
+	kind = "block",
+	pos = { x = 0, y = 0.2, z = 40.5 },
+	size = { x = 32, y = 0.4, z = 15 },
 	color = "FloorTile",
 	canCollide = false,
 })
