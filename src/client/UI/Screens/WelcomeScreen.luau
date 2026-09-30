@@ -102,7 +102,7 @@ local function steps(): { { title: string, body: string } }
 end
 
 local function controlLines(): { { action: string, keys: string } }
-	if ClientState.isTouch then
+	if ClientState.isTouchOnly() then
 		return {
 			{ action = "Движение", keys = "Левый стик" },
 			{ action = "Обзор", keys = "Свайп по правой половине" },

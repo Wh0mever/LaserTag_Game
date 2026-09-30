@@ -166,6 +166,23 @@ function ClientState.getMapId(): string
 	return player:GetAttribute("InMatch") or ""
 end
 
+--[[
+	Whether the phone chrome is the right chrome: a touchscreen and nothing else.
+
+	ClientState.isTouch is TouchEnabled alone, and a touchscreen laptop reports
+	that as true while also having a mouse and a keyboard. Layouts that swap
+	keys for thumbs (the key badges and the cursor-release hint, the folded
+	menu, the welcome card's controls) go by this instead, so a Surface player
+	is not shown a thumbstick they do not have and denied the key that frees
+	their cursor.
+
+	A function, not a field: a keyboard or mouse can be plugged into a tablet
+	after the client has booted, and the answer must follow it.
+]]
+function ClientState.isTouchOnly(): boolean
+	return UserInputService.TouchEnabled and not UserInputService.MouseEnabled and not UserInputService.KeyboardEnabled
+end
+
 function ClientState.isInMatch(): boolean
 	return ClientState.getMapId() ~= ""
 end

@@ -886,6 +886,55 @@ local laptopOk, laptopErr = pcall(function()
 
 	check(State.isTouch, "a touchscreen laptop still reports touch")
 	check(MouseLock.isEnabled(), "a touchscreen laptop keeps its cursor manager")
+
+	--[[
+		The same person sees the desktop chrome. ClientState.isTouch is plain
+		TouchEnabled, which is true here, and the side buttons and the welcome
+		card used to read it: no key badges, no cursor-release hint, a folded
+		hamburger and a card describing a thumbstick, to someone holding a mouse
+		and keyboard that the cursor manager above is already treating as one.
+	]]
+	check(type(State.isTouchOnly) == "function", "ClientState has one shared touch-only test")
+	check(
+		type(State.isTouchOnly) == "function" and not State.isTouchOnly(),
+		"a touchscreen laptop is not a touch-only device"
+	)
+
+	local LaptopUI = Env.load("src/client/UI/UIController")
+	LaptopUI.init()
+	local LaptopSide = Env.load("src/client/UI/Screens/SideButtonsScreen")
+	LaptopSide.init()
+	local LaptopWelcome = Env.load("src/client/UI/Screens/WelcomeScreen")
+	LaptopWelcome.init()
+
+	local sideRoot = LaptopUI.getScreenRoot("SideButtons"):FindFirstChild("Root")
+	local menu = sideRoot:FindFirstChild("Menu")
+	local list = menu:FindFirstChild("Buttons")
+	check(sideRoot:FindFirstChild("MouseHint").Visible, "the cursor-release hint is shown to a laptop")
+	check(LaptopSide.isExpanded(), "the side stack starts open on a laptop")
+	check(list.Visible, "and is on screen")
+	check(list:FindFirstChild("Shop"):FindFirstChild("KeyHint") ~= nil, "the buttons carry their key badges")
+	check(menu.AnchorPoint.Y == 0.5, "the stack is centred down the edge, not pinned to the corner")
+	check(list.Size.X.Offset == list.Shop.Size.X.Offset, "and runs down the edge, not along it")
+
+	local words = {}
+	for _, descendant in LaptopUI.getScreenRoot("WelcomeMenu"):GetDescendants() do
+		if descendant.ClassName == "TextLabel" then
+			words[descendant.Text] = true
+		end
+	end
+	check(words["W A S D  ·  Space"] == true, "the welcome card explains WASD to a laptop")
+	check(words["Левый стик"] == nil, "and does not describe a thumbstick")
+
+	-- Asked when used: a keyboard plugged into a tablet after boot changes the
+	-- answer, and nothing cached the old one.
+	local Input = Env.service("UserInputService")
+	Input.TouchEnabled, Input.MouseEnabled, Input.KeyboardEnabled = true, false, false
+	check(State.isTouchOnly(), "touch and nothing else is touch-only")
+	Input.KeyboardEnabled = true
+	check(not State.isTouchOnly(), "a keyboard makes it not touch-only, as soon as it is there")
+	Input.KeyboardEnabled, Input.MouseEnabled = false, true
+	check(not State.isTouchOnly(), "and so does a mouse")
 end)
 check(laptopOk, `the touchscreen laptop boots: {tostring(laptopErr)}`)
 

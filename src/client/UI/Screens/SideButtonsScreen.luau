@@ -77,6 +77,11 @@ local buttons: { any } = {}
 -- Touch devices start folded: on a phone the stack covers the arena. A mouse
 -- and keyboard has both the room and the hotkeys, so it starts open.
 local expanded = true
+-- Whether this is a touchscreen and nothing else (ClientState.isTouchOnly), read
+-- once when the screen is built: the tree's whole shape follows from it, and a
+-- layout that changed its mind under a live tree would be half of each. A
+-- touchscreen laptop is NOT this - it has the keys the badges name.
+local touchLayout = false
 local coins: any = nil
 local mouseHint: TextLabel? = nil
 -- nil until the first pass so the initial call always applies, including the
@@ -115,11 +120,7 @@ end
 
 local function wantsCompactNow(): boolean
 	local canvas = UIController.getCanvasSize()
-	return SideButtonsScreen.wantsCompact(
-		if canvas then canvas.X else math.huge,
-		UIController.scale,
-		ClientState.isTouch
-	)
+	return SideButtonsScreen.wantsCompact(if canvas then canvas.X else math.huge, UIController.scale, touchLayout)
 end
 
 --[[
@@ -151,7 +152,7 @@ end
 ]]
 local function stackSize(width: number): UDim2
 	local count = #MENUS
-	if ClientState.isTouch then
+	if touchLayout then
 		return UDim2.fromOffset(count * width + (count - 1) * BUTTON_GAP, BUTTON_HEIGHT)
 	end
 	return UDim2.fromOffset(width, count * BUTTON_HEIGHT + (count - 1) * BUTTON_GAP)
@@ -182,7 +183,7 @@ local function applyCompact(isCompact: boolean)
 			button:setText(isCompact and "" or entry.label)
 			-- A touch device has no key to hint at, and the badge would only
 			-- crowd an icon-sized button.
-			button:setKeyHint(if isCompact or ClientState.isTouch then nil else entry.key)
+			button:setKeyHint(if isCompact or touchLayout then nil else entry.key)
 		end
 	end
 end
@@ -260,7 +261,7 @@ local function placeBelowBar()
 	if coins then
 		coins.instance.Position = topLeftBelowRobloxBar(COINS_BELOW_BAR)
 	end
-	if panel and ClientState.isTouch then
+	if panel and touchLayout then
 		panel.Position = topLeftBelowRobloxBar(MENU_BELOW_BAR)
 	end
 end
@@ -270,18 +271,16 @@ local function buildStack(parent: Instance)
 	-- stack away actually reclaims the space rather than leaving a hole.
 	local holder = Instance.new("Frame")
 	holder.Name = "Menu"
-	holder.AnchorPoint = if ClientState.isTouch then Vector2.new(0, 0) else Vector2.new(0, 0.5)
-	holder.Position = if ClientState.isTouch then topLeftBelowRobloxBar(MENU_BELOW_BAR) else UDim2.new(0, 16, 0.5, 0)
+	holder.AnchorPoint = if touchLayout then Vector2.new(0, 0) else Vector2.new(0, 0.5)
+	holder.Position = if touchLayout then topLeftBelowRobloxBar(MENU_BELOW_BAR) else UDim2.new(0, 16, 0.5, 0)
 	holder.Size = UDim2.fromOffset(BUTTON_WIDTH, 0)
-	holder.AutomaticSize = if ClientState.isTouch then Enum.AutomaticSize.XY else Enum.AutomaticSize.Y
+	holder.AutomaticSize = if touchLayout then Enum.AutomaticSize.XY else Enum.AutomaticSize.Y
 	holder.BackgroundTransparency = 1
 	holder.Parent = parent
 	panel = holder
 
 	local panelLayout = Instance.new("UIListLayout")
-	panelLayout.FillDirection = if ClientState.isTouch
-		then Enum.FillDirection.Horizontal
-		else Enum.FillDirection.Vertical
+	panelLayout.FillDirection = if touchLayout then Enum.FillDirection.Horizontal else Enum.FillDirection.Vertical
 	panelLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 	panelLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	panelLayout.Padding = UDim.new(0, BUTTON_GAP)
@@ -314,7 +313,7 @@ local function buildStack(parent: Instance)
 	stack = list
 
 	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = if ClientState.isTouch then Enum.FillDirection.Horizontal else Enum.FillDirection.Vertical
+	layout.FillDirection = if touchLayout then Enum.FillDirection.Horizontal else Enum.FillDirection.Vertical
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Padding = UDim.new(0, BUTTON_GAP)
@@ -350,7 +349,7 @@ local function buildFooter(parent: Instance)
 	hint.Position = UDim2.new(1, -24, 1, -92)
 	hint.Size = UDim2.fromOffset(320, 18)
 	hint.TextXAlignment = Enum.TextXAlignment.Right
-	hint.Visible = not ClientState.isTouch
+	hint.Visible = not touchLayout
 	hint.Parent = parent
 	mouseHint = hint
 
@@ -369,6 +368,7 @@ end
 
 function SideButtonsScreen.init()
 	ClientState.init()
+	touchLayout = ClientState.isTouchOnly()
 
 	local gui = UIController.getScreenGui("SideButtons", Constants.DISPLAY_ORDER.SideButtons)
 	if not gui then
@@ -430,14 +430,14 @@ function SideButtonsScreen.init()
 	-- to get somewhere; left open, it stays in the top-left for the rest of
 	-- the match, one mis-tap from a shop.
 	trove:Add(UIController.MenuVisibilityChanged:Connect(function(_name: string, visible: boolean)
-		if visible and ClientState.isTouch and expanded then
+		if visible and touchLayout and expanded then
 			setExpanded(false)
 		end
 	end))
 
 	refreshMouseHint(InputController.isMouseUnlocked())
 	applyCompact(wantsCompactNow())
-	setExpanded(not ClientState.isTouch)
+	setExpanded(not touchLayout)
 end
 
 --[[
@@ -461,6 +461,7 @@ function SideButtonsScreen.stop()
 	stack = nil
 	coins = nil
 	mouseHint = nil
+	touchLayout = false
 end
 
 return SideButtonsScreen

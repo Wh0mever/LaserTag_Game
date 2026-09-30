@@ -538,6 +538,37 @@ UIController.refreshViewport()
 check(labelOf("Settings") == "", "the owner's phone is compact")
 
 --------------------------------------------------------------------------------
+-- A phone still gets the phone chrome
+--
+-- The counterpart of the touchscreen-laptop checks in mobile.luau: what the
+-- touch-only test takes away from a laptop it must leave on a phone.
+--------------------------------------------------------------------------------
+
+heading("Phone chrome")
+
+do
+	local ClientState = Env.load("src/client/ClientState")
+	check(ClientState.isTouchOnly(), "a phone is touch-only")
+
+	local rootFrame = UIController.getScreenRoot("SideButtons"):FindFirstChild("Root")
+	local menu, _, list = menuRow()
+	check(not rootFrame:FindFirstChild("MouseHint").Visible, "a phone has no cursor to release, so no hint for it")
+	SideButtons.setExpanded(false)
+	check(not list.Visible, "the menu folds away on a phone")
+	check(list:FindFirstChild("Shop"):FindFirstChild("KeyHint") == nil, "and its buttons carry no key badges")
+	check(menu.AnchorPoint.Y == 0, "pinned to the top left corner under the bar")
+
+	local words = {}
+	for _, descendant in UIController.getScreenRoot("WelcomeMenu"):GetDescendants() do
+		if descendant.ClassName == "TextLabel" then
+			words[descendant.Text] = true
+		end
+	end
+	check(words["Левый стик"] == true, "the welcome card describes the thumbstick")
+	check(words["W A S D  ·  Space"] == nil, "and not the keyboard")
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 
