@@ -68,6 +68,10 @@ local nameCache: { [number]: string } = {}
 -- player each minute) on nothing, and the leave-time write below would double
 -- the periodic one.
 local written: { [number]: number } = {}
+-- Leave-time writes still running. At shutdown ProfileService releases every
+-- profile before BindToClose reaches flushAll, so those writes are the only
+-- ones there are and flushAll has to wait for them.
+local releaseWrites = 0
 
 local function retry(attempts: number, action: () -> any): (boolean, any)
 	local lastError = nil
@@ -139,7 +143,9 @@ local function onProfileReleasing(player: Player, kills: number)
 	-- off would wake to find nothing recorded and put its lower score over this
 	-- one. Kills only grow, so a returning player is never held back by it, and
 	-- the table costs one number per player who visited.
+	releaseWrites += 1
 	writeScore(userId, kills, RETRY_ATTEMPTS)
+	releaseWrites -= 1
 end
 
 -- Connected here, not in start(): start() runs the board loop and may yield,
@@ -160,6 +166,8 @@ end
 -- Write every online player's score. Called from BindToClose, so the writes run
 -- as parallel jobs with a single attempt each and the whole thing gives up at
 -- SHUTDOWN_BUDGET rather than eating the shutdown budget profiles also need.
+-- Players whose profile was already released by ProfileService's own shutdown
+-- have no data left to read here; their leave-time writes are waited for instead.
 function LeaderboardService.flushAll()
 	local pending = 0
 
@@ -175,7 +183,7 @@ function LeaderboardService.flushAll()
 	end
 
 	local deadline = os.clock() + SHUTDOWN_BUDGET
-	while pending > 0 and os.clock() < deadline do
+	while (pending > 0 or releaseWrites > 0) and os.clock() < deadline do
 		task.wait(0.1)
 	end
 end

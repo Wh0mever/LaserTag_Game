@@ -357,17 +357,29 @@ function DataService.loadPlayer(player: Player)
 	profile:Reconcile()
 
 	profile:ListenToRelease(function()
-		-- Every release this server asks for (the player leaving, server shutdown,
-		-- a load abandoned below) has already dropped the profile from `profiles`
-		-- and marked the player unloaded before it fires. Only a release nobody
-		-- here asked for is a lost session lock; telling players at shutdown that
-		-- their data was opened on another server would just be wrong.
+		-- Every release this server asks for (the player leaving, a load abandoned
+		-- below) has already dropped the profile from `profiles` and marked the
+		-- player unloaded before it fires. Only a release nobody here asked for is
+		-- a lost session lock.
 		if profiles[player] ~= profile then
 			return
 		end
 
 		profiles[player] = nil
 		player:SetAttribute("Loaded", false)
+
+		-- The vendored ProfileService binds its own BindToClose: it raises
+		-- ServiceLocked and releases every profile before ours gets to run, so at
+		-- shutdown this is the first (and often only) place that sees the release.
+		-- Nothing was taken from anyone, so nobody is kicked, and the numbers are
+		-- announced from here: the profile is already inactive, getData() is nil
+		-- and the shutdown flush would find nothing to write. Profile.Data itself
+		-- stays readable.
+		if ProfileService.ServiceLocked then
+			DataService.ProfileReleasingSignal:Fire(player, profile.Data.Stats.Kills)
+			return
+		end
+
 		player:Kick(RELEASED_MESSAGE)
 	end)
 

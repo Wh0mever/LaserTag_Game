@@ -332,8 +332,10 @@ end
 --
 -- ProfileService is third-party and talks to DataStores; what is under test is
 -- DataService's own handling of the lifecycle around it. The stand-in profile
--- keeps ProfileService's one important timing: Release() returns at once and
--- the release listeners fire later, once the final save has finished.
+-- keeps ProfileService's one important timing: Release() marks the profile
+-- inactive and fires the release listeners before it returns (the real one runs
+-- ReleaseProfileInternally on the spawned thread up to its first yield, and
+-- Signal:Fire spawns the listeners); only the final save comes later.
 --------------------------------------------------------------------------------
 
 heading("Profiles")
@@ -349,7 +351,6 @@ local function deepCopy(value)
 	return copy
 end
 
-local pendingReleases: { any } = {}
 local loadedProfiles: { [string]: any } = {}
 local onLoad: any = nil
 local failLoads = false
@@ -364,15 +365,10 @@ local function endSession(profile)
 	end
 end
 
-local function finishReleases()
-	local queue = pendingReleases
-	pendingReleases = {}
-	for _, profile in queue do
-		endSession(profile)
-	end
-end
-
-Env.provide("src/server/Vendor/ProfileService", {
+-- ServiceLocked is the vendored module's shutdown flag: its own BindToClose
+-- raises it and then releases every active profile.
+local profileServiceStub = {
+	ServiceLocked = false,
 	GetProfileStore = function(_name, template)
 		return {
 			LoadProfileAsync = function(_self, key)
@@ -389,9 +385,7 @@ Env.provide("src/server/Vendor/ProfileService", {
 					table.insert(self.listeners, listener)
 				end
 				function profile:Release()
-					if self.active then
-						table.insert(pendingReleases, self)
-					end
+					endSession(self)
 				end
 				loadedProfiles[key] = profile
 				if onLoad then
@@ -401,7 +395,18 @@ Env.provide("src/server/Vendor/ProfileService", {
 			end,
 		}
 	end,
-})
+}
+Env.provide("src/server/Vendor/ProfileService", profileServiceStub)
+
+-- What the vendored ProfileService does when the server closes: raise the flag,
+-- then release every active profile on its own threads. It runs before the
+-- game's own BindToClose callback gets to do anything.
+local function vendorShutdown()
+	profileServiceStub.ServiceLocked = true
+	for _, profile in loadedProfiles do
+		endSession(profile)
+	end
+end
 
 local remoteHandlers: { [string]: any } = {}
 
@@ -425,7 +430,6 @@ do
 	check(DataService.isLoaded(player), "a player's profile loads")
 
 	DataService.releaseAll()
-	finishReleases()
 	check(not DataService.isLoaded(player), "shutdown releases the profile")
 	check(
 		kicks[player] == nil,
@@ -438,7 +442,6 @@ do
 	DataService.loadPlayer(player)
 	leave(player)
 	DataService.releasePlayer(player)
-	finishReleases()
 	check(kicks[player] == nil, "a player who leaves is not kicked by their own release")
 	check(player:GetAttribute("Loaded") == false, "and is marked as no longer loaded")
 end
@@ -467,7 +470,6 @@ do
 	end
 	DataService.loadPlayer(player)
 	onLoad = nil
-	finishReleases()
 	check(not DataService.isLoaded(player), "a player who left during the load never becomes loaded")
 	check(kicks[player] == nil, "and the release of their unused profile does not kick anyone")
 	check(profileOf(player) ~= nil and not profileOf(player).active, "and the session lock is not left behind")
@@ -629,8 +631,49 @@ do
 	check(scoreOf(player) == 12, "shutdown writes every player still online")
 	local before = orderedStore.sets
 	DataService.releaseAll()
-	finishReleases()
 	check(orderedStore.sets == before, "and the release that follows does not write them again")
+end
+
+-- The order that really happens on a live server: the vendored ProfileService's
+-- own BindToClose runs first, raises ServiceLocked and releases every profile
+-- (firing the release listeners) before the game's callback gets going. Nobody
+-- was asked to move servers, so nobody may be told they were, and every
+-- player's kills still have to reach the board exactly once.
+do
+	local first = loadedPlayer("closing_a", 21)
+	local second = loadedPlayer("closing_b", 22)
+	local setsBefore = orderedStore.sets
+	orderedStore.failWrites = 1 -- one release-time write is throttled once
+
+	vendorShutdown()
+	local flusher = Env.spawn(LeaderboardService.flushAll)
+	DataService.releaseAll()
+
+	check(kicks[first] == nil and kicks[second] == nil, "server shutdown kicks nobody, whoever releases first")
+	check(coroutine.status(flusher) ~= "dead", "the shutdown flush waits for the release-time writes still backing off")
+	Env.advance(10)
+	check(coroutine.status(flusher) == "dead", "and returns once they have landed")
+	check(scoreOf(first) == 21, `every online player's kills are written (first: {tostring(scoreOf(first))})`)
+	check(scoreOf(second) == 22, `(second: {tostring(scoreOf(second))})`)
+	check(orderedStore.sets == setsBefore + 2, `exactly once each (writes: {orderedStore.sets - setsBefore})`)
+	check(first:GetAttribute("Loaded") == false, "and the players are marked as no longer loaded")
+
+	orderedStore.failWrites = 0
+	profileServiceStub.ServiceLocked = false
+end
+
+-- The other order: the game's callback flushes first, the vendor releases after.
+do
+	local player = loadedPlayer("closing_c", 31)
+	LeaderboardService.flushAll()
+	local before = orderedStore.sets
+	vendorShutdown()
+	DataService.releaseAll()
+	check(scoreOf(player) == 31, "flushing before the vendor's release writes the score")
+	check(orderedStore.sets == before, "and the vendor's release does not write it again")
+	check(kicks[player] == nil, "and kicks nobody")
+
+	profileServiceStub.ServiceLocked = false
 end
 
 local function rowText(rank: number, column: string): string?
