@@ -60,8 +60,14 @@ PerspectiveController.FIRST_ZOOM = 0.5
 
 PerspectiveController.Changed = Signal.new()
 
+-- How long the view button must be left alone before the choice is sent to the
+-- server.
+local SAVE_DELAY = 1.5
+
 local trove = Trove.new()
 local current = SettingsConfig.get(SETTING_ID).default
+-- Bumped by every toggle; a pending save that finds it moved on is stale.
+local saveToken = 0
 
 function PerspectiveController.get(): string
 	return current
@@ -106,6 +112,11 @@ end
 	Stored, not just applied: a view that reverts on the next join is a setting
 	the player has to find again every session, and this one is reached mid-fight
 	rather than from a menu.
+
+	The view changes on the tap but the save waits until the taps stop. The save
+	remote is rate limited and a refused call counts against the sender, so
+	sending one per tap let a player who fiddles with the button run themselves
+	into a kick.
 ]]
 function PerspectiveController.toggle()
 	local other = if PerspectiveController.isFirstPerson()
@@ -113,7 +124,14 @@ function PerspectiveController.toggle()
 		else PerspectiveController.FIRST
 
 	ClientState.applySetting(SETTING_ID, other)
-	ClientState.saveSettings()
+
+	saveToken += 1
+	local token = saveToken
+	task.delay(SAVE_DELAY, function()
+		if token == saveToken then
+			ClientState.saveSettings()
+		end
+	end)
 end
 
 function PerspectiveController.init()
@@ -124,6 +142,8 @@ function PerspectiveController.init()
 end
 
 function PerspectiveController.stop()
+	-- A save still waiting belongs to the session being torn down.
+	saveToken += 1
 	trove:Clean()
 	current = SettingsConfig.get(SETTING_ID).default
 end

@@ -78,6 +78,10 @@ local SHOULDER_MARGIN = 0.85
 -- shoulder, looking at their chest.
 local DEATH_CAM_BACK = 9
 local DEATH_CAM_UP = 4.5
+-- The eye never comes closer to the target than this, however near the wall is,
+-- and stops this far short of a wall it would otherwise sit in.
+local DEATH_CAM_MIN_DISTANCE = 1.5
+local DEATH_CAM_WALL_MARGIN = 0.5
 -- Higher converges faster. 6 lands the camera in roughly half a second, which
 -- fits inside Constants.RESPAWN_SECONDS with time left to watch the killer.
 local DEATH_CAM_STIFFNESS = 6
@@ -104,6 +108,10 @@ local shoulderFilterFor: Model? = nil
 
 local deathCamActive = false
 local deathTargetPart: BasePart? = nil
+-- Rebuilt per target: assigning FilterDescendantsInstances allocates, and the
+-- death view probes every frame.
+local deathParams: RaycastParams? = nil
+local deathParamsFor: BasePart? = nil
 local deathLastCFrame: CFrame? = nil
 -- Bumped on every death so a stale watchdog from a previous death cannot cut a
 -- later one short. Cheaper and safer than cancelling the thread: the watchdog
@@ -244,6 +252,8 @@ local function stopDeathCam()
 
 	deathCamActive = false
 	deathTargetPart = nil
+	deathParams = nil
+	deathParamsFor = nil
 	deathLastCFrame = nil
 	deathGeneration += 1
 	restoreCamera()
@@ -282,8 +292,27 @@ local function updateDeathCam(cam: Camera, deltaTime: number)
 	if target and target.Parent then
 		local targetCFrame = target.CFrame
 		local focus = targetCFrame.Position + Vector3.new(0, 1.5, 0)
-		local eye = targetCFrame * CFrame.new(0, DEATH_CAM_UP, DEATH_CAM_BACK)
-		deathLastCFrame = CFrame.lookAt(eye.Position, focus)
+		local eyePosition = (targetCFrame * CFrame.new(0, DEATH_CAM_UP, DEATH_CAM_BACK)).Position
+
+		-- Pull the eye in along the way to the target until it clears whatever
+		-- is in between: a fixed spot behind and above lands inside the ceiling
+		-- of a corridor or the wall someone is standing against. Both bodies
+		-- are ignored, so the view is not blocked by what it is looking at.
+		if deathParamsFor ~= target or not deathParams then
+			local params = RaycastParams.new()
+			params.FilterType = Enum.RaycastFilterType.Exclude
+			params.FilterDescendantsInstances = { target.Parent, player.Character }
+			params.IgnoreWater = true
+			deathParams = params
+			deathParamsFor = target
+		end
+		local toEye = eyePosition - focus
+		local hit = workspace:Raycast(focus, toEye, deathParams)
+		if hit then
+			eyePosition = focus + toEye.Unit * math.max(hit.Distance - DEATH_CAM_WALL_MARGIN, DEATH_CAM_MIN_DISTANCE)
+		end
+
+		deathLastCFrame = CFrame.lookAt(eyePosition, focus)
 	elseif target then
 		deathTargetPart = nil
 	end

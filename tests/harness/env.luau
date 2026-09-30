@@ -44,6 +44,10 @@ Env.renderBindings = {}
 -- Desktop unless a scenario says otherwise; see Env.setDevice.
 Env.device = { TouchEnabled = false, KeyboardEnabled = true, MouseEnabled = true }
 Env.boundActions = {}
+-- Optional stand-ins a scenario installs: what workspace:Raycast answers, and
+-- what UserInputService:GetLastInputType reports. Both default to "nothing".
+Env.raycast = nil
+Env.lastInputType = nil
 -- Seconds the game has asked task.wait for. Nothing real elapses; this is how a
 -- check tells a loop that waited from one that did not.
 Env.virtualTime = 0
@@ -759,6 +763,18 @@ local function buildServices()
 		GetMouseDelta = function()
 			return roblox.Vector2.new(0, 0)
 		end,
+		-- What the last real input was. A phone's is a finger unless a scenario
+		-- says otherwise (Env.lastInputType); a touchscreen laptop's is a mouse,
+		-- which is exactly the difference the recoil scale has to tell apart.
+		GetLastInputType = function()
+			if Env.lastInputType then
+				return Env.lastInputType
+			end
+			if Env.device.TouchEnabled and not Env.device.MouseEnabled then
+				return roblox.Enum.UserInputType.Touch
+			end
+			return roblox.Enum.UserInputType.MouseButton1
+		end,
 	}
 
 	--[[
@@ -1332,8 +1348,13 @@ function Env.enableClientRuntime()
 	if not clientMethodsInstalled then
 		clientMethodsInstalled = true
 
-		roblox.implementMethod("Workspace", "Raycast", function()
+		roblox.implementMethod("Workspace", "Raycast", function(_self, origin, direction, params)
 			record("workspace:Raycast")
+			-- A scenario that needs a wall installs Env.raycast; without one the
+			-- world is empty, as it always was.
+			if Env.raycast then
+				return Env.raycast(origin, direction, params)
+			end
 			return nil
 		end)
 		roblox.implementMethod("Workspace", "GetPartBoundsInBox", function()
@@ -1523,6 +1544,8 @@ function Env.reset()
 	table.clear(parked)
 	table.clear(Env.spawnErrors)
 	Env.virtualTime = 0
+	Env.raycast = nil
+	Env.lastInputType = nil
 	buildServices()
 end
 

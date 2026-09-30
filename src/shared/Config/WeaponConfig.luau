@@ -52,7 +52,10 @@ WeaponConfig.Weapons = {
 		recoilRecovery = 10,
 
 		beamWidth = 0.28,
-		muzzleOffset = { x = 0, y = 0, z = -2.4 },
+		-- The end of the barrel in GunModelFactory's layout (tests/harness/vfx
+		-- checks it): beams and flashes start here, so half way along would put
+		-- the flash inside the gun.
+		muzzleOffset = { x = 0, y = 0, z = -2.9 },
 	},
 
 	Pistol = {
@@ -88,7 +91,7 @@ WeaponConfig.Weapons = {
 		recoilRecovery = 8,
 
 		beamWidth = 0.22,
-		muzzleOffset = { x = 0, y = 0, z = -1.4 },
+		muzzleOffset = { x = 0, y = 0, z = -1.55 },
 	},
 
 	Lance = {
@@ -120,7 +123,7 @@ WeaponConfig.Weapons = {
 		recoilRecovery = 5,
 
 		beamWidth = 0.36,
-		muzzleOffset = { x = 0, y = 0, z = -3.2 },
+		muzzleOffset = { x = 0, y = 0, z = -3.9 },
 	},
 }
 
