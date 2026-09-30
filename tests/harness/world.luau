@@ -278,6 +278,40 @@ local function strayWallNeon(built: any)
 	return stray
 end
 
+--[[
+	Pairs of floor-like tops that occupy the same plane over the same ground.
+	The GPU cannot decide which of two coincident faces is in front, so it
+	decides per pixel and per frame and the surface shimmers. Only the tops of
+	Floor, RoomFloor and Block parts are compared (the things a player stands
+	on), and only when they overlap by more than a stud in each direction, so
+	blocks that merely touch edge to edge are left alone.
+]]
+local function coplanarTops(built: any)
+	local boxes = {}
+	for _, part in partsNamed(built.model, WALKABLE) do
+		local box = uprightTop(part)
+		if box and part.Transparency < 1 then
+			box.part = part
+			table.insert(boxes, box)
+		end
+	end
+
+	local pairsFound = {}
+	for i = 1, #boxes do
+		for j = i + 1, #boxes do
+			local a, b = boxes[i], boxes[j]
+			if math.abs(a.y - b.y) < 0.02 then
+				local dx = math.min(a.maxX, b.maxX) - math.max(a.minX, b.minX)
+				local dz = math.min(a.maxZ, b.maxZ) - math.max(a.minZ, b.minZ)
+				if dx > 1 and dz > 1 then
+					table.insert(pairsFound, { a = a, b = b })
+				end
+			end
+		end
+	end
+	return pairsFound
+end
+
 local results = {}
 
 for _, entry in MAPS do
@@ -510,6 +544,17 @@ for _, entry in MAPS do
 			end
 		end
 	end
+
+	for _, clash in coplanarTops(built) do
+		check(
+			false,
+			`{clash.a.part.Name} and {clash.b.part.Name} share a top face at height `
+				.. `{string.format("%.2f", clash.a.y - built.origin.Y)} `
+				.. `(x {math.floor(clash.a.minX - built.origin.X)}..{math.floor(clash.a.maxX - built.origin.X)} vs `
+				.. `{math.floor(clash.b.minX - built.origin.X)}..{math.floor(clash.b.maxX - built.origin.X)}) and will z-fight`
+		)
+	end
+	check(true, "no two floor tops share a plane")
 
 	-- Everything must be anchored: one unanchored part falls through the map.
 	local unanchored = 0
