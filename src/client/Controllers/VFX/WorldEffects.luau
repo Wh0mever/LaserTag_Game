@@ -123,6 +123,9 @@ local function makeBeam(index: number)
 	flash.LightEmission = 1
 	flash.LightInfluence = 0
 	flash.Drag = 6
+	-- Emitters throw particles out of their TOP face by default. The origin
+	-- attachment looks down the beam (-Z), which is the face named Front.
+	flash.EmissionDirection = Enum.NormalId.Front
 	flash.Parent = origin
 
 	local light = Instance.new("PointLight")
@@ -237,6 +240,9 @@ local function makeImpact(index: number)
 	sparks.LightInfluence = 0
 	sparks.Acceleration = Vector3.new(0, -28, 0)
 	sparks.Drag = 3
+	-- The slab is laid with -Z pointing off the surface (see impact), so the
+	-- burst leaves the wall instead of skimming along it.
+	sparks.EmissionDirection = Enum.NormalId.Front
 	sparks.Parent = burst
 
 	local light = Instance.new("PointLight")

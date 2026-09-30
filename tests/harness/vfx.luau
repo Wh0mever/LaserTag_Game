@@ -235,6 +235,65 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- Sparks and flashes fly out of the surface, not along it
+--
+-- A ParticleEmitter throws particles out of its TOP face unless told otherwise.
+-- Both emitters here sit on an attachment whose -Z axis is the useful way (down
+-- the beam for the flash, off the wall for the sparks), so left at the default
+-- the muzzle flash sprayed sideways and the impact burst skimmed the surface.
+-- The muzzle itself belongs at the end of the barrel: half way along it, the
+-- flash appeared inside the gun.
+--------------------------------------------------------------------------------
+
+heading("Emitters point the right way")
+
+do
+	boot("desktop")
+	local VFXController = Env.load("src/client/Controllers/VFXController")
+	Env.load("src/client/ClientState").init()
+	VFXController.init()
+	VFXController.start()
+
+	local folder = Env.workspace():FindFirstChild("LaserTagVFX")
+	local emitters, wrong = 0, 0
+	for _, descendant in folder:GetDescendants() do
+		if descendant:IsA("ParticleEmitter") then
+			emitters += 1
+			if descendant.EmissionDirection ~= roblox.Enum.NormalId.Front then
+				wrong += 1
+			end
+		end
+	end
+	check(emitters > 0, "the effects own particle emitters")
+	check(wrong == 0, `every emitter fires out of its front face, along -Z ({wrong} of {emitters} do not)`)
+
+	VFXController.stop()
+end
+
+heading("The muzzle sits at the barrel tip")
+
+do
+	boot("desktop")
+	local GunModelFactory = Env.load("src/shared/GunModelFactory")
+	local WeaponConfig = Env.load("src/shared/Config/WeaponConfig")
+
+	for _, weaponId in WeaponConfig.Order do
+		local model = GunModelFactory.build(weaponId, nil)
+		-- The most forward point of any piece of the gun: parts are laid out
+		-- around the Handle at the origin, and forward is -Z.
+		local tip = math.huge
+		for _, part in partsOf(model) do
+			tip = math.min(tip, part.CFrame.Position.Z - part.Size.Z / 2)
+		end
+		local muzzleZ = GunModelFactory.getMuzzle(model).Position.Z
+		check(
+			math.abs(muzzleZ - tip) <= 0.05,
+			`{weaponId}: the muzzle is at the end of the barrel (muzzle {muzzleZ}, tip {tip})`
+		)
+	end
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 
