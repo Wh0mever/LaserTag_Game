@@ -91,6 +91,8 @@ end
 	(origin, direction, params) and returning the result table or nil.
 ]]
 Env.raycastHandler = nil
+-- What workspace:GetPartBoundsInBox answers; see Env.enableClientRuntime.
+Env.partBoundsHandler = nil
 
 -- Fire RunService.Heartbeat once, the way one frame of a running game would.
 function Env.stepHeartbeat(dt: number?)
@@ -1411,8 +1413,12 @@ function Env.enableClientRuntime()
 			local handler = Env.raycastHandler or Env.raycast
 			return if handler then handler(origin, direction, params) else nil
 		end)
-		roblox.implementMethod("Workspace", "GetPartBoundsInBox", function()
-			return {}
+		-- Nothing overlaps anything without physics; a scenario that needs a
+		-- pad with somebody on it installs Env.partBoundsHandler(cframe, size,
+		-- params) and answers with the parts it wants found.
+		roblox.implementMethod("Workspace", "GetPartBoundsInBox", function(_self, cframe, size, params)
+			local handler = Env.partBoundsHandler
+			return if handler then handler(cframe, size, params) else {}
 		end)
 		roblox.implementMethod("Workspace", "GetServerTimeNow", function()
 			return Env.now()

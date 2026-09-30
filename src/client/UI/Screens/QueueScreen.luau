@@ -14,6 +14,11 @@
 	Everything comes from ClientState.queue; this asks the server for nothing.
 	An empty map id means "in no queue" (QueueService sends that to whoever
 	steps off), and the chip is never shown during a match.
+
+	`closing` is the server's answer to "would I be seated?" for a match already
+	running or over (the last minute, the results): the portal sign says
+	"МАТЧ ЗАВЕРШАЕТСЯ" then, and the chip has to say the same rather than promise
+	a queue that will not start.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -42,12 +47,21 @@ local label: TextLabel? = nil
 	The chip's text for a queue state, or nil when there is nothing to show.
 	Pure over its arguments, so the harness can check every wording.
 ]]
-function QueueScreen.textFor(mapId: string?, count: number, needed: number, countdown: number?): string?
+function QueueScreen.textFor(
+	mapId: string?,
+	count: number,
+	needed: number,
+	countdown: number?,
+	closing: boolean?
+): string?
 	if type(mapId) ~= "string" or mapId == "" or count <= 0 then
 		return nil
 	end
 
 	local name = TextUtil.upper(mapId)
+	if closing == true then
+		return `{name}  ·  МАТЧ ЗАВЕРШАЕТСЯ`
+	end
 	if type(countdown) == "number" and countdown > 0 then
 		return `{name}  ·  СТАРТ ЧЕРЕЗ {math.ceil(countdown)}`
 	end
@@ -65,7 +79,7 @@ local function refresh()
 	local queue = ClientState.queue or {}
 	local text = if ClientState.isInMatch()
 		then nil
-		else QueueScreen.textFor(queue.mapId, queue.count or 0, queue.needed or 0, queue.countdown)
+		else QueueScreen.textFor(queue.mapId, queue.count or 0, queue.needed or 0, queue.countdown, queue.closing)
 
 	chip.Visible = text ~= nil
 	if text then
