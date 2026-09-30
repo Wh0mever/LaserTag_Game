@@ -240,6 +240,44 @@ local function buriedBlocks(built: any)
 	return buried
 end
 
+--[[
+	Wall neon that is not on a wall. A WallNeon bar is a decoration for the wall
+	it belongs to, so its centre must lie within a wall's box; one that does not
+	is a glowing bar hanging in mid-air. Returns the offending bars.
+]]
+local function strayWallNeon(built: any)
+	local walls = {}
+	for _, wall in partsNamed(built.model, { Wall = true }) do
+		local box = uprightTop(wall)
+		if box then
+			table.insert(walls, box)
+		end
+	end
+
+	local stray = {}
+	for _, bar in partsNamed(built.model, { WallNeon = true }) do
+		local at = bar.CFrame.Position
+		local held = false
+		for _, wall in walls do
+			if
+				at.X >= wall.minX - 0.5
+				and at.X <= wall.maxX + 0.5
+				and at.Z >= wall.minZ - 0.5
+				and at.Z <= wall.maxZ + 0.5
+				and at.Y >= wall.bottom - 0.5
+				and at.Y <= wall.y + 0.5
+			then
+				held = true
+				break
+			end
+		end
+		if not held then
+			table.insert(stray, bar)
+		end
+	end
+	return stray
+end
+
 local results = {}
 
 for _, entry in MAPS do
@@ -437,6 +475,17 @@ for _, entry in MAPS do
 			)
 		end
 		check(true, "no cover block is buried in a wall")
+
+		local stray = strayWallNeon(built)
+		for _, bar in stray do
+			local at = bar.CFrame.Position
+			check(
+				false,
+				`a wall neon bar floats at ({math.floor(at.X - built.origin.X)}, {math.floor(at.Y - built.origin.Y)}, `
+					.. `{math.floor(at.Z - built.origin.Z)}) with no wall around it`
+			)
+		end
+		check(true, "every wall neon bar sits on a wall")
 
 		local probes = probeRamps(built)
 		check(#probes > 0, "the map has ramps for the check below to measure")

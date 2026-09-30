@@ -291,7 +291,10 @@ local function buildSide(ctx, spec, side: string): (CFrame?, Vector3?)
 		local halfWidth = math.max(math.min(doorWidth, geom.length - 8), 4) * 0.5
 		segment(-half, -halfWidth)
 		segment(halfWidth, half)
-		segment(-halfWidth, halfWidth, { baseY = baseY + doorHeight, height = height - doorHeight, neonStripY = nil })
+		-- `false`, not nil: a nil override is simply absent from the table, so the
+		-- lintel would inherit the room's strip height and emit it relative to the
+		-- lintel's own baseY, leaving the bar floating above the roof.
+		segment(-halfWidth, halfWidth, { baseY = baseY + doorHeight, height = height - doorHeight, neonStripY = false })
 		emitDoorFrame(ctx, spec, geom, halfWidth, baseY, doorHeight)
 
 		local doorPos = worldVec(ctx, geom.cx, baseY + doorHeight * 0.5, geom.cz)
