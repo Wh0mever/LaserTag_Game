@@ -126,9 +126,13 @@ WeaponConfig.Weapons = {
 
 WeaponConfig.Order = { "Rifle", "Pistol", "Lance" }
 
--- Extra inaccuracy while moving faster than this (studs/second).
-WeaponConfig.MOVING_SPEED_THRESHOLD = 8
-WeaponConfig.MOVING_SPREAD_PENALTY_DEG = 0.5
+--[[
+	How long a weapon swap locks out firing, in seconds. The client's raise
+	animation matches it so the gun is fireable the moment it finishes coming up,
+	and the server enforces it (less a little for the network): it is a rule, not
+	an animation, so both sides read it from here.
+]]
+WeaponConfig.SWITCH_TIME = 0.35
 
 -- The server allows a shot origin to differ from the server-known eye position
 -- by at most this many studs, which tolerates normal latency but rejects

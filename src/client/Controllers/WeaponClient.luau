@@ -48,9 +48,6 @@ local WeaponClient = {}
 -- After VFXController (8), whose shot feedback this module drives.
 WeaponClient.Priority = 9
 
--- How long a weapon swap locks out firing. Matches ViewmodelController's raise
--- animation so the gun is fireable exactly when it finishes coming up.
-local SWITCH_TIME = 0.35
 --[[
 	How long a switch may go unanswered before the server's weapon wins.
 
@@ -357,7 +354,7 @@ local function adoptWeapon(weaponId: string, announce: boolean)
 	previous.reloadUntil = 0
 
 	currentWeaponId = weaponId
-	switchUntil = os.clock() + SWITCH_TIME
+	switchUntil = os.clock() + WeaponConfig.SWITCH_TIME
 
 	if announce and equipRemote then
 		local weapon = WeaponConfig.get(weaponId)

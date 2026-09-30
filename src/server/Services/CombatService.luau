@@ -172,6 +172,34 @@ local function applyHit(shooter: Player, weaponId: string, shot): (boolean, bool
 	return killed, isHeadshot
 end
 
+--[[
+	Tell everyone who could see a shot about its beam.
+
+	The audience is the shooter's own match. Maps run side by side in one
+	workspace and the hub is always full of people with no gun, and ShotFired is
+	an unreliable remote with a small per-client queue: sending every shot on the
+	server to every client spent that queue on beams nobody there could ever see,
+	and pushed the ones that mattered out of it.
+
+	The shooter is left out: it already drew its own beam from the local
+	viewmodel, and a second, slightly different one would double it.
+]]
+local function broadcastShot(shooter: Player, weaponId: string, shot)
+	local mapId = shooter:GetAttribute("InMatch")
+	if type(mapId) ~= "string" or mapId == "" then
+		return
+	end
+
+	local muzzle = ShotResolver.muzzlePosition(shooter, weaponId, shot.eye)
+	local color = beamColor(shooter, weaponId)
+
+	for _, other in Players:GetPlayers() do
+		if other ~= shooter and other:GetAttribute("InMatch") == mapId then
+			Remotes.fireClient(RemoteNames.ShotFired, other, shooter.UserId, weaponId, muzzle, shot.hitPos, color)
+		end
+	end
+end
+
 local function onShootRequest(player: Player, weaponId: string, seq: number, _origin: Vector3, direction: Vector3)
 	-- ShootValidation already cleared this request (it is the registered
 	-- validator). Committing the sequence number here is what makes the same
@@ -203,17 +231,7 @@ local function onShootRequest(player: Player, weaponId: string, seq: number, _or
 
 	local killed, isHeadshot = applyHit(player, weaponId, shot)
 
-	-- The shooter already drew its own beam from the local viewmodel, so it is
-	-- excluded rather than sent a second, slightly different one.
-	Remotes.fireAllClientsExcept(
-		RemoteNames.ShotFired,
-		player,
-		player.UserId,
-		weaponId,
-		ShotResolver.muzzlePosition(player, weaponId, shot.eye),
-		shot.hitPos,
-		beamColor(player, weaponId)
-	)
+	broadcastShot(player, weaponId, shot)
 
 	if killed then
 		registerKill(player, shot.victim, weaponId, isHeadshot)
@@ -257,6 +275,11 @@ local function onEquipWeaponRequest(player: Player, slot: number)
 		WeaponState.cancelReload(player, previous)
 		pushAmmo(player, previous)
 	end
+
+	-- The swap costs time on this side too. Fire rates are per weapon, so without
+	-- it a modified client could fire each of its weapons in the same frame by
+	-- swapping between them; WeaponState refuses shots until it has finished.
+	WeaponState.markSwitch(player, workspace:GetServerTimeNow())
 
 	player:SetAttribute("CurrentWeapon", weaponId)
 	pushAmmo(player, weaponId)
