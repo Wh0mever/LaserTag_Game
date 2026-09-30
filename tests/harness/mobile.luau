@@ -655,7 +655,9 @@ check(boardOk, `the scoreboard initialises on a phone: {tostring(boardErr)}`)
 player:SetAttribute("InMatch", "Dust")
 UIController.closeMenu("Side")
 
-local boardGui = UIController.getScreen("Scoreboard")
+-- The screen's content parent, not the ScreenGui: on a scaled screen the two
+-- differ, and the widgets are in the first.
+local boardGui = UIController.getScreenRoot("Scoreboard")
 local scoreTap = boardGui and boardGui:FindFirstChild("ScoreTap")
 local board = boardGui and boardGui:FindFirstChild("Board")
 check(scoreTap ~= nil and scoreTap.Visible, "in a match the score at the top can be tapped")

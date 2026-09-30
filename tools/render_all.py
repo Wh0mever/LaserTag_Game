@@ -64,14 +64,14 @@ SCENARIOS = [
     ("desktop", "hub", "Welcome"),
 ]
 
-BLOCKING = {"spill", "covered", "chrome", "offscreen"}
+BLOCKING = {"spill", "covered", "chrome", "offscreen", "scale-host"}
 
 # Deliberate, reviewed exceptions: (kind, path suffix) -> why it is fine.
 ALLOWED = {
     # Roblox draws its version badge nowhere near a thumb, but on the smallest
     # phones the corner it sits in is the jump button's; it is four characters
     # of grey text nobody needs to read mid-fight.
-    ("covered", "SideButtons/Root/Version"): "version label; not needed during play",
+    ("covered", "SideButtons/Scaled/Root/Version"): "version label; not needed during play",
 }
 
 
@@ -80,6 +80,54 @@ def allowed(issue):
         if issue["kind"] == kind and issue.get("path", "").endswith(suffix):
             return True
     return False
+
+
+def check_scale_hosts(data):
+    """The shape UIController promises for a scaled screen, checked on the tree
+    that was actually dumped.
+
+    A UIScale directly under a ScreenGui is the one placement whose effect on a
+    fromScale(1, 1) root nobody could verify (the Lune sandbox has no layout
+    engine), so UIController hangs it on a full-screen host Frame sized 1/scale
+    instead: host x scale is exactly the screen whichever way the engine treats
+    a Scale part. This fails the build if a screen goes back to the ambiguous
+    placement, or if a host's size and its scale stop agreeing - either of which
+    would make the renderer's picture differ from the phone's.
+    """
+    issues = []
+    for sc in data["screens"]:
+        name = sc.get("name")
+        under_gui = render_gui.mod(sc, "UIScale")
+        if under_gui:
+            issues.append(
+                {
+                    "kind": "scale-host",
+                    "path": name,
+                    "problem": "UIScale directly under the ScreenGui; it belongs on the Scaled host",
+                }
+            )
+        for child in sc.get("children") or []:
+            scale = render_gui.mod(child, "UIScale")
+            if child.get("name") != "Scaled" or not scale:
+                continue
+            factor = scale.get("scale") or 1.0
+            size = child.get("size") or [0, 0, 0, 0]
+            want = 1.0 / factor
+            if (
+                abs(size[0] - want) > 1e-3
+                or abs(size[2] - want) > 1e-3
+                or abs(size[1]) > 1e-6
+                or abs(size[3]) > 1e-6
+                or child.get("position") != [0, 0, 0, 0]
+            ):
+                issues.append(
+                    {
+                        "kind": "scale-host",
+                        "path": f"{name}/Scaled",
+                        "problem": f"host size {size} is not fromScale(1/{factor})",
+                    }
+                )
+    return issues
 
 
 def run(device, scenario, menu, out_dir):
@@ -96,6 +144,7 @@ def run(device, scenario, menu, out_dir):
     renderer = render_gui.Renderer(data)
     renderer.render()
     renderer.analyse()
+    renderer.issues.extend(check_scale_hosts(data))
 
     bg = Image.new("RGBA", renderer.canvas.size, (38, 44, 56, 255))
     bg.alpha_composite(renderer.canvas)
