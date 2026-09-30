@@ -338,6 +338,26 @@ function SpectatorController.init()
 
 	trove:Add(ClientState.Died:Connect(show))
 	trove:Add(ClientState.Respawned:Connect(hide))
+
+	--[[
+		The match ending is the other way out. A death just before the horn has
+		its respawn cancelled by the server, and the hub spawn that finally
+		revives the player comes after the whole Results hold, so without this the
+		card sits under the results overlay counting "…". Only a CHANGE of phase
+		counts: MatchChanged also carries every 1 Hz tick, and a death in the hub
+		(phase Idle all along) is an ordinary one with its own respawn.
+	]]
+	local lastPhase = ClientState.match.phase
+	trove:Add(ClientState.MatchChanged:Connect(function(match)
+		local phase = match.phase
+		if phase == lastPhase then
+			return
+		end
+		lastPhase = phase
+		if phase == "Results" or phase == "Idle" then
+			hide()
+		end
+	end))
 	trove:Add(countdownTrove)
 end
 

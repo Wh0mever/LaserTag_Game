@@ -1079,6 +1079,63 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- The death card does not outlive the match
+--
+-- A player killed in the last seconds has their respawn cancelled when the
+-- match leaves InProgress, and nothing sent them back to the hub for the whole
+-- Results hold: the card sat there with a "..." counter under the results
+-- overlay, and the dead-body camera with it.
+--------------------------------------------------------------------------------
+
+heading("Death card at the end of a match")
+
+do
+	boot("desktop")
+	local player = Env.service("Players").LocalPlayer
+	local ClientState = Env.load("src/client/ClientState")
+	ClientState.init()
+	local Spectator = Env.load("src/client/Controllers/SpectatorController")
+	local CameraController = Env.load("src/client/Controllers/CameraController")
+	CameraController.init()
+	Spectator.init()
+	player.Character = makeCharacter(nil)
+
+	local function phase(name: string)
+		ClientState.match.phase = name
+		ClientState.MatchChanged:Fire(ClientState.match)
+	end
+
+	phase("InProgress")
+	ClientState.isDead = true
+	ClientState.Died:Fire(nil, 3)
+	check(Spectator.isVisible() and CameraController.isDeathCamActive(), "a death in a match shows the card and view")
+
+	-- The 1 Hz tick repeats the phase it is already in and must change nothing.
+	phase("InProgress")
+	check(Spectator.isVisible() and CameraController.isDeathCamActive(), "a tick inside the match leaves them up")
+
+	phase("Results")
+	check(not Spectator.isVisible(), "the results hide the death card")
+	check(not CameraController.isDeathCamActive(), "and end the dead-body camera")
+
+	-- Hub spawn after the Results: alive again, and nothing comes back.
+	ClientState.isDead = false
+	ClientState.Respawned:Fire()
+	phase("Idle")
+	check(not Spectator.isVisible() and not CameraController.isDeathCamActive(), "the hub spawn brings nothing back")
+
+	-- A fall in the hub is an ordinary death with its own card and respawn.
+	ClientState.isDead = true
+	ClientState.Died:Fire(nil, 3)
+	check(Spectator.isVisible() and CameraController.isDeathCamActive(), "a death in the hub still shows the card")
+	phase("Idle")
+	check(Spectator.isVisible(), "a repeated Idle does not cut a hub death short")
+	ClientState.isDead = false
+	ClientState.Respawned:Fire()
+	check(not Spectator.isVisible(), "and the respawn hides it as before")
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 

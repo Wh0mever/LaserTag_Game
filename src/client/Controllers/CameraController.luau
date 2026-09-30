@@ -441,6 +441,22 @@ function CameraController.init()
 		restoreCamera()
 	end))
 
+	-- The match ending cancels the respawn of a player killed just before it,
+	-- and the hub spawn comes only after the Results hold: the dead-body view
+	-- must not stay up over the results. Only a change of phase counts (the
+	-- 1 Hz tick repeats the phase), so a death in the hub keeps its own view.
+	local lastPhase = ClientState.match.phase
+	trove:Add(ClientState.MatchChanged:Connect(function(match)
+		local phase = match.phase
+		if phase == lastPhase then
+			return
+		end
+		lastPhase = phase
+		if phase == "Results" or phase == "Idle" then
+			stopDeathCam()
+		end
+	end))
+
 	trove:Connect(player.CharacterAdded, function()
 		CameraController.resetRecoil()
 	end)
