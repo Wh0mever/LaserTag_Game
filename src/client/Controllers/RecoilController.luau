@@ -21,6 +21,7 @@
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
 assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.json")
@@ -122,8 +123,15 @@ function RecoilController.onShot(weaponId: string, now: number?): number
 		Roblox exposes no sensitivity for the touch camera — Sensitivity in the
 		settings panel drives UserInputService.MouseDeltaSensitivity, which a
 		phone does not have — so this is the lever that exists.
+
+		Keyed on the input that fired THIS shot, not on the device having a
+		touchscreen: a touchscreen laptop aimed with its mouse has a wrist, and
+		a thumb on a phone's fire button is the case this is for. A device with
+		no touchscreen cannot report Touch, so it never softens.
 	]]
-	local scale = if ClientState.isTouch then TOUCH_RECOIL_SCALE else 1
+	local scale = if ClientState.isTouch and UserInputService:GetLastInputType() == Enum.UserInputType.Touch
+		then TOUCH_RECOIL_SCALE
+		else 1
 	CameraController.addRecoilOffset(kick.pitch * scale, kick.yaw * scale, weapon.recoilRecovery)
 
 	-- Accumulate onto whatever is left of the previous shot's punch, not onto the

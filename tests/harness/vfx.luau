@@ -543,6 +543,50 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- Recoil is softened for a thumb, not for a touchscreen
+--
+-- The softening exists because correcting recoil with a thumb on glass is
+-- slower than with a wrist. It was keyed on the device having a touchscreen at
+-- all, so a touchscreen laptop aimed with its mouse got a weaker kick than
+-- every desktop player. What matters is the input that fired the shot.
+--------------------------------------------------------------------------------
+
+heading("Touch recoil follows the input that fired")
+
+do
+	local function firstKickFor(device: string, lastInput: any?): number
+		boot(device)
+		Env.lastInputType = lastInput
+		Env.load("src/client/ClientState").init()
+		local CameraController = Env.load("src/client/Controllers/CameraController")
+		local RecoilController = Env.load("src/client/Controllers/RecoilController")
+		RecoilController.init()
+		CameraController.resetRecoil()
+		RecoilController.onShot("Rifle", os.clock())
+		return (CameraController.getRecoilOffset())
+	end
+
+	local Enum = roblox.Enum
+	local full = firstKickFor("desktop", nil)
+	check(full > 0, "a rifle shot kicks the view")
+
+	local phone = firstKickFor("phone", nil)
+	check(phone < full * 0.9, `a phone player firing with a thumb gets the softened kick ({phone} against {full})`)
+
+	local laptopMouse = firstKickFor("touchLaptop", Enum.UserInputType.MouseButton1)
+	check(
+		math.abs(laptopMouse - full) < 1e-6,
+		`a touchscreen laptop firing with its mouse gets the full kick ({laptopMouse} against {full})`
+	)
+
+	local laptopTouch = firstKickFor("touchLaptop", Enum.UserInputType.Touch)
+	check(
+		math.abs(laptopTouch - phone) < 1e-6,
+		`the same laptop fired by touch gets the phone's kick ({laptopTouch} against {phone})`
+	)
+end
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 
