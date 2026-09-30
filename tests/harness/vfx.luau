@@ -113,13 +113,8 @@ roblox.implementMethod("Model", "ScaleTo", function(self, factor: number)
 	syncAttachments(self)
 end)
 
--- Emit exists only while a game runs. The count is kept so a check can ask how
--- many particles an effect actually released.
-local emitted = 0
-
-roblox.implementMethod("ParticleEmitter", "Emit", function(_self, count: number?)
-	emitted += count or 1
-end)
+-- Emit exists only while a game runs, and nothing here draws particles.
+roblox.implementMethod("ParticleEmitter", "Emit", function() end)
 
 --------------------------------------------------------------------------------
 -- Helpers
