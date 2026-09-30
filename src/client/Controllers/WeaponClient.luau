@@ -48,9 +48,6 @@ local WeaponClient = {}
 -- After VFXController (8), whose shot feedback this module drives.
 WeaponClient.Priority = 9
 
--- How long a weapon swap locks out firing. Matches ViewmodelController's raise
--- animation so the gun is fireable exactly when it finishes coming up.
-local SWITCH_TIME = 0.35
 --[[
 	How long a switch may go unanswered before the server's weapon wins.
 
@@ -69,6 +66,23 @@ local EQUIP_CONFIRM_TIMEOUT = 1
 -- the server refused) lands within a frame or two of the player noticing.
 local RECONCILE_GRACE = 0.35
 
+--[[
+	How much of a frame's lateness the next shot is allowed to inherit.
+
+	Shots leave on Heartbeat, so a shot is only ever sent on a frame. The first
+	frame at or after the interval is late by whatever was left of the frame
+	before it, and if that remainder were simply thrown away every shot would pay
+	it again: the rifle fired about a quarter slower at 30 fps than at 240. So a
+	shot that leaves late books its slot as the moment it was due, not the moment
+	it left, and the lateness is handed to the next interval.
+
+	Bounded, because it is time given back: the shortest gap the client can send
+	is the interval less this, which must stay well inside what the server
+	tolerates (WeaponState.FIRE_RATE_GRACE, 40 ms) or the server would refuse the
+	very shots this makes possible.
+]]
+local FIRE_CARRY = 0.012
+
 -- Rate limit for the empty-magazine click so holding the trigger on an empty
 -- gun does not machine-gun the sound.
 local EMPTY_CLICK_INTERVAL = 0.35
@@ -80,7 +94,18 @@ local trove = Trove.new()
 
 -- weaponId -> predicted state. magSize is seeded from config and replaced by
 -- whatever the server reports.
-local predicted: { [string]: { mag: number, magSize: number, reloading: boolean, reloadUntil: number, lastShotAt: number } } =
+local predicted: {
+	[string]: {
+		mag: number,
+		magSize: number,
+		reloading: boolean,
+		reloadUntil: number,
+		-- The last shot sent with this weapon, numbered as the server's per-weapon
+		-- acknowledgement (AmmoSync's ackSeq) is.
+		lastSeq: number,
+		lastShotAt: number,
+	},
+} =
 	{}
 
 local currentWeaponId = Constants.SLOTS[Constants.DEFAULT_SLOT]
@@ -123,6 +148,7 @@ local function stateFor(weaponId: string)
 			magSize = if weapon then weapon.magSize else 0,
 			reloading = false,
 			reloadUntil = 0,
+			lastSeq = 0,
 			lastShotAt = NEVER,
 		}
 		predicted[weaponId] = state
@@ -313,9 +339,16 @@ local function tryFire(now: number)
 	local origin = eyePosition() or cameraCF.Position
 	local direction = aimDirection(cameraCF, origin, weapon.range)
 
+	-- A shot that follows another by about the interval is part of a burst and
+	-- inherits a bounded share of its own lateness (see FIRE_CARRY). One that
+	-- follows a pause starts a fresh schedule exactly on this frame.
+	local late = now - (state.lastShotAt + weapon.fireRate)
+	local inherited = if late < weapon.fireRate then math.min(late, FIRE_CARRY) else 0
+
 	seq += 1
+	state.lastSeq = seq
 	state.mag -= 1
-	state.lastShotAt = now
+	state.lastShotAt = now - inherited
 	lastLocalShotAt = now
 
 	if shootRemote then
@@ -357,7 +390,7 @@ local function adoptWeapon(weaponId: string, announce: boolean)
 	previous.reloadUntil = 0
 
 	currentWeaponId = weaponId
-	switchUntil = os.clock() + SWITCH_TIME
+	switchUntil = os.clock() + WeaponConfig.SWITCH_TIME
 
 	if announce and equipRemote then
 		local weapon = WeaponConfig.get(weaponId)
@@ -401,11 +434,41 @@ local function reconcile(ammo)
 	local state = stateFor(ammo.weaponId)
 
 	state.magSize = if type(ammo.magSize) == "number" and ammo.magSize > 0 then ammo.magSize else state.magSize
-	state.reloading = ammo.reloading == true
-	-- The sync only says "reloading", not how much is left, so the local clock
-	-- restarts from now. It runs slightly long by the latency of this packet,
-	-- which the completion sync then corrects.
-	state.reloadUntil = if state.reloading then os.clock() + weapon.reloadTime else 0
+
+	local serverReloading = ammo.reloading == true
+	local wasReloading = state.reloading
+
+	-- The server works through shots in order and sends a sync after each, every
+	-- one saying "not reloading". The rifle empties and reloads by itself, so the
+	-- reload request goes out behind the last shots and the server is still
+	-- answering those when the client is already reloading; each of them would
+	-- cancel the reload and the HUD would flick reload, empty, reload as the
+	-- server caught up. A sync that has not yet accounted for the reload request
+	-- (`ackSeq` no later than the last shot this weapon fired, which is what the
+	-- request was sent behind: nothing fires while it reloads) and shows a
+	-- magazine that is not full cannot be the reload finishing, so it is not
+	-- allowed to end one. The completion sync carries a full magazine and still
+	-- does.
+	local predatesReload = wasReloading
+		and not serverReloading
+		and type(ammo.ackSeq) == "number"
+		and ammo.ackSeq <= state.lastSeq
+		and ammo.mag < state.magSize
+
+	if not predatesReload then
+		state.reloading = serverReloading
+		if not serverReloading then
+			state.reloadUntil = 0
+		elseif not wasReloading then
+			-- The server started a reload this client did not ask for. The sync only
+			-- says "reloading", not how much is left, so the clock starts now.
+			state.reloadUntil = os.clock() + weapon.reloadTime
+		end
+		-- Otherwise this is the answer to the reload the client started itself, and
+		-- its deadline stands. The reload began on the key press, a whole round
+		-- trip before this packet could arrive; restarting the clock here made
+		-- every reload as long as the weapon's plus the player's ping.
+	end
 
 	-- A server count higher than ours is either a correction for a shot it
 	-- refused, or a sync that left before our latest shots arrived. `ackSeq`

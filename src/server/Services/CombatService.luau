@@ -16,6 +16,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 -- Rojo places Shared under ReplicatedStorage at build time, so on the server it
 -- is always already there; the timeout exists so a broken build fails loudly
@@ -23,6 +24,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
 assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.json")
 
+local CharacterHitboxes = require(script.Parent.Parent.Combat.CharacterHitboxes)
+local CharacterTracker = require(script.Parent.Parent.Combat.CharacterTracker)
 local Constants = require(Shared.Constants)
 local DamageCalc = require(script.Parent.Parent.Combat.DamageCalc)
 local DataService = require(script.Parent.DataService)
@@ -172,6 +175,34 @@ local function applyHit(shooter: Player, weaponId: string, shot): (boolean, bool
 	return killed, isHeadshot
 end
 
+--[[
+	Tell everyone who could see a shot about its beam.
+
+	The audience is the shooter's own match. Maps run side by side in one
+	workspace and the hub is always full of people with no gun, and ShotFired is
+	an unreliable remote with a small per-client queue: sending every shot on the
+	server to every client spent that queue on beams nobody there could ever see,
+	and pushed the ones that mattered out of it.
+
+	The shooter is left out: it already drew its own beam from the local
+	viewmodel, and a second, slightly different one would double it.
+]]
+local function broadcastShot(shooter: Player, weaponId: string, shot)
+	local mapId = shooter:GetAttribute("InMatch")
+	if type(mapId) ~= "string" or mapId == "" then
+		return
+	end
+
+	local muzzle = ShotResolver.muzzlePosition(shooter, weaponId, shot.eye)
+	local color = beamColor(shooter, weaponId)
+
+	for _, other in Players:GetPlayers() do
+		if other ~= shooter and other:GetAttribute("InMatch") == mapId then
+			Remotes.fireClient(RemoteNames.ShotFired, other, shooter.UserId, weaponId, muzzle, shot.hitPos, color)
+		end
+	end
+end
+
 local function onShootRequest(player: Player, weaponId: string, seq: number, _origin: Vector3, direction: Vector3)
 	-- ShootValidation already cleared this request (it is the registered
 	-- validator). Committing the sequence number here is what makes the same
@@ -203,17 +234,7 @@ local function onShootRequest(player: Player, weaponId: string, seq: number, _or
 
 	local killed, isHeadshot = applyHit(player, weaponId, shot)
 
-	-- The shooter already drew its own beam from the local viewmodel, so it is
-	-- excluded rather than sent a second, slightly different one.
-	Remotes.fireAllClientsExcept(
-		RemoteNames.ShotFired,
-		player,
-		player.UserId,
-		weaponId,
-		ShotResolver.muzzlePosition(player, weaponId, shot.eye),
-		shot.hitPos,
-		beamColor(player, weaponId)
-	)
+	broadcastShot(player, weaponId, shot)
 
 	if killed then
 		registerKill(player, shot.victim, weaponId, isHeadshot)
@@ -258,6 +279,11 @@ local function onEquipWeaponRequest(player: Player, slot: number)
 		pushAmmo(player, previous)
 	end
 
+	-- The swap costs time on this side too. Fire rates are per weapon, so without
+	-- it a modified client could fire each of its weapons in the same frame by
+	-- swapping between them; WeaponState refuses shots until it has finished.
+	WeaponState.markSwitch(player, workspace:GetServerTimeNow())
+
 	player:SetAttribute("CurrentWeapon", weaponId)
 	pushAmmo(player, weaponId)
 end
@@ -275,6 +301,14 @@ local function onCharacterAdded(player: Player, character: Model)
 	-- reload the previous life had in flight dies with it.
 	WeaponState.reset(player)
 
+	-- ...and a clean record of where it has been. The shadow position shots are
+	-- resolved from starts once the server has placed the character (see
+	-- onSpawnProtectionChanged).
+	CharacterTracker.begin(player, character)
+
+	-- What the character wears must not stand in front of the body it covers.
+	trove:Add(CharacterHitboxes.apply(character))
+
 	if not WeaponConfig.exists(player:GetAttribute("CurrentWeapon")) then
 		player:SetAttribute("CurrentWeapon", Constants.SLOTS[Constants.DEFAULT_SLOT])
 	end
@@ -290,6 +324,26 @@ local function onCharacterAdded(player: Player, character: Model)
 	CombatService.syncAmmo(player)
 end
 
+--[[
+	PlayerService stamps a new spawn protection on a character straight after it
+	has moved it to its spawn room, and nothing a client can do writes that
+	attribute. So a stamp into the future is the server saying "I have just put
+	this player here": the moment to take their position as the reference that
+	shots are resolved from, and to forget the default spawn the character was
+	created at.
+
+	Not tied to the character's creation, because a character is created at the
+	default spawn and only then moved. Taking its position on creation would
+	start every honest player's shadow hundreds of studs from where they are.
+]]
+local function onSpawnProtectionChanged(player: Player)
+	local protectedUntil = player:GetAttribute("SpawnProtectedUntil")
+	local now = workspace:GetServerTimeNow()
+	if type(protectedUntil) == "number" and protectedUntil > now then
+		CharacterTracker.rebaseline(player, now)
+	end
+end
+
 local function onPlayerAdded(player: Player)
 	if playerTroves[player] then
 		return
@@ -297,6 +351,10 @@ local function onPlayerAdded(player: Player)
 
 	local trove = Trove.new()
 	playerTroves[player] = trove
+
+	trove:Connect(player:GetAttributeChangedSignal("SpawnProtectedUntil"), function()
+		onSpawnProtectionChanged(player)
+	end)
 
 	trove:Connect(player.CharacterAdded, function(character)
 		onCharacterAdded(player, character)
@@ -323,6 +381,7 @@ function CombatService.onPlayerRemoving(player: Player)
 	end
 
 	WeaponState.clear(player)
+	CharacterTracker.forget(player)
 end
 
 --[[
@@ -379,6 +438,13 @@ function CombatService.init()
 		RateLimit = EQUIP_RATE,
 		WindowSeconds = EQUIP_WINDOW,
 	})
+
+	-- One sample per frame of where every character is. Physics has run by
+	-- Heartbeat, so this reads the positions the frame's shots will be tested
+	-- against.
+	serviceTrove:Connect(RunService.Heartbeat, function()
+		CharacterTracker.step(workspace:GetServerTimeNow())
+	end)
 
 	serviceTrove:Connect(Players.PlayerAdded, onPlayerAdded)
 	serviceTrove:Connect(Players.PlayerRemoving, CombatService.onPlayerRemoving)

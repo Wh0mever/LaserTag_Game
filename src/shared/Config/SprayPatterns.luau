@@ -169,14 +169,24 @@ end
 
 	`previousIndex` is the index of the last shot (0 if none).
 	`timeSinceLastShot` is in seconds; pass math.huge for a fresh magazine.
+
+	`grace` is extra time the pause must exceed before it counts, for a caller
+	that measures the gap on the far side of a network. The client times its own
+	shots and resets exactly at `resetTime`; the server sees each gap stretched
+	or squeezed by jitter, and with no grace it restarts a burst the client still
+	draws as unbroken about half the time a pause sits near the boundary. Only
+	the server passes one. The cost is on the other side of the line: a pause
+	just past `resetTime` that the client did reset keeps its pattern on the
+	server for up to `grace`.
 ]]
 function SprayPatterns.nextIndex(
 	weaponId: string,
 	previousIndex: number,
 	timeSinceLastShot: number,
-	resetTime: number
+	resetTime: number,
+	grace: number?
 ): number
-	if timeSinceLastShot > resetTime then
+	if timeSinceLastShot > resetTime + (grace or 0) then
 		return 1
 	end
 

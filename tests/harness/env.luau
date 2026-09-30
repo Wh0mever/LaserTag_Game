@@ -63,6 +63,35 @@ function Env.calls(): { [string]: number }
 	return recorded
 end
 
+--[[
+	The clock the game code reads.
+
+	os.clock and Workspace:GetServerTimeNow are real time unless a scenario
+	installs a virtual one, which is what lets a fire-rate or reload check run a
+	minute of play in no time and get the same answer every run. Env.useVirtualClock
+	ties both to the scheduler's clock, so a task.delay lands exactly when
+	Env.advance says it does and a module reading os.clock sees the same moment.
+]]
+local clockSource: (() -> number)? = nil
+
+function Env.now(): number
+	local source = clockSource
+	return if source then source() else os.clock()
+end
+
+function Env.useVirtualClock()
+	clockSource = function()
+		return Env.virtualTime
+	end
+end
+
+--[[
+	What Workspace:Raycast answers. There is no physics here, so by default a ray
+	hits nothing; a scenario that needs geometry installs a function taking
+	(origin, direction, params) and returning the result table or nil.
+]]
+Env.raycastHandler = nil
+
 -- Fire RunService.Heartbeat once, the way one frame of a running game would.
 function Env.stepHeartbeat(dt: number?)
 	Env.service("RunService").Heartbeat:Fire(dt or 1 / 60)
@@ -1157,7 +1186,7 @@ local function buildEnvironment(scriptHandle: any)
 		math = math,
 		table = table,
 		string = string,
-		os = { time = os.time, clock = os.clock, date = os.date },
+		os = { time = os.time, clock = Env.now, date = os.date },
 		coroutine = coroutine,
 		utf8 = utf8,
 		buffer = buffer,
@@ -1370,18 +1399,16 @@ function Env.enableClientRuntime()
 
 		roblox.implementMethod("Workspace", "Raycast", function(_self, origin, direction, params)
 			record("workspace:Raycast")
-			-- A scenario that needs a wall installs Env.raycast; without one the
-			-- world is empty, as it always was.
-			if Env.raycast then
-				return Env.raycast(origin, direction, params)
-			end
-			return nil
+			-- A scenario that needs a wall installs a handler; without one the world
+			-- is empty, as it always was. Two names because two suites grew one each.
+			local handler = Env.raycastHandler or Env.raycast
+			return if handler then handler(origin, direction, params) else nil
 		end)
 		roblox.implementMethod("Workspace", "GetPartBoundsInBox", function()
 			return {}
 		end)
 		roblox.implementMethod("Workspace", "GetServerTimeNow", function()
-			return os.clock()
+			return Env.now()
 		end)
 		-- Playback exists only in a running game. Recorded rather than silent,
 		-- so a check can still ask whether a sound was played.

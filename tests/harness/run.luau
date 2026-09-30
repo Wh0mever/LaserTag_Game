@@ -30,6 +30,8 @@ local SCENARIOS = {
 	{ name = "net", what = "the remote pipeline: who is kicked, and what a client can make the log say" },
 	{ name = "economy", what = "analytics, profiles, leaderboard and friends against strict stand-ins" },
 	{ name = "friends", what = "the friends panel lists who is online elsewhere, and says so when it cannot tell" },
+	{ name = "combat", what = "fire rate, reloads, swaps, hit resolution and who hears a shot" },
+	{ name = "weapon", what = "the client's firing loop at 30 to 240 fps, reloads and server syncs" },
 }
 
 local failed = {}

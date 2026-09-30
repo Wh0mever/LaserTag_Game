@@ -81,4 +81,30 @@ return function(t)
 	t.equal(SprayPatterns.nextIndex("Rifle", 12, resetTime - 0.01, resetTime), 13, "a short pause does not reset")
 	t.equal(SprayPatterns.nextIndex("Rifle", 30, 0.05, resetTime), 30, "index saturates at the pattern length")
 	t.equal(SprayPatterns.nextIndex("Pistol", pistolMag, 0.05, 0.5), pistolMag, "pistol index saturates too")
+
+	-- Grace, for a caller that times the gap across a network. The client passes
+	-- none and resets exactly at the reset time; the server allows for jitter so
+	-- it never restarts a burst the client still sees as unbroken.
+	local grace = 0.05
+	t.equal(
+		SprayPatterns.nextIndex("Rifle", 12, resetTime + 0.03, resetTime, grace),
+		13,
+		"a pause a hair past the reset time keeps the pattern when a grace is given"
+	)
+	t.equal(
+		SprayPatterns.nextIndex("Rifle", 12, resetTime + grace, resetTime, grace),
+		13,
+		"the grace itself still counts as unbroken"
+	)
+	t.equal(
+		SprayPatterns.nextIndex("Rifle", 12, resetTime + grace + 0.01, resetTime, grace),
+		1,
+		"a pause past reset time plus grace resets"
+	)
+	t.equal(
+		SprayPatterns.nextIndex("Rifle", 12, resetTime + 0.03, resetTime, nil),
+		1,
+		"with no grace the reset is exactly at the reset time, as the client has it"
+	)
+	t.equal(SprayPatterns.nextIndex("Rifle", 0, math.huge, resetTime, grace), 1, "a fresh magazine still starts at 1")
 end

@@ -69,4 +69,23 @@ return function(t)
 		"origin tolerance is in a sane range"
 	)
 	t.expect(WeaponConfig.HEAD_PARTS.Head == true, "the Head part counts as a headshot")
+
+	-- The swap lockout is a rule both sides enforce, so it lives here. It must be
+	-- a real pause (the raise animation is tied to it) and short enough that a
+	-- swap is a tactical option rather than a penalty.
+	t.expect(
+		type(WeaponConfig.SWITCH_TIME) == "number" and WeaponConfig.SWITCH_TIME > 0.1 and WeaponConfig.SWITCH_TIME <= 1,
+		"the weapon-swap lockout is a sane number of seconds"
+	)
+
+	-- Config the server does not read misleads whoever tunes it: a moving-spread
+	-- penalty sat here for a long time, applied by nothing, while the crosshair
+	-- and every shot ignored it. If a movement penalty is ever added it needs the
+	-- server rule and the crosshair together, not a constant on its own.
+	for key in pairs(WeaponConfig) do
+		t.expect(
+			not string.find(key, "^MOVING_"),
+			`WeaponConfig.{key} would be a moving-inaccuracy setting nothing applies`
+		)
+	end
 end

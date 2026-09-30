@@ -96,6 +96,8 @@ local SPECS = {
 	"SprayPatterns",
 	"WeaponConfig",
 	"DamageCalc",
+	"PositionHistory",
+	"MovementBudget",
 	"Balance",
 	"MatchStateMachine",
 	"Payout",
