@@ -101,9 +101,10 @@ local RELOAD_RAMP = 0.25
 local RELOAD_DIP = 0.55
 local RELOAD_PITCH = 0.5
 
--- Equip raise, in seconds. Matches WeaponClient's switch lockout so the gun is
--- on screen exactly when it becomes fireable.
-local EQUIP_TIME = 0.35
+-- Equip raise, in seconds. It is the swap lockout itself (both sides read
+-- WeaponConfig.SWITCH_TIME), so the gun is on screen exactly when it becomes
+-- fireable.
+local EQUIP_TIME = WeaponConfig.SWITCH_TIME
 local EQUIP_DROP = 0.9
 
 -- Fraction of the camera's recoil offset the gun rotates *against*. The camera

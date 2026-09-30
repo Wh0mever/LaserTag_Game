@@ -30,6 +30,7 @@ local Constants = require(Shared.Constants)
 local DamageCalc = require(script.Parent.Parent.Combat.DamageCalc)
 local DataService = require(script.Parent.DataService)
 local MatchService = require(script.Parent.MatchService)
+local PlayerService = require(script.Parent.PlayerService)
 local RemoteNames = require(Shared.RemoteNames)
 local Remotes = require(script.Parent.Parent.Net.Remotes)
 local ShootValidation = require(script.Parent.Parent.Combat.ShootValidation)
@@ -115,11 +116,17 @@ end
 ]]
 local function registerKill(killer: Player, victim: Player, weaponId: string, isHeadshot: boolean)
 	local service = getMatchService()
+	local pays = nil
 	if service and type(service.registerKill) == "function" then
-		service.registerKill(victim, killer, weaponId, isHeadshot)
+		pays = service.registerKill(victim, killer, weaponId, isHeadshot)
 	end
 
-	DataService.recordKill(killer, isHeadshot)
+	-- The match scores every kill, but stops paying for the same victim once a
+	-- pair has traded too many in one match (two accounts feeding each other).
+	-- nil means no match claimed the kill, which pays as it always did.
+	if pays ~= false then
+		DataService.recordKill(killer, isHeadshot)
+	end
 	DataService.recordDeath(victim)
 
 	-- A dead player's reload must not land during their respawn timer.
@@ -149,13 +156,14 @@ local function registerKill(killer: Player, victim: Player, weaponId: string, is
 end
 
 --[[
-	Apply one resolved hit. Returns whether it killed, and whether it was a
-	headshot, so the caller can pay for the kill without re-deriving either.
+	Apply one resolved hit. Returns whether it killed, whether it was a
+	headshot, and whether it hurt anyone at all, so the caller can pay for the
+	kill and judge the shot's intent without re-deriving any of it.
 ]]
-local function applyHit(shooter: Player, weaponId: string, shot): (boolean, boolean)
+local function applyHit(shooter: Player, weaponId: string, shot): (boolean, boolean, boolean)
 	local victim, humanoid = shot.victim, shot.humanoid
 	if not victim or not humanoid or not ShotResolver.canDamage(shooter, victim, humanoid) then
-		return false, false
+		return false, false, false
 	end
 
 	-- Measured from the server's own eye position to where the server's own ray
@@ -169,10 +177,14 @@ local function applyHit(shooter: Player, weaponId: string, shot): (boolean, bool
 	humanoid:TakeDamage(damage)
 	local killed = healthBefore > 0 and humanoid.Health <= 0
 
+	-- Remembered so a death this shot leaves unfinished (a reset, a fall) is
+	-- still credited to the player who caused it.
+	PlayerService.noteDamage(victim, shooter, weaponId)
+
 	Remotes.fireClient(RemoteNames.HitConfirmed, shooter, victim.UserId, damage, isHeadshot, shot.hitPos, killed)
 	Remotes.fireClient(RemoteNames.DamageTaken, victim, shooter.UserId, damage, shot.eye)
 
-	return killed, isHeadshot
+	return killed, isHeadshot, true
 end
 
 --[[
@@ -222,17 +234,16 @@ local function onShootRequest(player: Player, weaponId: string, seq: number, _or
 	-- a free kill even on the shot that ends it.
 	ShotResolver.clearSpawnProtection(player)
 
-	-- ...and it is proof the player is present, which is what keeps a marksman
-	-- holding a lane from being removed as idle for playing the Arc Lance the
-	-- way it was designed.
-	MatchService.markActivity(player)
-
 	local shot = ShotResolver.resolve(player, weaponId, direction, sprayIndex, nextRandom)
 	if not shot then
+		-- A round in the air is only proof the player is present if it shows
+		-- intent: a held trigger on a weighted mouse is not (see IdleTracker).
+		MatchService.markActivity(player, { damaged = false, sprayIndex = sprayIndex, direction = direction })
 		return
 	end
 
-	local killed, isHeadshot = applyHit(player, weaponId, shot)
+	local killed, isHeadshot, damaged = applyHit(player, weaponId, shot)
+	MatchService.markActivity(player, { damaged = damaged, sprayIndex = sprayIndex, direction = direction })
 
 	broadcastShot(player, weaponId, shot)
 

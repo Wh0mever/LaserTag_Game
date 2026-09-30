@@ -358,20 +358,33 @@ Env.provide("src/server/Net/Remotes", {
 
 local SkinCatalog = Env.load("src/shared/Config/SkinCatalog")
 
+-- What CombatService tells its neighbours, for the section that checks it.
+-- `killPays` is the answer the match gives to "does this kill pay": nil when no
+-- match claims it, false once a pair has traded too many.
+local told = { activity = {}, noted = {}, kills = 0, deaths = 0, killPays = nil }
+
 Env.provide("src/server/Services/DataService", {
 	getEquippedSkin = function()
 		return SkinCatalog.DEFAULT_SKIN_ID
 	end,
-	recordKill = function() end,
-	recordDeath = function() end,
+	recordKill = function()
+		told.kills += 1
+	end,
+	recordDeath = function()
+		told.deaths += 1
+	end,
 })
 
 Env.provide("src/server/Services/MatchService", {
-	markActivity = function() end,
+	markActivity = function(player, shot)
+		table.insert(told.activity, { player = player, shot = shot })
+	end,
 	isInProgress = function()
 		return true
 	end,
-	registerKill = function() end,
+	registerKill = function()
+		return told.killPays
+	end,
 })
 
 Env.provide("src/server/Services/TeamService", {
@@ -390,6 +403,9 @@ Env.provide("src/server/Services/PlayerService", {
 	end,
 	clearSpawnProtection = function(player)
 		player:SetAttribute("SpawnProtectedUntil", 0)
+	end,
+	noteDamage = function(victim, shooter, weaponId)
+		table.insert(told.noted, { victim = victim, shooter = shooter, weaponId = weaponId })
 	end,
 })
 
@@ -1114,6 +1130,94 @@ do
 		WeaponState.get(drifter, "Rifle").mag == WeaponConfig.Weapons.Rifle.magSize - 1,
 		"a character the server has not placed is shot from where it stands"
 	)
+end
+
+--------------------------------------------------------------------------------
+-- What the match is told
+--
+-- Three things the match needs from combat and cannot see for itself: who hurt
+-- whom (so a reset or a fall after a hit is still blamed on the shooter),
+-- whether a kill pays (so two accounts cannot feed each other), and what a shot
+-- showed (so a held trigger does not count as being present).
+--------------------------------------------------------------------------------
+
+heading("What the match is told")
+
+do
+	clearField()
+	Env.raycastHandler = castRay
+
+	local shooter = newPlayer("Reporter", "Dust", "A")
+	local target = newPlayer("Reported", "Dust", "B")
+	join(shooter)
+	join(target)
+	spawnPlayer(shooter, Vector3.new(0, 3, 0))
+	local _, targetHumanoid = spawnPlayer(target, Vector3.new(0, 3, -30))
+	Env.advance(5)
+	frames(0.5)
+
+	local function fresh()
+		table.clear(told.activity)
+		table.clear(told.noted)
+		told.kills, told.deaths = 0, 0
+		clearSent()
+		Env.advance(1)
+	end
+
+	-- A round into the empty air.
+	fresh()
+	shoot(shooter, "Rifle", Vector3.new(1, 0, 0))
+	local missed = told.activity[#told.activity]
+	check(missed ~= nil, "a shot that hits nothing is still reported to the match")
+	check(missed ~= nil and missed.shot ~= nil and missed.shot.damaged == false, "and reported as having hurt nobody")
+	check(
+		missed ~= nil and missed.shot ~= nil and missed.shot.sprayIndex == 1,
+		"with the place it holds in the burst, so the match can tell a burst's first round"
+	)
+	check(
+		missed ~= nil and missed.shot ~= nil and missed.shot.direction == Vector3.new(1, 0, 0),
+		"and where it was aimed, so a burst pointed the same way as the last can be recognised"
+	)
+	check(#told.noted == 0, "nobody is blamed for a round that hit nothing")
+
+	-- A hit.
+	fresh()
+	shootAt(shooter, "Rifle", Vector3.new(0, 3.2, -30))
+	local hit = told.activity[#told.activity]
+	check(
+		hit ~= nil and hit.shot ~= nil and hit.shot.damaged == true,
+		"a shot that hurts someone is reported as having done so"
+	)
+	check(#told.noted == 1, "and the hit is recorded against its victim")
+	check(
+		told.noted[1] ~= nil
+			and told.noted[1].victim == target
+			and told.noted[1].shooter == shooter
+			and told.noted[1].weaponId == "Rifle",
+		"naming who shot whom with what, so a reset a second later is the shooter's kill"
+	)
+
+	-- A kill the match is happy to pay for, and one it is not.
+	fresh()
+	told.killPays = nil
+	targetHumanoid.Health = 1
+	shootAt(shooter, "Rifle", Vector3.new(0, 3.2, -30))
+	check(told.kills == 1, "a kill nobody objects to is paid for")
+	check(told.deaths == 1, "and the death is recorded either way")
+
+	fresh()
+	told.killPays = true
+	targetHumanoid.Health = 1
+	shootAt(shooter, "Rifle", Vector3.new(0, 3.2, -30))
+	check(told.kills == 1, "a kill the match says pays is paid for")
+
+	fresh()
+	told.killPays = false
+	targetHumanoid.Health = 1
+	shootAt(shooter, "Rifle", Vector3.new(0, 3.2, -30))
+	check(told.kills == 0, "a kill the match says has been traded too often pays nothing")
+	check(told.deaths == 1, "but the victim still dies and is counted dead")
+	told.killPays = nil
 end
 
 --------------------------------------------------------------------------------
