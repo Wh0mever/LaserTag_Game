@@ -34,6 +34,7 @@
 	itself — two listeners would toggle twice and cancel out.
 ]]
 
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
@@ -394,6 +395,28 @@ function UIController.getCanvasSize(): Vector2?
 		return nil
 	end
 	return size / UIController.scale
+end
+
+--[[
+	Roblox's top bar, in the units a scaled screen lays out in.
+
+	GuiService reports it in real pixels, and every screen here ignores the inset
+	so its origin is the top of the display, under that bar. A pixel offset inside
+	a host is multiplied by the scale, so "the bar's height plus 8" written
+	straight into a Position lands the element at 0.82 x (36 + 8) = 36 real
+	pixels on a phone: the bar's own height, with the margin eaten. Dividing the
+	bar by the scale first makes the multiplication give the real figure back;
+	the margin stays in canvas units and shrinks with the rest of the UI.
+
+	Rounded up, because a UDim offset is a whole number and the engine drops the
+	fraction: rounding down would put the element a fraction of a pixel into the
+	bar it is meant to clear.
+
+	Read again whenever the viewport changes, since the bar is not the same on
+	every device or orientation.
+]]
+function UIController.getTopBarOffset(): number
+	return math.ceil(GuiService:GetGuiInset().Y / UIController.scale)
 end
 
 local function watchViewport()

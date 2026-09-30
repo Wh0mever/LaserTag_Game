@@ -388,6 +388,156 @@ if hudGui and hudHost and type(UIController.calibrate) == "function" then
 end
 
 --------------------------------------------------------------------------------
+-- Roblox's top bar is measured in real pixels
+--
+-- GuiService reports the bar in real pixels, and pixel offsets inside a host are
+-- multiplied by the scale. Added as-is, "36 + 8" landed at 0.82 x 44 = 36 real
+-- pixels on a phone: the bar's own height, so the coin chip sat under it.
+--------------------------------------------------------------------------------
+
+heading("Chrome under the top bar")
+
+local guiService = Env.service("GuiService")
+
+local function realTop(instance: any): number
+	return instance.Position.Y.Offset * UIController.scale
+end
+
+local function chromeTops(): { [string]: any }
+	local sideRoot = UIController.getScreenRoot("SideButtons")
+	local queueRoot = UIController.getScreenRoot("Queue")
+	local rootFrame = sideRoot and sideRoot:FindFirstChild("Root")
+	return {
+		coins = rootFrame and rootFrame:FindFirstChild("Coins"),
+		menu = rootFrame and rootFrame:FindFirstChild("Menu"),
+		queue = queueRoot and queueRoot:FindFirstChild("QueueChip"),
+	}
+end
+
+-- Where each sits below the bar, in the units the screen's own margins use.
+local BELOW_BAR = { coins = 8, menu = 56, queue = 8 }
+
+local function assertBelowBar(label: string)
+	local inset = guiService:GetGuiInset().Y
+	local tops = chromeTops()
+	for name, extra in BELOW_BAR do
+		local instance = tops[name]
+		check(instance ~= nil, `{label}: the {name} element exists`)
+		if instance then
+			local real = realTop(instance)
+			check(
+				real >= inset - 0.01,
+				`{label}: {name} starts at {string.format("%.1f", real)} real px, below the {inset} px bar`
+			)
+			-- A UDim offset is a whole number, so the bar's share is rounded up
+			-- by less than one canvas unit: never into the bar, never far off.
+			check(
+				near(real, inset + extra * UIController.scale, UIController.scale),
+				`{label}: {name} keeps its {extra}-unit margin under the bar ({string.format("%.1f", real)} px)`
+			)
+		end
+	end
+end
+
+assertBelowBar("phone")
+
+-- The bar can change with the viewport (rotation, a different device
+-- profile); the screens read it again when it does.
+local realGetInset = guiService.GetGuiInset
+guiService.GetGuiInset = function()
+	return roblox.Vector2.new(0, 58), roblox.Vector2.new(0, 0)
+end
+camera.ViewportSize = roblox.Vector2.new(1024, 768)
+UIController.refreshViewport()
+assertBelowBar("tablet with a 58 px bar")
+
+camera.ViewportSize = roblox.Vector2.new(640, 294)
+UIController.refreshViewport()
+assertBelowBar("phone with a 58 px bar")
+
+guiService.GetGuiInset = realGetInset
+UIController.refreshViewport()
+assertBelowBar("phone, bar back to 36")
+
+--------------------------------------------------------------------------------
+-- The touch menu row fits the screen it is on
+--
+-- On a touchscreen the five menu buttons open sideways from the hamburger, a
+-- row 1122 units long with labels. It used to shrink to icons only when the UI
+-- was being scaled down, i.e. on the smallest phones; on a tablet or any phone
+-- with a viewport past 700x360 nothing shrank it, and НАСТРОЙКИ and КОЛЕСО ran
+-- off the right edge with no other way to reach them on a touchscreen.
+--------------------------------------------------------------------------------
+
+heading("The menu row on touch screens")
+
+local SideButtons = Env.load("src/client/UI/Screens/SideButtonsScreen")
+
+local function menuRow(): (any, any, any)
+	local rootFrame = UIController.getScreenRoot("SideButtons"):FindFirstChild("Root")
+	local menu = rootFrame:FindFirstChild("Menu")
+	return menu, menu:FindFirstChild("MenuToggle"), menu:FindFirstChild("Buttons")
+end
+
+-- Right edge of the row in canvas units, from the sizes the screen declared:
+-- Lune lays nothing out, and these are what the engine would be given.
+local function rowRightEdge(): number
+	local menu, toggle, list = menuRow()
+	local gap = menu:FindFirstChildOfClass("UIListLayout").Padding.Offset
+	return menu.Position.X.Offset + toggle.Size.X.Offset + gap + list.Size.X.Offset
+end
+
+local function labelOf(name: string): string
+	local _, _, list = menuRow()
+	return list:FindFirstChild(name).Content.Label.Text
+end
+
+SideButtons.setExpanded(true)
+
+for _, viewport in
+	{
+		{ 640, 294, "the owner's phone" },
+		{ 844, 390, "a 844x390 phone" },
+		{ 852, 393, "a 852x393 phone" },
+		{ 1024, 768, "a 1024x768 tablet" },
+		{ 1100, 820, "a 1100x820 tablet" },
+		{ 1280, 800, "a 1280x800 tablet" },
+		{ 1920, 1080, "a large touch monitor" },
+	}
+do
+	camera.ViewportSize = roblox.Vector2.new(viewport[1], viewport[2])
+	UIController.refreshViewport()
+
+	local canvas = viewport[1] / UIController.scale
+	local right = rowRightEdge()
+	check(
+		right <= canvas,
+		`{viewport[3]}: the menu row ends at {right}, inside the {string.format("%.0f", canvas)} unit canvas`
+	)
+
+	-- Whichever way it fits, all five buttons are still there and pressable.
+	local _, _, list = menuRow()
+	for _, name in { "Equip", "Shop", "Friends", "Spin", "Settings" } do
+		check(list:FindFirstChild(name) ~= nil, `{viewport[3]}: the {name} button exists`)
+	end
+end
+
+-- Compact where the labels do not fit, labelled where they do: a large screen
+-- keeps the words rather than five bare glyphs.
+camera.ViewportSize = roblox.Vector2.new(1024, 768)
+UIController.refreshViewport()
+check(labelOf("Settings") == "", "a 1024 tablet cannot fit the labelled row, so the labels go")
+camera.ViewportSize = roblox.Vector2.new(1280, 800)
+UIController.refreshViewport()
+check(labelOf("Settings") == "НАСТРОЙКИ", "a 1280 tablet has room for the words")
+camera.ViewportSize = roblox.Vector2.new(852, 393)
+UIController.refreshViewport()
+check(labelOf("Settings") == "", "a phone that is not scaled down is compact all the same")
+camera.ViewportSize = roblox.Vector2.new(640, 294)
+UIController.refreshViewport()
+check(labelOf("Settings") == "", "the owner's phone is compact")
+
+--------------------------------------------------------------------------------
 -- Result
 --------------------------------------------------------------------------------
 

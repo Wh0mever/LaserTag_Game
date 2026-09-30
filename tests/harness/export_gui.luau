@@ -12,7 +12,7 @@
 	real modules construct, at the viewport the real device reports.
 
 	Run:  lune run tests/harness/export_gui <device> <scenario> [menu] > gui.json
-	      device:   phone | tablet | desktop
+	      device:   phone | widephone | tablet | widetablet | desktop
 	      scenario: hub | queue | match | dead | results
 	      menu:     optional menu name to open (Shop, Equip, Spin, Friends,
 	                Settings, Welcome, Side)
@@ -32,7 +32,13 @@ local menu = process.args[3]
 local VIEWPORTS = {
 	-- What a landscape phone's Roblox viewport reports, NOT its pixel count.
 	phone = { 640, 294 },
+	-- A current phone on its side (852x393 is an iPhone Pro Max): tall enough
+	-- and wide enough that no UIScale applies, which is exactly the size the
+	-- phone layouts were never drawn at.
+	widephone = { 852, 393 },
 	tablet = { 1024, 768 },
+	-- A large tablet, or a touchscreen with room to spare.
+	widetablet = { 1280, 800 },
 	desktop = { 1920, 1080 },
 }
 local viewport = VIEWPORTS[device] or VIEWPORTS.phone

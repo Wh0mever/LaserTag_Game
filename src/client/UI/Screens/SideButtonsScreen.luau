@@ -10,9 +10,11 @@
 	click and a menu opened by a keypress go through the same exclusivity rules.
 
 	On a small screen the labels are dropped and the buttons collapse to their
-	icons. The trigger is UIController.ScaleChanged, which already fires when the
-	screen becomes small enough to shrink the UI — a second viewport watcher
-	here could only disagree with it.
+	icons. A screen that is being scaled down is small by definition; on a
+	touchscreen the row also has to FIT, and a tablet or a phone past 700x360 is
+	not scaled at all yet still cannot hold six labelled buttons across (the row
+	is over a thousand units long). So the decision is wantsCompact, asked of
+	the canvas the screen lays out in, and asked again on every resize.
 
 	THE STACK FOLDS AWAY. Five buttons down the left edge is a reasonable amount
 	of chrome on a monitor and half the screen on a phone, where it sat over the
@@ -25,7 +27,6 @@
 	costs a keyboard player nothing.
 ]]
 
-local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
@@ -85,6 +86,41 @@ local compact: boolean? = nil
 --------------------------------------------------------------------------------
 -- Layout
 --------------------------------------------------------------------------------
+
+-- Kept clear on both sides of the touch row.
+local ROW_MARGIN = 16
+
+--[[
+	Whether the buttons drop their labels. Pure over its arguments, so the
+	harness can ask it at any size.
+
+	A scaled-down screen is always compact. On a touchscreen the row also goes
+	compact whenever the labelled row (the toggle and the five buttons side by
+	side, with the margin at both ends) is wider than the canvas: 1138 units,
+	which a scale of 1 leaves only to a screen 1138 wide. On a mouse-and-keyboard
+	machine the stack runs down the edge rather than across, so it does not need
+	to fit anything.
+]]
+function SideButtonsScreen.wantsCompact(canvasWidth: number, scale: number, touch: boolean): boolean
+	if scale < 1 then
+		return true
+	end
+	if not touch then
+		return false
+	end
+
+	local across = ROW_MARGIN * 2 + (#MENUS + 1) * BUTTON_WIDTH + #MENUS * BUTTON_GAP
+	return across > canvasWidth
+end
+
+local function wantsCompactNow(): boolean
+	local canvas = UIController.getCanvasSize()
+	return SideButtonsScreen.wantsCompact(
+		if canvas then canvas.X else math.huge,
+		UIController.scale,
+		ClientState.isTouch
+	)
+end
 
 --[[
 	Shows or hides the stack. The panel sizes itself from its children, so a
@@ -207,10 +243,26 @@ end
 	top of the display and Roblox's top bar is drawn over the first ~36 pixels
 	of it. Anything placed at a small y is not merely cramped, it is invisible —
 	which is exactly what happened to the coin counter.
+
+	The bar is in real pixels and this screen is scaled, so it goes through
+	UIController.getTopBarOffset rather than being added as it stands; see there.
 ]]
 local function topLeftBelowRobloxBar(extraY: number): UDim2
-	local inset = GuiService:GetGuiInset()
-	return UDim2.new(0, 16, 0, inset.Y + extraY)
+	return UDim2.new(0, 16, 0, UIController.getTopBarOffset() + extraY)
+end
+
+-- Where the coin chip and the touch menu row sit, again: the bar's share of
+-- the canvas changes with the scale, and the bar itself with the device.
+local COINS_BELOW_BAR = 8
+local MENU_BELOW_BAR = 56
+
+local function placeBelowBar()
+	if coins then
+		coins.instance.Position = topLeftBelowRobloxBar(COINS_BELOW_BAR)
+	end
+	if panel and ClientState.isTouch then
+		panel.Position = topLeftBelowRobloxBar(MENU_BELOW_BAR)
+	end
 end
 
 local function buildStack(parent: Instance)
@@ -219,7 +271,7 @@ local function buildStack(parent: Instance)
 	local holder = Instance.new("Frame")
 	holder.Name = "Menu"
 	holder.AnchorPoint = if ClientState.isTouch then Vector2.new(0, 0) else Vector2.new(0, 0.5)
-	holder.Position = if ClientState.isTouch then topLeftBelowRobloxBar(56) else UDim2.new(0, 16, 0.5, 0)
+	holder.Position = if ClientState.isTouch then topLeftBelowRobloxBar(MENU_BELOW_BAR) else UDim2.new(0, 16, 0.5, 0)
 	holder.Size = UDim2.fromOffset(BUTTON_WIDTH, 0)
 	holder.AutomaticSize = if ClientState.isTouch then Enum.AutomaticSize.XY else Enum.AutomaticSize.Y
 	holder.BackgroundTransparency = 1
@@ -336,7 +388,7 @@ function SideButtonsScreen.init()
 	coins = CurrencyLabel.create({
 		name = "Coins",
 		parent = root,
-		position = topLeftBelowRobloxBar(8),
+		position = topLeftBelowRobloxBar(COINS_BELOW_BAR),
 		anchorPoint = Vector2.new(0, 0),
 		value = ClientState.coins,
 	})
@@ -363,9 +415,16 @@ function SideButtonsScreen.init()
 	end))
 
 	trove:Add(InputController.MouseUnlockToggled:Connect(refreshMouseHint))
-	trove:Add(UIController.ScaleChanged:Connect(function(scale: number)
-		applyCompact(scale < 1)
-	end))
+	-- A resize can change the scale, the room left for the row, or the bar
+	-- above it, and either signal can come without the other: the scale alone
+	-- when the camera is replaced, the viewport alone when the scale rounds to
+	-- the same value.
+	local function reflow()
+		applyCompact(wantsCompactNow())
+		placeBelowBar()
+	end
+	trove:Add(UIController.ScaleChanged:Connect(reflow))
+	trove:Add(UIController.ViewportChanged:Connect(reflow))
 
 	-- On a touchscreen, opening a menu folds the row away again. It opened it
 	-- to get somewhere; left open, it stays in the top-left for the rest of
@@ -377,7 +436,7 @@ function SideButtonsScreen.init()
 	end))
 
 	refreshMouseHint(InputController.isMouseUnlocked())
-	applyCompact(UIController.scale < 1)
+	applyCompact(wantsCompactNow())
 	setExpanded(not ClientState.isTouch)
 end
 
