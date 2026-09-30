@@ -38,7 +38,9 @@ local FUNNEL_NAME = "MatchFunnel"
 local PROGRESSION_LEVEL = 1
 local PROGRESSION_LEVEL_NAME = "Match"
 
-local available = true
+-- Methods that threw or do not exist. Per method, not per service: one call
+-- site with a bad signature must not silence the events that work.
+local disabledMethods: { [string]: boolean } = {}
 local matchSessions: { [Player]: { id: string, mapId: string, kills: number, startedAt: number } } = {}
 
 --------------------------------------------------------------------------------
@@ -48,26 +50,28 @@ local matchSessions: { [Player]: { id: string, mapId: string, kills: number, sta
 --[[
 	Call an AnalyticsService method, swallowing anything it throws.
 
-	After the first failure the whole service is switched off for the rest of the
-	server's life: if it is unavailable it will stay unavailable, and retrying
-	every event would turn one broken dependency into a warning per kill.
+	After a method's first failure that method is switched off for the rest of
+	the server's life: if it is unavailable it will stay unavailable, and
+	retrying every event would turn one broken call into a warning per kill. The
+	other methods keep reporting, since a bad signature in one place says nothing
+	about the rest.
 ]]
 local function report(methodName: string, ...): boolean
-	if not available then
+	if disabledMethods[methodName] then
 		return false
 	end
 
 	local method = (RobloxAnalytics :: any)[methodName]
 	if type(method) ~= "function" then
-		available = false
-		warn(`[Analytics] AnalyticsService has no {methodName}; analytics disabled for this server`)
+		disabledMethods[methodName] = true
+		warn(`[Analytics] AnalyticsService has no {methodName}; it is disabled for this server`)
 		return false
 	end
 
 	local ok, err = pcall(method, RobloxAnalytics, ...)
 	if not ok then
-		available = false
-		warn(`[Analytics] {methodName} failed, analytics disabled for this server: {err}`)
+		disabledMethods[methodName] = true
+		warn(`[Analytics] {methodName} failed, it is disabled for this server: {err}`)
 	end
 	return ok
 end
@@ -216,8 +220,9 @@ function AnalyticsService.cleanupPlayer(player: Player)
 	matchSessions[player] = nil
 end
 
+-- True while every method is still working; false once any has been switched off.
 function AnalyticsService.isAvailable(): boolean
-	return available
+	return next(disabledMethods) == nil
 end
 
 function AnalyticsService.init()
