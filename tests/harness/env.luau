@@ -1327,6 +1327,15 @@ function Env.service(name: string)
 end
 
 --[[
+	Swap a service for one a scenario built itself, before any module that reads
+	it is loaded (modules keep the table they were handed). For code that parents
+	real Instances to a Player, which a table cannot be.
+]]
+function Env.setService(name: string, value: any)
+	services[name] = value
+end
+
+--[[
 	Which device the sandbox pretends to be. Desktop by default, so every
 	scenario written before this existed keeps the machine it was written for.
 

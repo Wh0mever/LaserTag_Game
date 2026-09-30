@@ -17,8 +17,6 @@
 local Env = require("./env")
 local roblox = require("@lune/roblox")
 
-Env.enableClientRuntime()
-
 local passed, failed = 0, 0
 local failures: { string } = {}
 
@@ -38,6 +36,73 @@ local function heading(text: string)
 end
 
 local Enum = roblox.Enum
+
+--------------------------------------------------------------------------------
+-- Real players
+--
+-- DataService parents a leaderstats folder to the player, and only an Instance
+-- can be a parent, so a table will not do. Lune's Player and Players classes
+-- carry no behaviour of their own; the members these services use are added
+-- here, once, and recorded so a check can read them back.
+--------------------------------------------------------------------------------
+
+local players = roblox.Instance.new("Players")
+players.Name = "Players"
+Env.setService("Players", players)
+
+roblox.implementMethod("Players", "GetPlayers", function(self)
+	local roster = {}
+	for _, child in self:GetChildren() do
+		if child.ClassName == "Player" then
+			table.insert(roster, child)
+		end
+	end
+	return roster
+end)
+
+local userNames: { [number]: string } = {}
+roblox.implementMethod("Players", "GetNameFromUserIdAsync", function(_self, userId)
+	local name = userNames[userId]
+	if not name then
+		error(`HTTP 404 (no user {userId})`, 2)
+	end
+	return name
+end)
+
+for _, eventName in { "PlayerAdded", "PlayerRemoving" } do
+	roblox.implementProperty("Players", eventName, function(self)
+		return Env.instanceEvent(self, eventName)
+	end)
+end
+
+local kicks: { [any]: string } = {}
+roblox.implementMethod("Player", "Kick", function(self, message)
+	kicks[self] = message or ""
+end)
+
+local friendships: { [number]: { [number]: boolean } } = {}
+roblox.implementMethod("Player", "IsFriendsWith", function(self, userId)
+	local mine = friendships[self.UserId]
+	return mine ~= nil and mine[userId] == true
+end)
+
+local nextUserId = 5000
+local function fakePlayer(name: string)
+	nextUserId += 1
+	local player = roblox.Instance.new("Player")
+	player.Name = name
+	player.DisplayName = name
+	player.UserId = nextUserId
+	player.Parent = players
+	userNames[nextUserId] = name
+	return player
+end
+
+-- The way a player leaves: the event fires while they are still in the game.
+local function leave(player)
+	players.PlayerRemoving:Fire(player)
+	player.Parent = nil
+end
 
 --------------------------------------------------------------------------------
 -- A strict AnalyticsService
@@ -82,7 +147,7 @@ local function expectEnum(method: string, position: number, value: any, enumType
 end
 
 local function expectPlayer(method: string, value: any)
-	if type(value) ~= "table" or type(value.UserId) ~= "number" then
+	if type(value) ~= "userdata" or value.ClassName ~= "Player" then
 		argError(method, 1, "a Player", value)
 	end
 end
@@ -177,27 +242,6 @@ local function loggedCalls(method: string)
 	return out
 end
 
-local nextUserId = 5000
-local function fakePlayer(name: string)
-	nextUserId += 1
-	local attributes = {}
-	return {
-		Name = name,
-		DisplayName = name,
-		UserId = nextUserId,
-		Parent = Env.service("Players"),
-		GetAttribute = function(_self, key)
-			return attributes[key]
-		end,
-		SetAttribute = function(_self, key, value)
-			attributes[key] = value
-		end,
-		IsDescendantOf = function(self, ancestor)
-			return self.Parent == ancestor
-		end,
-	}
-end
-
 --------------------------------------------------------------------------------
 -- Analytics
 --------------------------------------------------------------------------------
@@ -254,6 +298,152 @@ do
 
 	local spin = loggedCalls("LogCustomEvent")[1]
 	check(spin ~= nil and spin.args[4] ~= nil, "a spin carries its breakdown fields")
+end
+
+--------------------------------------------------------------------------------
+-- Profiles
+--
+-- ProfileService is third-party and talks to DataStores; what is under test is
+-- DataService's own handling of the lifecycle around it. The stand-in profile
+-- keeps ProfileService's one important timing: Release() returns at once and
+-- the release listeners fire later, once the final save has finished.
+--------------------------------------------------------------------------------
+
+heading("Profiles")
+
+local function deepCopy(value)
+	if type(value) ~= "table" then
+		return value
+	end
+	local copy = {}
+	for key, entry in value do
+		copy[key] = deepCopy(entry)
+	end
+	return copy
+end
+
+local pendingReleases: { any } = {}
+local loadedProfiles: { [string]: any } = {}
+local onLoad: any = nil
+local failLoads = false
+
+local function endSession(profile)
+	if not profile.active then
+		return
+	end
+	profile.active = false
+	for _, listener in profile.listeners do
+		listener()
+	end
+end
+
+local function finishReleases()
+	local queue = pendingReleases
+	pendingReleases = {}
+	for _, profile in queue do
+		endSession(profile)
+	end
+end
+
+Env.provide("src/server/Vendor/ProfileService", {
+	GetProfileStore = function(_name, template)
+		return {
+			LoadProfileAsync = function(_self, key)
+				if failLoads then
+					error("HTTP 429 (too many requests)", 2)
+				end
+				local profile = { Data = deepCopy(template), active = true, listeners = {} }
+				function profile:AddUserId() end
+				function profile:Reconcile() end
+				function profile:IsActive()
+					return self.active
+				end
+				function profile:ListenToRelease(listener)
+					table.insert(self.listeners, listener)
+				end
+				function profile:Release()
+					if self.active then
+						table.insert(pendingReleases, self)
+					end
+				end
+				loadedProfiles[key] = profile
+				if onLoad then
+					onLoad(key)
+				end
+				return profile
+			end,
+		}
+	end,
+})
+
+local remoteHandlers: { [string]: any } = {}
+
+Env.provide("src/server/Net/Remotes", {
+	register = function(config)
+		remoteHandlers[config.Name] = config
+	end,
+	fireClient = function() end,
+})
+
+local DataService = Env.load("src/server/Services/DataService")
+DataService.init()
+
+local function profileOf(player)
+	return loadedProfiles["Player_" .. player.UserId]
+end
+
+do
+	local player = fakePlayer("shutdown")
+	DataService.loadPlayer(player)
+	check(DataService.isLoaded(player), "a player's profile loads")
+
+	DataService.releaseAll()
+	finishReleases()
+	check(not DataService.isLoaded(player), "shutdown releases the profile")
+	check(
+		kicks[player] == nil,
+		`shutdown does not tell the player their data was opened elsewhere (got "{tostring(kicks[player])}")`
+	)
+end
+
+do
+	local player = fakePlayer("leaver")
+	DataService.loadPlayer(player)
+	leave(player)
+	DataService.releasePlayer(player)
+	finishReleases()
+	check(kicks[player] == nil, "a player who leaves is not kicked by their own release")
+	check(player:GetAttribute("Loaded") == false, "and is marked as no longer loaded")
+end
+
+do
+	local player = fakePlayer("stolen")
+	DataService.loadPlayer(player)
+	check(DataService.isLoaded(player), "the session-lock case starts loaded")
+
+	-- Another server force-loaded this profile: nothing here asked for the
+	-- release, and continuing to play would edit data that is no longer ours.
+	endSession(profileOf(player))
+	check(not DataService.isLoaded(player), "a profile taken by another server stops being writable here")
+	check(player:GetAttribute("Loaded") == false, "and the player is marked as not loaded")
+	check(
+		type(kicks[player]) == "string" and kicks[player]:find("другом сервере") ~= nil,
+		`and they are told why they were removed (got "{tostring(kicks[player])}")`
+	)
+end
+
+do
+	local player = fakePlayer("quitter")
+	onLoad = function(_key)
+		-- The player disconnects while the profile is still being fetched.
+		player.Parent = nil
+	end
+	DataService.loadPlayer(player)
+	onLoad = nil
+	finishReleases()
+	check(not DataService.isLoaded(player), "a player who left during the load never becomes loaded")
+	check(kicks[player] == nil, "and the release of their unused profile does not kick anyone")
+	check(profileOf(player) ~= nil and not profileOf(player).active, "and the session lock is not left behind")
 end
 
 check(#Env.spawnErrors == 0, `no background thread died: {table.concat(Env.spawnErrors, " | ")}`)

@@ -354,6 +354,15 @@ function DataService.loadPlayer(player: Player)
 	profile:Reconcile()
 
 	profile:ListenToRelease(function()
+		-- Every release this server asks for (the player leaving, server shutdown,
+		-- a load abandoned below) has already dropped the profile from `profiles`
+		-- and marked the player unloaded before it fires. Only a release nobody
+		-- here asked for is a lost session lock; telling players at shutdown that
+		-- their data was opened on another server would just be wrong.
+		if profiles[player] ~= profile then
+			return
+		end
+
 		profiles[player] = nil
 		player:SetAttribute("Loaded", false)
 		player:Kick(RELEASED_MESSAGE)
