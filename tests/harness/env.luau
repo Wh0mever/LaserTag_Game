@@ -1133,6 +1133,93 @@ local function buildEnvironment(scriptHandle: any)
 	return env
 end
 
+--------------------------------------------------------------------------------
+-- Property writes the engine would refuse
+--
+-- Lune backs every Instance with Roblox's class database, and it accepts a
+-- write to any property that exists in it. The engine does not: a property
+-- whose Scriptability is "None" or "Read" (Lighting.Technology is the one that
+-- bit this game) throws when a script sets it. The mock cannot see that from
+-- the inside, because the write happens on an opaque userdata, so it is caught
+-- here instead: every module is read for assignments to a variable whose class
+-- is spelled out on its own declaration (`game:GetService("X")` or
+-- `Instance.new("X")`), and each one is looked up in the reflection database.
+--
+-- This is deliberately a scan of what the source says, not a full type
+-- checker: a variable of unknown class is never flagged, so it can miss a
+-- write but cannot invent one.
+--------------------------------------------------------------------------------
+
+local reflection = roblox.getReflectionDatabase()
+
+local function scriptabilityOf(className: string, property: string): string?
+	local class = reflection:GetClass(className)
+	while class do
+		local found = class.Properties[property]
+		if found then
+			return tostring(found.Scriptability)
+		end
+		class = if class.Superclass then reflection:GetClass(class.Superclass) else nil
+	end
+	return nil
+end
+
+--[[
+	Returns one message per assignment in `source` to a property a script may
+	not write. `path` only labels the messages.
+]]
+function Env.unwritableAssignments(path: string, source: string): { string }
+	local problems = {}
+	local classOf: { [string]: string } = {}
+	local inBlockComment = false
+
+	for lineNumber, line in string.split(source, "\n") do
+		local text = line
+		if inBlockComment then
+			if string.find(text, "]]", 1, true) then
+				inBlockComment = false
+			end
+			text = ""
+		elseif string.find(text, "--[[", 1, true) then
+			inBlockComment = not string.find(text, "]]", 1, true)
+			text = ""
+		end
+		text = string.gsub(text, "%-%-.*$", "")
+
+		local declared, service = string.match(text, 'local%s+([%a_][%w_]*)%s*=%s*game:GetService%("(%w+)"%)')
+		if declared then
+			classOf[declared] = service
+		end
+		local made, className = string.match(text, 'local%s+([%a_][%w_]*)[%w_:%s]-=%s*Instance%.new%("(%w+)"')
+		if made then
+			classOf[made] = className
+		end
+
+		local from = 1
+		while true do
+			local first, last, object, property = string.find(text, "([%a_][%w_]*)%.([%a_][%w_]*)%s*=[^=]", from)
+			if not first then
+				break
+			end
+			from = last
+			-- `a.b.c = 1` writes c on a.b, not b on a; and `x:y.z` is not a field.
+			local before = if first > 1 then string.sub(text, first - 1, first - 1) else ""
+			local owner = classOf[object]
+			if owner and before ~= "." and before ~= ":" then
+				local scriptability = scriptabilityOf(owner, property)
+				if scriptability == "None" or scriptability == "Read" then
+					table.insert(
+						problems,
+						`{path}:{lineNumber}: {owner}.{property} has Scriptability "{scriptability}" and throws when written`
+					)
+				end
+			end
+		end
+	end
+
+	return problems
+end
+
 --[[
 	require() for a module handle. Results are cached, matching Roblox's
 	one-instance-one-result behaviour, which several modules rely on for state.
@@ -1152,6 +1239,13 @@ function Env.requireHandle(target: any): any
 	moduleResults[file] = false
 
 	local source = fs.readFile(file)
+	if not string.find(file, "/Vendor/", 1, true) then
+		local problems = Env.unwritableAssignments(file, source)
+		if #problems > 0 then
+			moduleResults[file] = nil
+			error(`[harness] {table.concat(problems, "; ")}`, 0)
+		end
+	end
 	local chunk = luau.load(source, {
 		debugName = file,
 		environment = buildEnvironment(target),

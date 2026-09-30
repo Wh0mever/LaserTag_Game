@@ -91,10 +91,22 @@ add({
 	color = "Floor",
 })
 
+-- Tiled inlay on the arena floor only. It stops at the spawn rooms (x = +-59)
+-- and at the green rooms (z = +-33), so a room keeps its own floor colour; the
+-- strips between the green rooms carry it out to z = +-48. Laid as pieces that
+-- touch rather than overlap, because two coplanar tops would z-fight.
 add({
 	kind = "block",
 	pos = { x = 0, y = 0.2, z = 0 },
-	size = { x = 120, y = 0.4, z = 96 },
+	size = { x = 118, y = 0.4, z = 66 },
+	color = "FloorTile",
+	canCollide = false,
+})
+
+mirror({
+	kind = "block",
+	pos = { x = 0, y = 0.2, z = 40.5 },
+	size = { x = 32, y = 0.4, z = 15 },
 	color = "FloorTile",
 	canCollide = false,
 })
@@ -240,16 +252,18 @@ add({
 	color = "Neon",
 })
 
--- Ramps onto the middle; the +11 degree tilt raises the +x end and mirror()
+-- Ramps onto the middle; the +13.3 degree tilt raises the +x end and mirror()
 -- negates it for the far side. The centre height is chosen so the high end
--- lands level with the 6-stud platform and the low end meets the floor:
--- y + (length/2)*sin(t) + (thickness/2)*cos(t) == 6.
+-- lands level with the 6-stud platform:
+-- y + (length/2)*sin(t) + (thickness/2)*cos(t) == 6,
+-- and the tilt so the low end meets the floor: length*sin(t) == 6. (11 degrees
+-- satisfied the first and left a one-stud lip at the bottom.)
 mirror({
 	kind = "ramp",
-	pos = { x = -30, y = 2.4, z = 0 },
+	pos = { x = -29.85, y = 1.94, z = 0 },
 	size = { x = 26, y = 2.2, z = 24 },
 	color = "WallDeep",
-	rotation = { x = 0, y = 0, z = 11 },
+	rotation = { x = 0, y = 0, z = 13.3 },
 })
 
 -- Corridor walls ----------------------------------------------------------

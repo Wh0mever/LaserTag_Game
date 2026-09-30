@@ -82,11 +82,15 @@ end
 -- tied by an assertion in tests/MapDefs.spec.luau rather than by a require.
 add({
 	kind = "sign",
-	pos = { x = 0, y = 17.5, z = -20 },
+	pos = { x = 0, y = 23.5, z = -20 },
 	size = { x = 36, y = 9, z = 1.2 },
 	facing = "+z",
-	-- Posts reach the ground: 17.5 - 4.5 - 13 = 0.
-	postHeight = 13,
+	-- Posts reach the ground: 23.5 - 4.5 - 19 = 0. The sign is this high so it
+	-- clears the line of sight from the landing area to the middle portal's
+	-- name and to the leaderboard behind it: hung at head-and-a-bit height, as
+	-- it first was, it stood squarely in front of both and hid two thirds of
+	-- the one and most of the other. tests/harness/world.luau measures it.
+	postHeight = 19,
 	lines = { "SKILLANDIA", "LASERTAG" },
 })
 
@@ -116,12 +120,15 @@ add({
 	padSize = { x = 20, y = 1.2, z = 20 },
 })
 
--- Top Kills board, mounted flat against the north wall facing the plaza.
+-- Top Kills board, mounted flat against the north wall facing the plaza. It
+-- stands in the gap between the Dust and Mirage portals rather than on the
+-- centre line: every portal is a 29-stud-wide frame, and the one at x = 0 hides
+-- all but a sliver of a wall-wide board behind it from anywhere in the lobby.
 add({
 	kind = "board",
 	boardId = "TopKills",
-	pos = { x = 0, y = 17, z = -94 },
-	size = { x = 56, y = 28, z = 1.6 },
+	pos = { x = -36, y = 17, z = -94 },
+	size = { x = 26, y = 28, z = 1.6 },
 	facing = "+z",
 	title = "ЛУЧШИЕ СТРЕЛКИ",
 })
@@ -172,8 +179,11 @@ add({
 
 -- Scenery ----------------------------------------------------------------
 
--- Planters: an orange Lego box with a studded hedge sitting in it.
-for _, spot in { { x = -66, z = -66 }, { x = 66, z = -66 }, { x = -66, z = 66 }, { x = 66, z = 66 } } do
+-- Planters: an orange Lego box with a studded hedge sitting in it. The two on
+-- the portal side stand beside the plaza rather than in its north corners, where
+-- the Dust and Nexus portals (which are yawed toward the centre, so their frames
+-- reach well behind the pads) used to be built through them.
+for _, spot in { { x = -76, z = 4 }, { x = 76, z = 4 }, { x = -66, z = 66 }, { x = 66, z = 66 } } do
 	add({
 		kind = "block",
 		pos = { x = spot.x, y = 3, z = spot.z },
@@ -189,12 +199,13 @@ for _, spot in { { x = -66, z = -66 }, { x = 66, z = -66 }, { x = -66, z = 66 },
 	})
 end
 
--- Low decorative walls flanking the portal approach.
+-- Low decorative walls flanking the portal approach, far enough out to clear the
+-- outer portals' frames.
 for _, sign in { -1, 1 } do
 	add({
 		kind = "wall",
 		from = { x = sign * 20, z = -20 },
-		to = { x = sign * 74, z = -20 },
+		to = { x = sign * 84, z = -20 },
 		height = 7,
 		thickness = 4,
 		color = "Wall",
@@ -203,8 +214,8 @@ for _, sign in { -1, 1 } do
 	})
 	add({
 		kind = "wall",
-		from = { x = sign * 74, z = -20 },
-		to = { x = sign * 74, z = -46 },
+		from = { x = sign * 84, z = -20 },
+		to = { x = sign * 84, z = -46 },
 		height = 7,
 		thickness = 4,
 		color = "Wall",

@@ -53,7 +53,10 @@ end
 	Applies the global lighting rig. Idempotent.
 ]]
 function LightingSetup.apply()
-	Lighting.Technology = Enum.Technology.Future
+	-- Lighting.Technology is not set here: it is not scriptable, so assigning it
+	-- throws and would take the whole rig down with it. default.project.json
+	-- already sets it to Future for the place.
+	--
 	-- Ambient, OutdoorAmbient and EnvironmentDiffuseScale all add sky light and
 	-- Future stacks them rather than choosing between them, so a value that
 	-- looks moderate in isolation is paid for three times over.

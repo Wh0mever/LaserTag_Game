@@ -30,6 +30,12 @@ local TILE_GAP = 2.4
 local DOOR_HEIGHT = 14
 local DOOR_PANEL_THICKNESS = 0.8
 
+-- A room floor is laid on the arena floor it stands on. Left exactly level, the
+-- two faces are the same plane and the GPU alternates between them pixel by
+-- pixel. A tenth of a stud settles which one wins for good, and is far below the
+-- step a Humanoid walks over without noticing.
+local ROOM_FLOOR_LIFT = 0.1
+
 -- HumanoidRootPart sits roughly 3 studs above the floor; the extra half stud
 -- stops a spawning character from clipping into the pad it lands on.
 local SPAWN_HEIGHT = 3.5
@@ -291,7 +297,10 @@ local function buildSide(ctx, spec, side: string): (CFrame?, Vector3?)
 		local halfWidth = math.max(math.min(doorWidth, geom.length - 8), 4) * 0.5
 		segment(-half, -halfWidth)
 		segment(halfWidth, half)
-		segment(-halfWidth, halfWidth, { baseY = baseY + doorHeight, height = height - doorHeight, neonStripY = nil })
+		-- `false`, not nil: a nil override is simply absent from the table, so the
+		-- lintel would inherit the room's strip height and emit it relative to the
+		-- lintel's own baseY, leaving the bar floating above the roof.
+		segment(-halfWidth, halfWidth, { baseY = baseY + doorHeight, height = height - doorHeight, neonStripY = false })
 		emitDoorFrame(ctx, spec, geom, halfWidth, baseY, doorHeight)
 
 		local doorPos = worldVec(ctx, geom.cx, baseY + doorHeight * 0.5, geom.cz)
@@ -511,7 +520,7 @@ local function roomShell(ctx, element, doors)
 		makePart(ctx, {
 			name = "RoomFloor",
 			size = Vector3.new(element.size.x, 2, element.size.z),
-			cframe = CFrame.new(worldVec(ctx, element.center.x, baseY - 1, element.center.z)),
+			cframe = CFrame.new(worldVec(ctx, element.center.x, baseY - 1 + ROOM_FLOOR_LIFT, element.center.z)),
 			color = resolveColor(ctx, element.floorColor or element.color),
 		})
 	end

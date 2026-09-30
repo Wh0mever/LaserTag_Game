@@ -256,8 +256,8 @@ local cover = {
 	{ pos = { x = -64, y = 3, z = -66 }, size = { x = 14, y = 6, z = 14 }, color = "Crate", studs = true },
 	{ pos = { x = -50, y = 4, z = -78 }, size = { x = 16, y = 8, z = 12 }, color = "CrateDark" },
 	-- North lane, outside the site.
-	{ pos = { x = -28, y = 2.5, z = -46 }, size = { x = 12, y = 5, z = 20 }, color = "Crate" },
-	{ pos = { x = -18, y = 3, z = -68 }, size = { x = 12, y = 6, z = 12 }, color = "CrateDark", studs = true },
+	{ pos = { x = -28, y = 2.5, z = -44 }, size = { x = 12, y = 5, z = 20 }, color = "Crate" },
+	{ pos = { x = -8, y = 3, z = -68 }, size = { x = 12, y = 6, z = 12 }, color = "CrateDark", studs = true },
 	{ pos = { x = 6, y = 5, z = -48 }, size = { x = 10, y = 10, z = 22 }, color = "WallDark" },
 	-- Mid lane, approach to the plateau. Kept clear of z = 0 so it never stands
 	-- in the spawn doorway.
@@ -279,7 +279,10 @@ for _, block in cover do
 end
 
 -- Sandbag ridges: too tall to jump (a Roblox character clears about 6.4 studs),
--- so they read as hard cover rather than as a step.
+-- so they read as hard cover rather than as a step. That only holds while no
+-- crate is close enough to jump from: one crate against the first ridge, and
+-- another six studs from its end, made it a stair to the top. The cover above
+-- keeps out of a running jump's reach; tests/harness/world.luau measures it.
 mirror({
 	kind = "wall",
 	from = { x = -26, z = -84 },
