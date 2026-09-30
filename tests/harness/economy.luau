@@ -302,6 +302,31 @@ do
 	check(spin ~= nil and spin.args[4] ~= nil, "a spin carries its breakdown fields")
 end
 
+-- One method failing must not silence the others: a bad signature in one call
+-- site used to switch the whole service off for the rest of the server's life.
+do
+	local player = fakePlayer("flaky")
+	local healthyCustom = strictAnalytics.LogCustomEvent
+	local customAttempts = 0
+	strictAnalytics.LogCustomEvent = function()
+		customAttempts += 1
+		error("LogCustomEvent: rejected by the engine", 2)
+	end
+
+	local economyBefore = #loggedCalls("LogEconomyEvent")
+	AnalyticsService.spinResolved(player, 1, "Coins", 100)
+	AnalyticsService.spinResolved(player, 2, "Coins", 100)
+	AnalyticsService.coinsEarned(player, 25, 150, "Kill")
+	check(
+		#loggedCalls("LogEconomyEvent") == economyBefore + 1,
+		"a failing custom event does not silence the economy events"
+	)
+	check(customAttempts == 1, `and the failed method is not retried on every event (attempts: {customAttempts})`)
+	check(not AnalyticsService.isAvailable(), "and the service still reports that a method was switched off")
+
+	strictAnalytics.LogCustomEvent = healthyCustom
+end
+
 --------------------------------------------------------------------------------
 -- Profiles
 --
