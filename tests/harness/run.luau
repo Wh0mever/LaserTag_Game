@@ -21,6 +21,7 @@ local SCENARIOS = {
 	{ name = "mobile", what = "a phone can aim, shoot, reload and switch view" },
 	{ name = "match", what = "the match runtime's own rules: sides, late joins, results" },
 	{ name = "economy", what = "analytics, profiles, leaderboard and friends against strict stand-ins" },
+	{ name = "friends", what = "the friends panel lists who is online elsewhere, and says so when it cannot tell" },
 }
 
 local failed = {}

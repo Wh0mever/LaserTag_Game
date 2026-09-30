@@ -81,7 +81,9 @@ roblox.implementMethod("Player", "Kick", function(self, message)
 end)
 
 local friendships: { [number]: { [number]: boolean } } = {}
+local isFriendsWithCalls = 0
 roblox.implementMethod("Player", "IsFriendsWith", function(self, userId)
+	isFriendsWithCalls += 1
 	local mine = friendships[self.UserId]
 	return mine ~= nil and mine[userId] == true
 end)
@@ -635,6 +637,57 @@ check(
 	`a successful read of an empty board does say there are no results (got {tostring(rowText(1, "PlayerName"))})`
 )
 check(runner ~= nil, "the board loop is running")
+
+--------------------------------------------------------------------------------
+-- Friends (server half)
+--
+-- The server answers "who is here". Who is online elsewhere is the client's
+-- question to ask (see tests/harness/friends): the server's copy of it ran on
+-- an IsOnline field the engine no longer fills in, and paged the whole friends
+-- list on every panel open to produce an empty answer.
+--------------------------------------------------------------------------------
+
+heading("Friends (server)")
+
+local friendsAsyncCalls = 0
+roblox.implementMethod("Players", "GetFriendsAsync", function()
+	friendsAsyncCalls += 1
+	error("GetFriendsAsync is no longer needed by the server", 2)
+end)
+
+local FriendsService = Env.load("src/server/Services/FriendsService")
+FriendsService.init()
+
+do
+	local asker = fakePlayer("asker")
+	local pal = fakePlayer("pal")
+	local stranger = fakePlayer("stranger")
+	friendships[asker.UserId] = { [pal.UserId] = true }
+
+	local config = remoteHandlers.GetFriendsRequest
+	check(config ~= nil, "the friends request is registered")
+	check(config.RateLimit == 2 and config.WindowSeconds == 10, "with the rate limit from the network contract")
+
+	local payload = config.Handler(asker)
+	check(#payload.inServer == 1, `the payload lists the friends in this server (got {#payload.inServer})`)
+	check(
+		payload.inServer[1] ~= nil and payload.inServer[1].userId == pal.UserId,
+		"and it is the friend, not the stranger"
+	)
+	check(
+		payload.inServer[1] ~= nil and payload.inServer[1].name == "pal" and payload.inServer[1].displayName == "pal",
+		"with the name and display name the panel renders"
+	)
+	check(friendsAsyncCalls == 0, "the server no longer pages the whole friends list on every open")
+	check(payload.online == nil, "and no longer claims to know who is online elsewhere")
+
+	local calls = isFriendsWithCalls
+	check(config.Handler(asker) == payload, "an answer inside the cache window is the cached one")
+	check(isFriendsWithCalls == calls, "and costs no lookups")
+
+	FriendsService.onPlayerRemoving(stranger)
+	check(config.Handler(asker) ~= payload, "the roster changing drops the cache")
+end
 
 check(#Env.spawnErrors == 0, `no background thread died: {table.concat(Env.spawnErrors, " | ")}`)
 
