@@ -93,6 +93,153 @@ local function countDescendants(instance: any): (number, { [string]: number })
 	return total, byClass
 end
 
+--------------------------------------------------------------------------------
+-- Geometry probes
+--
+-- Lune has no physics, so "can a player walk from here to there" cannot be
+-- asked of the engine. It can be asked of the boxes: every surface in these
+-- maps is an upright box or a box tilted about one axis, so the questions that
+-- matter (does this ramp meet the thing it climbs to?) are plain arithmetic on
+-- the built parts' CFrames, read back off the instances the way a player's
+-- feet would meet them.
+--------------------------------------------------------------------------------
+
+local function partsNamed(model: any, names: { [string]: boolean }): { any }
+	local found = {}
+	for _, node in model:GetDescendants() do
+		if node:IsA("BasePart") and names[node.Name] then
+			table.insert(found, node)
+		end
+	end
+	return found
+end
+
+-- World-space top face of an upright, axis-aligned box: {minX, maxX, minZ, maxZ, y}.
+-- Nil for anything tilted, so a ramp can never be mistaken for the surface it serves.
+local function uprightTop(part: any)
+	local cf = part.CFrame
+	if math.abs(cf.UpVector.Y) < 0.999 then
+		return nil
+	end
+	local size = part.Size
+	local right, look = cf.RightVector, cf.LookVector
+	local halfX = math.abs(right.X) * size.X / 2 + math.abs(look.X) * size.Z / 2
+	local halfZ = math.abs(right.Z) * size.X / 2 + math.abs(look.Z) * size.Z / 2
+	local centre = cf.Position
+	return {
+		minX = centre.X - halfX,
+		maxX = centre.X + halfX,
+		minZ = centre.Z - halfZ,
+		maxZ = centre.Z + halfZ,
+		y = centre.Y + size.Y / 2,
+		bottom = centre.Y - size.Y / 2,
+	}
+end
+
+local WALKABLE = { Floor = true, Block = true, RoomFloor = true }
+
+--[[
+	For each ramp: where the middle of its top edge sits at the low and the high
+	end, and the surface a player steps onto from the high end. That surface is
+	the highest walkable top whose footprint contains a point one stud further
+	up the slope from the edge — one stud past the edge rather than the edge
+	itself, because a ramp that stops exactly at a platform's rim is still a
+	ramp that reaches it.
+]]
+local function probeRamps(built: any)
+	local probes = {}
+	local surfaces = {}
+	for _, part in partsNamed(built.model, WALKABLE) do
+		local top = uprightTop(part)
+		if top then
+			table.insert(surfaces, top)
+		end
+	end
+
+	for _, ramp in partsNamed(built.model, { Ramp = true }) do
+		local half = ramp.Size / 2
+		local a = ramp.CFrame * roblox.Vector3.new(half.X, half.Y, 0)
+		local b = ramp.CFrame * roblox.Vector3.new(-half.X, half.Y, 0)
+		local high, low, highSign = a, b, 1
+		if b.Y > a.Y then
+			high, low, highSign = b, a, -1
+		end
+
+		local flat = roblox.Vector3.new(high.X - low.X, 0, high.Z - low.Z).Unit
+		local probeX, probeZ = high.X + flat.X, high.Z + flat.Z
+
+		local served = nil
+		for _, top in surfaces do
+			local inside = probeX >= top.minX and probeX <= top.maxX and probeZ >= top.minZ and probeZ <= top.maxZ
+			-- A ramp that ends against a wall's foot is not "serving" the wall,
+			-- and the arena floor under it is not a destination either.
+			if inside and top.y > built.origin.Y + 1 and (not served or top.y > served.y) then
+				served = top
+			end
+		end
+
+		-- How much of the ramp's width actually meets that surface: a ramp whose
+		-- middle lands on a platform but whose sides hang in the air is a trap.
+		local covered = 0
+		if served then
+			for _, across in { -1, -0.5, 0, 0.5, 1 } do
+				local edge = ramp.CFrame * roblox.Vector3.new(highSign * half.X, half.Y, across * half.Z)
+				local x, z = edge.X + flat.X, edge.Z + flat.Z
+				if
+					x >= served.minX - 0.01
+					and x <= served.maxX + 0.01
+					and z >= served.minZ - 0.01
+					and z <= served.maxZ + 0.01
+				then
+					covered += 1
+				end
+			end
+		end
+
+		table.insert(probes, { ramp = ramp, high = high, low = low, served = served, covered = covered / 5 })
+	end
+	return probes
+end
+
+--[[
+	Blocks that are mostly inside a wall. Cover that has been placed in a wall
+	is invisible, cannot be stood behind, and shows no face to anyone — the
+	Nexus catwalk railings were built that way, one stud from the perimeter.
+	Returns { part, fraction } for each block with more than half its volume
+	buried.
+]]
+local function buriedBlocks(built: any)
+	local walls = {}
+	for _, wall in partsNamed(built.model, { Wall = true }) do
+		local box = uprightTop(wall)
+		if box then
+			table.insert(walls, box)
+		end
+	end
+
+	local buried = {}
+	for _, block in partsNamed(built.model, { Block = true }) do
+		local box = uprightTop(block)
+		if not box then
+			continue
+		end
+		local volume = (box.maxX - box.minX) * (box.maxZ - box.minZ) * (box.y - box.bottom)
+		local inside = 0
+		for _, wall in walls do
+			local dx = math.min(box.maxX, wall.maxX) - math.max(box.minX, wall.minX)
+			local dz = math.min(box.maxZ, wall.maxZ) - math.max(box.minZ, wall.minZ)
+			local dy = math.min(box.y, wall.y) - math.max(box.bottom, wall.bottom)
+			if dx > 0 and dz > 0 and dy > 0 then
+				inside += dx * dz * dy
+			end
+		end
+		if inside / volume > 0.5 then
+			table.insert(buried, { part = block, fraction = inside / volume })
+		end
+	end
+	return buried
+end
+
 local results = {}
 
 for _, entry in MAPS do
@@ -269,6 +416,50 @@ for _, entry in MAPS do
 		local b = built.spawns.B[1].Position
 		local separation = (a - b).Magnitude
 		check(separation > 60, `team spawns are far apart ({math.floor(separation)} studs)`)
+
+		----------------------------------------------------------------------
+		-- Ramps that actually reach something
+		--
+		-- A ramp is only a ramp if a player can walk from the floor onto it and
+		-- from it onto the surface it climbs to. Nexus shipped with six that did
+		-- neither: low ends floating three studs up, high ends stopping two studs
+		-- short of a platform they were meant to serve, and a comment claiming
+		-- the opposite. Nothing checked, because every part was anchored, in
+		-- bounds and correctly coloured. Humanoids step up ~2 studs and cross
+		-- gaps of about half a stud, so half a stud is the tolerance here.
+		----------------------------------------------------------------------
+		for _, hidden in buriedBlocks(built) do
+			local at = hidden.part.CFrame.Position
+			check(
+				false,
+				`block at ({math.floor(at.X - built.origin.X)}, {math.floor(at.Y - built.origin.Y)}, `
+					.. `{math.floor(at.Z - built.origin.Z)}) is {math.floor(hidden.fraction * 100)}% inside a wall`
+			)
+		end
+		check(true, "no cover block is buried in a wall")
+
+		local probes = probeRamps(built)
+		check(#probes > 0, "the map has ramps for the check below to measure")
+		for _, probe in probes do
+			local at = probe.ramp.CFrame.Position
+			local label = `ramp at ({math.floor(at.X - built.origin.X)}, {math.floor(at.Z - built.origin.Z)})`
+			check(
+				math.abs(probe.low.Y - built.origin.Y) <= 0.5,
+				`{label} meets the floor at its low end (top edge {string.format("%.2f", probe.low.Y - built.origin.Y)} up)`
+			)
+			check(probe.served ~= nil, `{label} ends on a surface a player can step onto`)
+			if probe.served then
+				check(probe.covered >= 0.8, `{label} meets its surface across its whole width ({probe.covered * 100}%)`)
+				check(
+					math.abs(probe.high.Y - probe.served.y) <= 0.5,
+					`{label} lands level with what it climbs to `
+						.. `(top edge {string.format("%.2f", probe.high.Y - built.origin.Y)}, surface {string.format(
+							"%.2f",
+							probe.served.y - built.origin.Y
+						)})`
+				)
+			end
+		end
 	end
 
 	-- Everything must be anchored: one unanchored part falls through the map.

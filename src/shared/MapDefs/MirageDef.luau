@@ -240,16 +240,18 @@ add({
 	color = "Neon",
 })
 
--- Ramps onto the middle; the +11 degree tilt raises the +x end and mirror()
+-- Ramps onto the middle; the +13.3 degree tilt raises the +x end and mirror()
 -- negates it for the far side. The centre height is chosen so the high end
--- lands level with the 6-stud platform and the low end meets the floor:
--- y + (length/2)*sin(t) + (thickness/2)*cos(t) == 6.
+-- lands level with the 6-stud platform:
+-- y + (length/2)*sin(t) + (thickness/2)*cos(t) == 6,
+-- and the tilt so the low end meets the floor: length*sin(t) == 6. (11 degrees
+-- satisfied the first and left a one-stud lip at the bottom.)
 mirror({
 	kind = "ramp",
-	pos = { x = -30, y = 2.4, z = 0 },
+	pos = { x = -29.85, y = 1.94, z = 0 },
 	size = { x = 26, y = 2.2, z = 24 },
 	color = "WallDeep",
-	rotation = { x = 0, y = 0, z = 11 },
+	rotation = { x = 0, y = 0, z = 13.3 },
 })
 
 -- Corridor walls ----------------------------------------------------------

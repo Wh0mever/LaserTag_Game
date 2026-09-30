@@ -33,6 +33,7 @@ local PLATFORM_Y = 14 -- top surface of the central platform
 local PLATFORM_HALF_X = 30
 local PLATFORM_HALF_Z = 26
 local CATWALK_Y = 14 -- level with the platform, so duels across are fair
+local CATWALK_INNER_Z = -HALF_Z + 18 -- the catwalk's arena-facing edge (it spans z = -78 .. -62)
 
 local elements = {}
 
@@ -202,26 +203,33 @@ mirror({
 })
 
 -- Ramps up ----------------------------------------------------------------
--- One pair from each flank. The 16-degree tilt raises the far end; the centre
--- height is chosen so the high end lands level with the platform and the low
--- end meets the floor.
+-- One pair from each flank. A ramp is a tilted box, and where its ends land
+-- follows from three numbers: for a box of length L and thickness T tilted by t,
+-- the middle of its top edge sits at
+--     y = pos.y +/- (L/2)*sin(t) + (T/2)*cos(t)
+-- so the high end meets a surface at height H when pos.y + (L/2)*sin(t) +
+-- (T/2)*cos(t) == H, and the low end meets the floor when L*sin(t) == H. Here
+-- H is 14, t is 25 degrees and L is 33.2, which puts the low end on the floor
+-- and the high end half a stud inside the platform's west face (x = -30), so
+-- there is no gap to fall down and no lip to catch on. tests/harness/world.luau
+-- measures every ramp in every map against exactly this.
 
 mirror({
 	kind = "ramp",
-	pos = { x = -46, y = 6.4, z = -34 },
-	size = { x = 30, y = 2.4, z = 20 },
+	pos = { x = -44.14, y = 5.9, z = -17.5 },
+	size = { x = 33.2, y = 2.4, z = 16 },
 	color = "DeckDark",
 	material = "Metal",
-	rotation = { x = 0, y = 0, z = 16 },
+	rotation = { x = 0, y = 0, z = 25 },
 })
 
 mirror({
 	kind = "ramp",
-	pos = { x = -46, y = 6.4, z = 34 },
-	size = { x = 30, y = 2.4, z = 20 },
+	pos = { x = -44.14, y = 5.9, z = 17.5 },
+	size = { x = 33.2, y = 2.4, z = 16 },
 	color = "DeckDark",
 	material = "Metal",
-	rotation = { x = 0, y = 0, z = 16 },
+	rotation = { x = 0, y = 0, z = 25 },
 })
 
 -- Side catwalks -----------------------------------------------------------
@@ -236,22 +244,27 @@ mirror({
 	material = "Metal",
 })
 
+-- On the edge players walk along, not against the perimeter wall: a railing
+-- inside the wall would give no cover and bury its own face.
 mirror({
 	kind = "block",
-	pos = { x = -40, y = CATWALK_Y + 1.5, z = -HALF_Z + 2.4 },
+	pos = { x = -40, y = CATWALK_Y + 1.5, z = CATWALK_INNER_Z - 0.6 },
 	size = { x = 56, y = 3, z = 1.2 },
 	color = "Strut",
 	material = "Metal",
 })
 
--- Ramp from the spawn side up onto the catwalk.
+-- Ramp from the spawn side up onto the catwalk (H = 14, t = 28 degrees, L = 30:
+-- see the formula above). Its low end stops three studs short of the perimeter
+-- wall so there is floor to step on from, and its high end is half a stud inside
+-- the catwalk's west edge (x = -68).
 mirror({
 	kind = "ramp",
-	pos = { x = -74, y = 6, z = -HALF_Z + 10 },
-	size = { x = 22, y = 2.4, z = 16 },
+	pos = { x = -80.28, y = 5.9, z = -HALF_Z + 10 },
+	size = { x = 30, y = 2.4, z = 16 },
 	color = "Deck",
 	material = "Metal",
-	rotation = { x = 0, y = 0, z = 20 },
+	rotation = { x = 0, y = 0, z = 28 },
 })
 
 -- Cover on the open deck --------------------------------------------------
@@ -302,7 +315,7 @@ mirror({
 
 mirror({
 	kind = "neonStrip",
-	pos = { x = -40, y = CATWALK_Y + 0.2, z = -HALF_Z + 18 },
+	pos = { x = -40, y = CATWALK_Y + 0.2, z = CATWALK_INNER_Z - 2.2 },
 	size = { x = 56, y = 0.4, z = 1.2 },
 	color = "Neon",
 })
