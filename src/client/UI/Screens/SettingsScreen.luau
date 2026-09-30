@@ -62,6 +62,23 @@ local KEY_ROWS = {
 	{ action = "Освободить курсор", keys = "Правый Ctrl" },
 }
 
+-- The same actions on a controller (InputController binds them). A, B and the
+-- sticks are Roblox's own, so they are listed as what they do there.
+local PAD_ROWS = {
+	{ action = "Движение", keys = "Левый стик" },
+	{ action = "Камера", keys = "Правый стик" },
+	{ action = "Прыжок", keys = "A" },
+	{ action = "Огонь", keys = "RT" },
+	{ action = "Перезарядка", keys = "X" },
+	{ action = "Оружие", keys = "LB / RB" },
+	{ action = "Таблица счёта", keys = "View" },
+	{ action = "Скины (закрыть окно)", keys = "Y" },
+	{ action = "Магазин", keys = "D-pad вверх" },
+	{ action = "Друзья", keys = "D-pad вправо" },
+	{ action = "Колесо", keys = "D-pad вниз" },
+	{ action = "Настройки", keys = "D-pad влево" },
+}
+
 local trove = Trove.new()
 local panel: any = nil
 local sliders: { [string]: any } = {}
@@ -77,26 +94,23 @@ local function pushControlValues()
 	end
 end
 
-local function buildKeyList(parent: Instance, order: number)
+local function buildKeyList(parent: Instance, order: number, name: string, title: string, rows, visible: boolean)
 	local root = Instance.new("Frame")
-	root.Name = "Keys"
+	root.Name = name
 	root.LayoutOrder = order
-	root.Size = UDim2.new(1, 0, 0, 18 + #KEY_ROWS * 18)
+	root.Size = UDim2.new(1, 0, 0, 18 + #rows * 18)
 	root.BackgroundTransparency = 1
-	-- A list of keys on a device with no keys is a list of things the player
-	-- cannot do. A touchscreen laptop has a keyboard and keeps it.
-	root.Visible = UserInputService.KeyboardEnabled
+	root.Visible = visible
 	root.ZIndex = 3
 	root.Parent = parent
 
-	local header =
-		UITheme.label("УПРАВЛЕНИЕ", UITheme.TextSizes.Small, UITheme.Colors.TextDim, UITheme.Fonts.Bold)
+	local header = UITheme.label(title, UITheme.TextSizes.Small, UITheme.Colors.TextDim, UITheme.Fonts.Bold)
 	header.Name = "Header"
 	header.Size = UDim2.new(1, 0, 0, 16)
 	header.ZIndex = 3
 	header.Parent = root
 
-	for index, entry in KEY_ROWS do
+	for index, entry in rows do
 		local row = Instance.new("Frame")
 		row.Name = entry.action
 		row.Position = UDim2.new(0, 0, 0, 18 + (index - 1) * 18)
@@ -120,6 +134,8 @@ local function buildKeyList(parent: Instance, order: number)
 		keys.ZIndex = 3
 		keys.Parent = row
 	end
+
+	return root
 end
 
 function SettingsScreen.init()
@@ -214,7 +230,19 @@ function SettingsScreen.init()
 		end
 	end
 
-	buildKeyList(body, #SettingsConfig.Definitions + 1)
+	-- A list of keys on a device with no keys is a list of things the player
+	-- cannot do. A touchscreen laptop has a keyboard and keeps it; a console has
+	-- only the pad, so each list follows its own hardware. A pad plugged in
+	-- after the panel was built is picked up by the events below.
+	local count = #SettingsConfig.Definitions
+	buildKeyList(body, count + 1, "Keys", "УПРАВЛЕНИЕ", KEY_ROWS, UserInputService.KeyboardEnabled)
+	local padList =
+		buildKeyList(body, count + 2, "PadKeys", "ГЕЙМПАД", PAD_ROWS, UserInputService.GamepadEnabled)
+	local function syncPadList()
+		padList.Visible = UserInputService.GamepadEnabled
+	end
+	trove:Connect(UserInputService.GamepadConnected, syncPadList)
+	trove:Connect(UserInputService.GamepadDisconnected, syncPadList)
 
 	--[[
 		The panel's two actions, at the end of the list rather than in the title
@@ -225,7 +253,7 @@ function SettingsScreen.init()
 	]]
 	local actions = Instance.new("Frame")
 	actions.Name = "Actions"
-	actions.LayoutOrder = #SettingsConfig.Definitions + 2
+	actions.LayoutOrder = count + 3
 	actions.Size = UDim2.new(1, 0, 0, ACTION_HEIGHT)
 	actions.BackgroundTransparency = 1
 	actions.ZIndex = 3

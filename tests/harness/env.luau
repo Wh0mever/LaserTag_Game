@@ -424,6 +424,7 @@ Env.instanceEvent = instanceEvent
 for _, entry in
 	{
 		{ class = "GuiButton", events = { "Activated", "MouseButton1Click", "MouseButton1Down", "MouseButton1Up" } },
+		{ class = "Humanoid", events = { "Died" } },
 		{ class = "GuiObject", events = { "MouseEnter", "MouseLeave", "InputBegan", "InputEnded", "InputChanged" } },
 		{ class = "Instance", events = { "Changed", "ChildAdded", "ChildRemoved", "AncestryChanged", "Destroying" } },
 	}
@@ -539,6 +540,7 @@ local function makeInstanceService(className: string)
 end
 
 local function buildServices()
+	Env.lastInputType = nil
 	-- Real service classes, not stand-in Folders. Lune validates every property
 	-- against Roblox's class database, so `Lighting.Technology` and
 	-- `Workspace.CurrentCamera` are checked for real — and a typo in one fails
@@ -711,8 +713,9 @@ local function buildServices()
 		UserId = 1,
 		Character = nil,
 		PlayerGui = playerGui,
-		CharacterAdded = signal(),
-		CharacterRemoving = signal(),
+		-- Live: a respawn is something a scenario has to be able to cause.
+		CharacterAdded = liveSignal(),
+		CharacterRemoving = liveSignal(),
 		GetAttribute = function(_self, name: string)
 			return attributes[name]
 		end,
@@ -749,13 +752,20 @@ local function buildServices()
 		TouchEnabled = Env.device.TouchEnabled,
 		KeyboardEnabled = Env.device.KeyboardEnabled,
 		MouseEnabled = Env.device.MouseEnabled,
-		GamepadEnabled = false,
+		GamepadEnabled = Env.device.GamepadEnabled == true,
 		-- Live, not inert: the touch controls are driven entirely through these,
 		-- and a scenario has to be able to put a finger on the glass.
 		InputBegan = liveSignal(),
 		InputEnded = liveSignal(),
 		InputChanged = liveSignal(),
 		WindowFocusReleased = signal(),
+		GamepadConnected = liveSignal(),
+		GamepadDisconnected = liveSignal(),
+		-- What the player last touched; Env.setLastInputType moves it.
+		LastInputTypeChanged = liveSignal(),
+		GetLastInputType = function()
+			return Env.lastInputType or roblox.Enum.UserInputType.None
+		end,
 		GetMouseDelta = function()
 			return roblox.Vector2.new(0, 0)
 		end,
@@ -1342,6 +1352,10 @@ function Env.setDevice(profile: string)
 		Env.device = { TouchEnabled = true, KeyboardEnabled = false, MouseEnabled = false }
 	elseif profile == "desktop" then
 		Env.device = { TouchEnabled = false, KeyboardEnabled = true, MouseEnabled = true }
+	elseif profile == "gamepad" then
+		-- A console, or a PC with only a pad plugged in: no touch, no mouse, no
+		-- keyboard. Movement and camera come from Roblox's default controls.
+		Env.device = { TouchEnabled = false, KeyboardEnabled = false, MouseEnabled = false, GamepadEnabled = true }
 	elseif profile == "touchLaptop" then
 		-- Touch AND a mouse. Must keep desktop behaviour: treating this as a
 		-- phone would take the cursor away from someone who has one.
@@ -1350,6 +1364,17 @@ function Env.setDevice(profile: string)
 		error(`[harness] unknown device profile "{profile}"`, 2)
 	end
 	buildServices()
+end
+
+--[[
+	Reports what the player last used, the way UserInputService does when they
+	switch from the touchscreen to the keyboard or back. `name` is an
+	Enum.UserInputType member name.
+]]
+function Env.setLastInputType(name: string)
+	local item = (roblox.Enum.UserInputType :: any)[name]
+	Env.lastInputType = item
+	services.UserInputService.LastInputTypeChanged:Fire(item)
 end
 
 --[[
