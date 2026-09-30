@@ -676,6 +676,138 @@ if scoreTap and board then
 end
 
 --------------------------------------------------------------------------------
+-- The scoreboard with a full lobby
+--
+-- Rows were a plain Frame with no clipping and no cap. On a 640x294 phone the
+-- board has room for four of them, so a 10v10 match drew the rest below the
+-- panel, over the HUD and off the bottom of the screen, and the players at the
+-- bottom of a list are the ones who most want to see where they stand.
+--------------------------------------------------------------------------------
+
+heading("Scoreboard with a full lobby")
+
+do
+	local PlayersService = Env.service("Players")
+	local realGetPlayers = PlayersService.GetPlayers
+
+	local function fakePlayer(name: string, team: string, kills: number)
+		return {
+			DisplayName = name,
+			GetAttribute = function(_self, key: string)
+				if key == "InMatch" then
+					return "Dust"
+				elseif key == "TeamId" then
+					return team
+				elseif key == "MatchKills" then
+					return kills
+				end
+				return nil
+			end,
+		}
+	end
+
+	local function lobby(localKills: number)
+		player:SetAttribute("InMatch", "Dust")
+		player:SetAttribute("TeamId", "A")
+		player:SetAttribute("MatchKills", localKills)
+		local roster = { player }
+		for index = 1, 9 do
+			table.insert(roster, fakePlayer(`Alpha{index}`, "A", index))
+		end
+		for index = 1, 10 do
+			table.insert(roster, fakePlayer(`Bravo{index}`, "B", index))
+		end
+		PlayersService.GetPlayers = function()
+			return roster
+		end
+	end
+
+	local function rowsOf(teamId: string): any
+		return board and board:FindFirstChild(teamId) and board[teamId]:FindFirstChild("Rows")
+	end
+
+	local function visibleRows(list: any): number
+		local count = 0
+		for _, row in list:GetChildren() do
+			if row.Name == "Row" and row.Visible then
+				count += 1
+			end
+		end
+		return count
+	end
+
+	local function canvasTop(list: any): number
+		local ok, position = pcall(function()
+			return list.CanvasPosition.Y
+		end)
+		return if ok then position else -1
+	end
+
+	local step = 30 + 4 -- a row and the gap under it
+
+	if board and scoreTap then
+		-- The last place on the team: nine others out-kill the local player.
+		lobby(0)
+		player:SetAttribute("InMatch", "Dust")
+		scoreTap.Activated:Fire()
+		check(board.Visible, "the board opens for a full lobby")
+
+		local listA, listB = rowsOf("A"), rowsOf("B")
+		check(listA ~= nil and listB ~= nil, "both teams have a list of rows")
+		if listA and listB then
+			for name, list in { A = listA, B = listB } do
+				check(list.ClassName == "ScrollingFrame", `team {name}'s rows scroll (they are a {list.ClassName})`)
+				check(
+					list.ClassName == "ScrollingFrame" and list.ScrollingDirection == roblox.Enum.ScrollingDirection.Y,
+					`team {name}'s rows scroll vertically only`
+				)
+				check(
+					list.ClassName == "ScrollingFrame" and list.AutomaticCanvasSize == roblox.Enum.AutomaticSize.Y,
+					`team {name}'s canvas grows with its rows`
+				)
+			end
+			check(board.ClipsDescendants, "nothing the board holds can be drawn outside it")
+
+			check(visibleRows(listA) == 10, `all ten of team A are listed (got {visibleRows(listA)})`)
+			check(visibleRows(listB) == 10, `all ten of team B are listed (got {visibleRows(listB)})`)
+
+			-- The local player is 10th of 10; opening the board scrolls to them
+			-- rather than leaving them below the fold.
+			local expected = 9 * step * UIController.scale
+			check(
+				math.abs(canvasTop(listA) - expected) < 1,
+				`the board scrolls to the local player's row (canvas at {canvasTop(listA)}, wanted {expected})`
+			)
+			check(canvasTop(listB) == 0, "and leaves the other team's list at the top")
+		end
+
+		scoreTap.Activated:Fire()
+		check(not board.Visible, "tapping again closes it")
+
+		-- First place: nothing to scroll to.
+		lobby(50)
+		scoreTap.Activated:Fire()
+		local listA2 = rowsOf("A")
+		check(listA2 ~= nil and canvasTop(listA2) == 0, "a player at the top of their team sees the top of the list")
+		scoreTap.Activated:Fire()
+
+		-- Far enough down to scroll, near enough that the row is on the first page.
+		lobby(8)
+		scoreTap.Activated:Fire()
+		local listA3 = rowsOf("A")
+		check(
+			listA3 ~= nil and canvasTop(listA3) == 0,
+			"a player who is on the first page of the list is not scrolled away from the top"
+		)
+		scoreTap.Activated:Fire()
+	end
+
+	PlayersService.GetPlayers = realGetPlayers
+	player:SetAttribute("InMatch", "")
+	player:SetAttribute("MatchKills", nil)
+end
+
+--------------------------------------------------------------------------------
 -- A touchscreen laptop is not a phone
 --
 -- The device test is "touch AND no mouse", not "touch". Someone on a Surface or
