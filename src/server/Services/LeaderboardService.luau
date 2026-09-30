@@ -40,6 +40,9 @@ local ROW_HEIGHT_SCALE = 0.085
 local PROPAGATION_DELAY = 5
 local RETRY_ATTEMPTS = 3
 local RETRY_BACKOFF = 2
+-- After a failed read: soon enough that a hiccup does not freeze the board for
+-- a whole update interval, far enough apart not to hammer a store that is down.
+local READ_RETRY_DELAY = 30
 local WORLD_RETRY_DELAY = 5
 local WORLD_WAIT_TIMEOUT = 60
 -- BindToClose gives the whole server ~30s; leave room for profile releases.
@@ -59,10 +62,16 @@ local COLUMNS = {
 local store = nil
 local worldService = nil
 local nameCache: { [number]: string } = {}
-
-function LeaderboardService.init()
-	store = DataStoreService:GetOrderedDataStore(GameConfig.LEADERBOARD_STORE_NAME)
-end
+-- The highest score each player's entry is known to hold. Kills only ever grow,
+-- so anything at or below this needs no request: a write per player per cycle
+-- for scores that did not move would spend the DataStore budget (60 + 10 per
+-- player each minute) on nothing, and the leave-time write below would double
+-- the periodic one.
+local written: { [number]: number } = {}
+-- Leave-time writes still running. At shutdown ProfileService releases every
+-- profile before BindToClose reaches flushAll, so those writes are the only
+-- ones there are and flushAll has to wait for them.
+local releaseWrites = 0
 
 local function retry(attempts: number, action: () -> any): (boolean, any)
 	local lastError = nil
@@ -96,14 +105,54 @@ local function writeScore(userId: number, kills: number, attempts: number): bool
 		return true
 	end
 
+	if (written[userId] or 0) >= score then
+		return true
+	end
+
 	local ok, err = retry(attempts, function()
+		-- Checked again on every attempt: a retry backing off for seconds can
+		-- find a newer write (the leave-time one) already stored, and must not
+		-- put a lower score over it.
+		if (written[userId] or 0) >= score then
+			return
+		end
 		store:SetAsync(tostring(userId), score)
 	end)
 
 	if not ok then
 		warn(`[LeaderboardService] Failed to write score for {userId}: {tostring(err)}`)
+		return false
 	end
-	return ok
+
+	written[userId] = math.max(written[userId] or 0, score)
+	return true
+end
+
+--[[
+	A player's profile is being released, whether they left, the server is
+	closing or their data was taken. Their kills since the last periodic write
+	would otherwise wait for a cycle they are no longer here for.
+
+	DataService fires this on its own thread, so the retries' backoff never holds
+	up the leave path.
+]]
+local function onProfileReleasing(player: Player, kills: number)
+	local userId = player.UserId
+	-- The high-water mark stays after the leave-time write. Clearing it would
+	-- blind the re-check inside writeScore's retry: an older write still backing
+	-- off would wake to find nothing recorded and put its lower score over this
+	-- one. Kills only grow, so a returning player is never held back by it, and
+	-- the table costs one number per player who visited.
+	releaseWrites += 1
+	writeScore(userId, kills, RETRY_ATTEMPTS)
+	releaseWrites -= 1
+end
+
+-- Connected here, not in start(): start() runs the board loop and may yield,
+-- and a player leaving before it got round to connecting would be missed.
+function LeaderboardService.init()
+	store = DataStoreService:GetOrderedDataStore(GameConfig.LEADERBOARD_STORE_NAME)
+	DataService.ProfileReleasingSignal:Connect(onProfileReleasing)
 end
 
 function LeaderboardService.flush(player: Player)
@@ -117,6 +166,8 @@ end
 -- Write every online player's score. Called from BindToClose, so the writes run
 -- as parallel jobs with a single attempt each and the whole thing gives up at
 -- SHUTDOWN_BUDGET rather than eating the shutdown budget profiles also need.
+-- Players whose profile was already released by ProfileService's own shutdown
+-- have no data left to read here; their leave-time writes are waited for instead.
 function LeaderboardService.flushAll()
 	local pending = 0
 
@@ -132,34 +183,39 @@ function LeaderboardService.flushAll()
 	end
 
 	local deadline = os.clock() + SHUTDOWN_BUDGET
-	while pending > 0 and os.clock() < deadline do
+	while (pending > 0 or releaseWrites > 0) and os.clock() < deadline do
 		task.wait(0.1)
 	end
 end
 
-local function fetchTop(count: number): { { rank: number, userId: number, kills: number } }
+--[[
+	The head of the board, or nil when it could not be read. An empty list means
+	the store answered and nobody has a score; nil means it did not answer, and
+	the caller must not present the second as the first.
+]]
+local function fetchTop(count: number): { { rank: number, userId: number, kills: number } }?
 	if not store then
-		return {}
+		return nil
 	end
 
-	local ok, pages = retry(RETRY_ATTEMPTS, function()
-		return store:GetSortedAsync(false, count)
+	-- Reading the page is inside the retried call as well: a malformed answer
+	-- must cost this cycle a retry, not kill the loop that runs the board.
+	local ok, entries = retry(RETRY_ATTEMPTS, function()
+		local pages = store:GetSortedAsync(false, count)
+		local rows = {}
+		for rank, entry in pages:GetCurrentPage() do
+			table.insert(rows, {
+				rank = rank,
+				userId = tonumber(entry.key) or 0,
+				kills = entry.value,
+			})
+		end
+		return rows
 	end)
 
-	if not ok or not pages then
-		warn(`[LeaderboardService] Failed to read the sorted board: {tostring(pages)}`)
-		return {}
-	end
-
-	local entries = {}
-	local rank = 0
-	for _, entry in pages:GetCurrentPage() do
-		rank += 1
-		table.insert(entries, {
-			rank = rank,
-			userId = tonumber(entry.key) or 0,
-			kills = entry.value,
-		})
+	if not ok then
+		warn(`[LeaderboardService] Failed to read the sorted board: {tostring(entries)}`)
+		return nil
 	end
 
 	return entries
@@ -263,7 +319,7 @@ local function render(gui: SurfaceGui, entries)
 	end
 
 	if shown == 0 then
-		fillRow(parent, 1, "", "No scores yet", "", DIM_TEXT_COLOR)
+		fillRow(parent, 1, "", "Пока нет результатов", "", DIM_TEXT_COLOR)
 	end
 
 	for rank = math.max(shown, 1) + 1, DISPLAY_ROWS do
@@ -318,6 +374,8 @@ function LeaderboardService.start()
 		task.wait(WORLD_RETRY_DELAY)
 	end
 
+	local lastGood = nil
+
 	while true do
 		for _, player in Players:GetPlayers() do
 			task.spawn(LeaderboardService.flush, player)
@@ -326,12 +384,19 @@ function LeaderboardService.start()
 		task.wait(PROPAGATION_DELAY)
 
 		local entries = fetchTop(GameConfig.LEADERBOARD_SIZE)
-		local board = getBoard()
-		if board then
-			render(board, entries)
+		if entries then
+			lastGood = entries
 		end
 
-		task.wait(GameConfig.LEADERBOARD_UPDATE_INTERVAL)
+		-- A failed read leaves the last good rows up (drawn again, in case the
+		-- board was rebuilt): the store being down says nothing about the scores,
+		-- and "no results" would tell everyone in the hub that they were wiped.
+		local board = getBoard()
+		if board and lastGood then
+			render(board, lastGood)
+		end
+
+		task.wait(if entries then GameConfig.LEADERBOARD_UPDATE_INTERVAL else READ_RETRY_DELAY)
 	end
 end
 

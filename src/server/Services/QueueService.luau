@@ -47,7 +47,7 @@ local overlapParams: OverlapParams? = nil
 local pads: { { [string]: any } } = {}
 local queues: { [string]: { Player } } = {}
 local signState: { [string]: string } = {}
-local lastPayload: { [string]: { count: number, countdown: number? } } = {}
+local lastPayload: { [string]: { count: number, countdown: number?, closing: boolean } } = {}
 
 --------------------------------------------------------------------------------
 -- Sampling
@@ -113,11 +113,13 @@ end
 
 local States = MatchStateMachine.States
 
-local function statusText(phase: string, count: number, needed: number, countdown: number?): string
+local function statusText(phase: string, count: number, needed: number, countdown: number?, closing: boolean): string
 	if phase == States.Countdown and countdown then
 		return `СТАРТ ЧЕРЕЗ {countdown}`
 	elseif phase == States.InProgress then
-		return "МАТЧ ИДЁТ"
+		-- In its last minute a match takes nobody new. Saying it is still going
+		-- would leave a player on the pad wondering why nothing happens.
+		return if closing then "МАТЧ ЗАВЕРШАЕТСЯ" else "МАТЧ ИДЁТ"
 	elseif phase == States.Results then
 		return "МАТЧ ЗАВЕРШАЕТСЯ"
 	elseif count > 0 then
@@ -149,9 +151,24 @@ local function updateSigns(mapId: string, text: string)
 end
 
 --[[
+	Whether the match behind a pad takes nobody new: in its last minute, or over
+	and holding on the results. The one answer behind both the sign ("МАТЧ
+	ЗАВЕРШАЕТСЯ") and the `closing` flag the client's chip is sent, so the two can
+	never disagree about a player standing on the pad.
+]]
+local function isClosing(mapId: string, phase: string): boolean
+	if phase == States.Results then
+		return true
+	end
+	return phase == States.InProgress and not MatchService.acceptsJoiners(mapId)
+end
+
+--[[
 	QueueUpdate goes to the players in the queue and to whoever just stepped off
 	it — a leaver still needs one last message or their HUD keeps showing a queue
 	they are no longer in.
+
+	Its arguments are (mapId, count, needed, countdown, closing).
 ]]
 local function publish(mapId: string, current: { Player }, previous: { Player }, membersChanged: boolean)
 	local phase = MatchService.getPhase(mapId)
@@ -159,26 +176,32 @@ local function publish(mapId: string, current: { Player }, previous: { Player },
 	local count = #current
 	local needed = GameConfig.MIN_PLAYERS
 
-	updateSigns(mapId, statusText(phase, count, needed, countdown))
+	local closing = isClosing(mapId, phase)
+	updateSigns(mapId, statusText(phase, count, needed, countdown, closing))
 
-	-- Two reasons to send: the numbers on the HUD moved, or somebody stepped off
-	-- the pad and is owed a final update even though the numbers did not.
+	-- Two reasons to send: what the HUD shows moved (the closing flag changes
+	-- the words while the numbers stay put), or somebody stepped off the pad and
+	-- is owed a final update even though nothing did.
 	local last = lastPayload[mapId]
-	local payloadChanged = last == nil or last.count ~= count or last.countdown ~= countdown
+	local payloadChanged = last == nil or last.count ~= count or last.countdown ~= countdown or last.closing ~= closing
 	if not payloadChanged and not membersChanged then
 		return
 	end
-	lastPayload[mapId] = { count = count, countdown = countdown }
+	lastPayload[mapId] = { count = count, countdown = countdown, closing = closing }
 
 	local notified: { [Player]: boolean } = {}
 	for _, player in current do
 		notified[player] = true
-		Remotes.fireClient(RemoteNames.QueueUpdate, player, mapId, count, needed, countdown)
+		Remotes.fireClient(RemoteNames.QueueUpdate, player, mapId, count, needed, countdown, closing)
 	end
 
+	-- A leaver is told they are in no queue at all (an empty map id), not the
+	-- queue's new size: given the same message as the players still standing
+	-- there, a client cannot tell that it has stepped off, and its "in queue"
+	-- chip would stay up in the hub forever.
 	for _, player in previous do
 		if not notified[player] and player:IsDescendantOf(Players) then
-			Remotes.fireClient(RemoteNames.QueueUpdate, player, mapId, count, needed, countdown)
+			Remotes.fireClient(RemoteNames.QueueUpdate, player, "", 0, needed, nil, false)
 		end
 	end
 end

@@ -14,6 +14,14 @@
 	  * punch — RecoilController's decaying kick, plus a counter-rotation against
 	            the camera's recoil offset so the muzzle visibly lags the view
 
+	The model is built at full size and then shrunk about its pivot (VIEWMODEL_SCALE),
+	with every camera-space offset brought in by the same factor. That is the
+	same picture on screen, since apparent size is size over distance, but the
+	gun is real geometry drawn with the map's own depth buffer: at full size the
+	rifle's barrel reached four studs past the camera, the Lance's five, and
+	standing against a wall pushed the gun through it. Shrunk, nothing in it is
+	more than a stud or two from the eye.
+
 	Every part is anchored and posed with Model:PivotTo, so the factory's
 	WeldConstraints are disabled rather than left to fight the assignment. Parts
 	are also stripped of collision, query and shadow: an unlit, non-colliding
@@ -50,11 +58,25 @@ local RENDER_BINDING = "LaserTagViewmodel"
 -- frame's view instead of the previous frame's.
 local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value + 3
 
+-- How much the model is shrunk, and how much every offset below is brought in.
+-- The constants that follow are written in the units the gun was designed in
+-- (a rifle three studs long held a stud and a bit from the eye); the pose is
+-- multiplied by this once, in onRender, so they can still be read and tuned as
+-- what they look like rather than as what they are in studs.
+--
+-- Rotations are not scaled: a gun that leans ten degrees leans ten degrees at
+-- any size. The camera's near plane is a fixed distance, so it now crops a
+-- slightly larger share of the stock end; that part is behind or far to the
+-- side of the eye at any size, and was never on screen.
+local VIEWMODEL_SCALE = 0.3
+
 -- Where the Handle sits in camera space, per weapon. The rifle is longer, so it
--- is held further back and lower to keep the stock out of the near plane.
+-- is held further back and lower to keep the stock out of the near plane; the
+-- Lance is longer still.
 local HOLD = {
 	Rifle = Vector3.new(0.95, -0.95, -1.15),
 	Pistol = Vector3.new(0.78, -0.82, -1.0),
+	Lance = Vector3.new(0.95, -0.95, -1.35),
 }
 local DEFAULT_HOLD = Vector3.new(0.9, -0.9, -1.1)
 
@@ -79,9 +101,10 @@ local RELOAD_RAMP = 0.25
 local RELOAD_DIP = 0.55
 local RELOAD_PITCH = 0.5
 
--- Equip raise, in seconds. Matches WeaponClient's switch lockout so the gun is
--- on screen exactly when it becomes fireable.
-local EQUIP_TIME = 0.35
+-- Equip raise, in seconds. It is the swap lockout itself (both sides read
+-- WeaponConfig.SWITCH_TIME), so the gun is on screen exactly when it becomes
+-- fireable.
+local EQUIP_TIME = WeaponConfig.SWITCH_TIME
 local EQUIP_DROP = 0.9
 
 -- Fraction of the camera's recoil offset the gun rotates *against*. The camera
@@ -170,6 +193,10 @@ local function rebuild()
 	end
 
 	model.Name = "Viewmodel"
+	-- Before anything is anchored or parented: scaling is a property change on a
+	-- loose model, and it takes the Muzzle attachment with it, which is where the
+	-- local beam starts.
+	model:ScaleTo(VIEWMODEL_SCALE)
 	for _, descendant in model:GetDescendants() do
 		if descendant:IsA("BasePart") then
 			descendant.Anchored = true
@@ -288,6 +315,15 @@ function ViewmodelController.getMuzzlePosition(): Vector3?
 end
 
 --[[
+	How much smaller than its design size the gun on screen is, 1 when there is
+	none. VFXController shrinks the near end of the local beam and the muzzle
+	flash by this, so they keep the size on screen they had at the old distance.
+]]
+function ViewmodelController.getScale(): number
+	return if viewmodel then VIEWMODEL_SCALE else 1
+end
+
+--[[
 	Re-evaluate what should be on screen. Public so a shop screen can call it the
 	moment an EquipSkinRequest returns, instead of waiting for ProfileLoaded.
 ]]
@@ -391,9 +427,11 @@ local function onRender(deltaTime: number)
 
 	local hold = HOLD[builtWeaponId] or DEFAULT_HOLD
 	local offset = CFrame.new(
-		hold.X + swayX + bobX,
-		hold.Y + swayY + bobY - dip * RELOAD_DIP - equip * EQUIP_DROP,
-		hold.Z + punch * PUNCH_BACK
+		Vector3.new(
+			hold.X + swayX + bobX,
+			hold.Y + swayY + bobY - dip * RELOAD_DIP - equip * EQUIP_DROP,
+			hold.Z + punch * PUNCH_BACK
+		) * VIEWMODEL_SCALE
 	) * CFrame.Angles(
 		swayY * SWAY_ROT_PER_STUD + punch * PUNCH_PITCH - math.rad(recoilPitch * RECOIL_LAG) - dip * RELOAD_PITCH,
 		-swayX * SWAY_ROT_PER_STUD - math.rad(recoilYaw * RECOIL_LAG),

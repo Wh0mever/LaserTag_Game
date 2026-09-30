@@ -119,6 +119,27 @@ local function onAmmoChanged(ammo)
 	widgets.ammoWeapon.TextColor3 = dim and UITheme.Colors.Warning or UITheme.Colors.TextDim
 end
 
+--[[
+	Marks the player's own side. Both chips were styled the same with Альфа
+	always on the left, so a player on Браво could not tell from the HUD whether
+	the "23" beside their colour was theirs — after a mid-match join or a side
+	switch, not even which colour was theirs.
+]]
+local function refreshOwnTeam()
+	if not widgets or not widgets.scoreChips then
+		return
+	end
+	local own = ClientState.getTeamId()
+	for teamId, chip in widgets.scoreChips do
+		local mine = teamId == own
+		chip.BackgroundTransparency = if mine then 0.45 else 0.78
+		local stroke = chip:FindFirstChildOfClass("UIStroke")
+		if stroke then
+			stroke.Thickness = if mine then 3 else 1.5
+		end
+	end
+end
+
 local function onSlotChanged(slot: number)
 	if not widgets then
 		return
@@ -211,9 +232,13 @@ local function updateCrosshair()
 
 	-- Degrees of cone -> pixels on this viewport, through the camera's focal
 	-- length, so the same spread reads the same on any screen or field of view.
+	-- Those are REAL pixels, and the bars live in the scaled HUD host, where an
+	-- offset is multiplied by the UI scale on its way to the glass: dividing the
+	-- cone by it makes the drawn gap come back out as the true one. The resting
+	-- hole and the ceiling are design sizes and stay in host units.
 	local focal = (camera.ViewportSize.Y * 0.5) / math.tan(math.rad(camera.FieldOfView * 0.5))
-	local gap =
-		MathUtil.clamp(CROSSHAIR_MIN_GAP + focal * math.tan(math.rad(spreadDeg)), CROSSHAIR_MIN_GAP, CROSSHAIR_MAX_GAP)
+	local cone = focal * math.tan(math.rad(spreadDeg)) / UIController.scale
+	local gap = MathUtil.clamp(CROSSHAIR_MIN_GAP + cone, CROSSHAIR_MIN_GAP, CROSSHAIR_MAX_GAP)
 
 	for _, entry in widgets.crosshairBars do
 		entry.bar.Position = UDim2.new(0.5, entry.dx * gap, 0.5, entry.dy * gap)
@@ -236,7 +261,7 @@ function HUDScreen.init()
 		-- The same intent the number keys publish; WeaponClient decides whether
 		-- the swap is allowed.
 		InputController.SlotPressed:Fire(slot)
-	end)
+	end, { touch = ClientState.isTouchOnly() })
 	trove:Add(function()
 		widgets.destroy()
 	end)
@@ -252,6 +277,8 @@ function HUDScreen.init()
 	trove:Add(ClientState.AttributeChanged:Connect(function(name: string)
 		if name == "InMatch" then
 			refreshVisibility()
+		elseif name == "TeamId" then
+			refreshOwnTeam()
 		end
 	end))
 
@@ -267,6 +294,7 @@ function HUDScreen.init()
 	onSlotChanged(ClientState.currentSlot)
 	onMatchChanged(ClientState.match)
 	refreshVisibility()
+	refreshOwnTeam()
 end
 
 function HUDScreen.start()

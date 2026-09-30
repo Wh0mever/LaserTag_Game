@@ -24,14 +24,19 @@ SpinConfig.EXTRA_SPIN_COST = 600
 -- forced onto a skin segment.
 SpinConfig.PITY_THRESHOLD = 10
 
--- A skin the player already owns converts to coins at this fraction of price.
---
--- This is what stops the wheel becoming a coin shredder for its best customers.
--- At 0.5 a player who owned the wheel's skins got back 0.69 coins per coin
--- spent — the paid spin was a straight loss for exactly the people most likely
--- to buy one, and nothing on screen said so. At 0.6 the paid spin stays
--- (slightly) worth taking even with the whole wheel already owned.
-SpinConfig.DUPLICATE_REFUND_RATIO = 0.6
+--[[
+	A skin the player already owns converts to coins at this fraction of price.
+
+	It must leave a PAID spin losing coins on average once the wheel's skins are
+	all owned. At 0.6 it did not: 430 back from the coin segments plus 240 from
+	duplicates is 670 for a 600-coin spin, +80 per spin with pity counted, and
+	with a spin every few seconds that was about 1,450 coins a minute against
+	about 60 a minute for playing — a macro on the wheel out-earned any player
+	and emptied the shop of meaning. At 0.35 a collector's paid spin loses
+	about 27 coins on average: still a gamble worth a try, never a printer.
+	Economy.spec pins both sides of that.
+]]
+SpinConfig.DUPLICATE_REFUND_RATIO = 0.35
 
 --[[
 	Wheel segments. `weight` is the displayed percentage chance.

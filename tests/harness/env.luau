@@ -44,6 +44,13 @@ Env.renderBindings = {}
 -- Desktop unless a scenario says otherwise; see Env.setDevice.
 Env.device = { TouchEnabled = false, KeyboardEnabled = true, MouseEnabled = true }
 Env.boundActions = {}
+-- Optional stand-ins a scenario installs: what workspace:Raycast answers, and
+-- what UserInputService:GetLastInputType reports. Both default to "nothing".
+Env.raycast = nil
+Env.lastInputType = nil
+-- Every warn() the game issued, in order, so a scenario can assert on what was
+-- logged and not only that something was.
+Env.warnings = {}
 -- Seconds the game has asked task.wait for. Nothing real elapses; this is how a
 -- check tells a loop that waited from one that did not.
 Env.virtualTime = 0
@@ -54,6 +61,42 @@ end
 
 function Env.calls(): { [string]: number }
 	return recorded
+end
+
+--[[
+	The clock the game code reads.
+
+	os.clock and Workspace:GetServerTimeNow are real time unless a scenario
+	installs a virtual one, which is what lets a fire-rate or reload check run a
+	minute of play in no time and get the same answer every run. Env.useVirtualClock
+	ties both to the scheduler's clock, so a task.delay lands exactly when
+	Env.advance says it does and a module reading os.clock sees the same moment.
+]]
+local clockSource: (() -> number)? = nil
+
+function Env.now(): number
+	local source = clockSource
+	return if source then source() else os.clock()
+end
+
+function Env.useVirtualClock()
+	clockSource = function()
+		return Env.virtualTime
+	end
+end
+
+--[[
+	What Workspace:Raycast answers. There is no physics here, so by default a ray
+	hits nothing; a scenario that needs geometry installs a function taking
+	(origin, direction, params) and returning the result table or nil.
+]]
+Env.raycastHandler = nil
+-- What workspace:GetPartBoundsInBox answers; see Env.enableClientRuntime.
+Env.partBoundsHandler = nil
+
+-- Fire RunService.Heartbeat once, the way one frame of a running game would.
+function Env.stepHeartbeat(dt: number?)
+	Env.service("RunService").Heartbeat:Fire(dt or 1 / 60)
 end
 
 -- Virtual seconds spent inside task.wait since `from` (default: the start).
@@ -419,6 +462,7 @@ Env.instanceEvent = instanceEvent
 for _, entry in
 	{
 		{ class = "GuiButton", events = { "Activated", "MouseButton1Click", "MouseButton1Down", "MouseButton1Up" } },
+		{ class = "Humanoid", events = { "Died" } },
 		{ class = "GuiObject", events = { "MouseEnter", "MouseLeave", "InputBegan", "InputEnded", "InputChanged" } },
 		{ class = "Instance", events = { "Changed", "ChildAdded", "ChildRemoved", "AncestryChanged", "Destroying" } },
 	}
@@ -461,6 +505,21 @@ end
 
 function Handle:FindFirstChild(name: string)
 	return rawget(self, name) or Env.handleFor(self.__dir .. "/" .. name)
+end
+
+--[[
+	Modules ask what a sibling is before requiring it (`module:IsA("ModuleScript")`),
+	which is how a lazy require avoids a load-time cycle. A file is a ModuleScript,
+	a directory a Folder.
+]]
+function Handle:IsA(className: string)
+	if className == "Instance" then
+		return true
+	end
+	if self.__file then
+		return className == "ModuleScript" or className == "LuaSourceContainer"
+	end
+	return className == "Folder"
 end
 
 function Handle:GetChildren()
@@ -534,6 +593,7 @@ local function makeInstanceService(className: string)
 end
 
 local function buildServices()
+	Env.lastInputType = nil
 	-- Real service classes, not stand-in Folders. Lune validates every property
 	-- against Roblox's class database, so `Lighting.Technology` and
 	-- `Workspace.CurrentCamera` are checked for real — and a typo in one fails
@@ -620,7 +680,9 @@ local function buildServices()
 
 	services.RunService = {
 		Name = "RunService",
-		Heartbeat = signal(),
+		-- Live, but nothing fires it on its own: a scenario steps it with
+		-- Env.stepHeartbeat, so per-frame logic runs only when a check asks.
+		Heartbeat = liveSignal(),
 		Stepped = signal(),
 		RenderStepped = signal(),
 		IsServer = function()
@@ -704,8 +766,9 @@ local function buildServices()
 		UserId = 1,
 		Character = nil,
 		PlayerGui = playerGui,
-		CharacterAdded = signal(),
-		CharacterRemoving = signal(),
+		-- Live: a respawn is something a scenario has to be able to cause.
+		CharacterAdded = liveSignal(),
+		CharacterRemoving = liveSignal(),
 		GetAttribute = function(_self, name: string)
 			return attributes[name]
 		end,
@@ -742,15 +805,31 @@ local function buildServices()
 		TouchEnabled = Env.device.TouchEnabled,
 		KeyboardEnabled = Env.device.KeyboardEnabled,
 		MouseEnabled = Env.device.MouseEnabled,
-		GamepadEnabled = false,
+		GamepadEnabled = Env.device.GamepadEnabled == true,
 		-- Live, not inert: the touch controls are driven entirely through these,
 		-- and a scenario has to be able to put a finger on the glass.
 		InputBegan = liveSignal(),
 		InputEnded = liveSignal(),
 		InputChanged = liveSignal(),
 		WindowFocusReleased = signal(),
+		GamepadConnected = liveSignal(),
+		GamepadDisconnected = liveSignal(),
+		-- What the player last touched; Env.setLastInputType moves it.
+		LastInputTypeChanged = liveSignal(),
 		GetMouseDelta = function()
 			return roblox.Vector2.new(0, 0)
+		end,
+		-- What the last real input was. A phone's is a finger unless a scenario
+		-- says otherwise (Env.lastInputType); a touchscreen laptop's is a mouse,
+		-- which is exactly the difference the recoil scale has to tell apart.
+		GetLastInputType = function()
+			if Env.lastInputType then
+				return Env.lastInputType
+			end
+			if Env.device.TouchEnabled and not Env.device.MouseEnabled then
+				return roblox.Enum.UserInputType.Touch
+			end
+			return roblox.Enum.UserInputType.MouseButton1
 		end,
 	}
 
@@ -1088,7 +1167,9 @@ local function buildEnvironment(scriptHandle: any)
 			for _, v in { ... } do
 				table.insert(parts, tostring(v))
 			end
-			print("[warn] " .. table.concat(parts, " "))
+			local line = table.concat(parts, " ")
+			table.insert(Env.warnings, line)
+			print("[warn] " .. line)
 		end,
 
 		print = print,
@@ -1114,7 +1195,7 @@ local function buildEnvironment(scriptHandle: any)
 		math = math,
 		table = table,
 		string = string,
-		os = { time = os.time, clock = os.clock, date = os.date },
+		os = { time = os.time, clock = Env.now, date = os.date },
 		coroutine = coroutine,
 		utf8 = utf8,
 		buffer = buffer,
@@ -1124,6 +1205,93 @@ local function buildEnvironment(scriptHandle: any)
 	env._G = env
 
 	return env
+end
+
+--------------------------------------------------------------------------------
+-- Property writes the engine would refuse
+--
+-- Lune backs every Instance with Roblox's class database, and it accepts a
+-- write to any property that exists in it. The engine does not: a property
+-- whose Scriptability is "None" or "Read" (Lighting.Technology is the one that
+-- bit this game) throws when a script sets it. The mock cannot see that from
+-- the inside, because the write happens on an opaque userdata, so it is caught
+-- here instead: every module is read for assignments to a variable whose class
+-- is spelled out on its own declaration (`game:GetService("X")` or
+-- `Instance.new("X")`), and each one is looked up in the reflection database.
+--
+-- This is deliberately a scan of what the source says, not a full type
+-- checker: a variable of unknown class is never flagged, so it can miss a
+-- write but cannot invent one.
+--------------------------------------------------------------------------------
+
+local reflection = roblox.getReflectionDatabase()
+
+local function scriptabilityOf(className: string, property: string): string?
+	local class = reflection:GetClass(className)
+	while class do
+		local found = class.Properties[property]
+		if found then
+			return tostring(found.Scriptability)
+		end
+		class = if class.Superclass then reflection:GetClass(class.Superclass) else nil
+	end
+	return nil
+end
+
+--[[
+	Returns one message per assignment in `source` to a property a script may
+	not write. `path` only labels the messages.
+]]
+function Env.unwritableAssignments(path: string, source: string): { string }
+	local problems = {}
+	local classOf: { [string]: string } = {}
+	local inBlockComment = false
+
+	for lineNumber, line in string.split(source, "\n") do
+		local text = line
+		if inBlockComment then
+			if string.find(text, "]]", 1, true) then
+				inBlockComment = false
+			end
+			text = ""
+		elseif string.find(text, "--[[", 1, true) then
+			inBlockComment = not string.find(text, "]]", 1, true)
+			text = ""
+		end
+		text = string.gsub(text, "%-%-.*$", "")
+
+		local declared, service = string.match(text, 'local%s+([%a_][%w_]*)%s*=%s*game:GetService%("(%w+)"%)')
+		if declared then
+			classOf[declared] = service
+		end
+		local made, className = string.match(text, 'local%s+([%a_][%w_]*)[%w_:%s]-=%s*Instance%.new%("(%w+)"')
+		if made then
+			classOf[made] = className
+		end
+
+		local from = 1
+		while true do
+			local first, last, object, property = string.find(text, "([%a_][%w_]*)%.([%a_][%w_]*)%s*=[^=]", from)
+			if not first then
+				break
+			end
+			from = last
+			-- `a.b.c = 1` writes c on a.b, not b on a; and `x:y.z` is not a field.
+			local before = if first > 1 then string.sub(text, first - 1, first - 1) else ""
+			local owner = classOf[object]
+			if owner and before ~= "." and before ~= ":" then
+				local scriptability = scriptabilityOf(owner, property)
+				if scriptability == "None" or scriptability == "Read" then
+					table.insert(
+						problems,
+						`{path}:{lineNumber}: {owner}.{property} has Scriptability "{scriptability}" and throws when written`
+					)
+				end
+			end
+		end
+	end
+
+	return problems
 end
 
 --[[
@@ -1145,6 +1313,13 @@ function Env.requireHandle(target: any): any
 	moduleResults[file] = false
 
 	local source = fs.readFile(file)
+	if not string.find(file, "/Vendor/", 1, true) then
+		local problems = Env.unwritableAssignments(file, source)
+		if #problems > 0 then
+			moduleResults[file] = nil
+			error(`[harness] {table.concat(problems, "; ")}`, 0)
+		end
+	end
 	local chunk = luau.load(source, {
 		debugName = file,
 		environment = buildEnvironment(target),
@@ -1162,6 +1337,20 @@ function Env.requireHandle(target: any): any
 
 	moduleResults[file] = result
 	return result
+end
+
+--[[
+	Stand `value` in for the module at `modulePath` for everything loaded after
+	this. For driving one module whose neighbours reach DataStores, characters
+	or the network: the match runtime is worth running for real, the services
+	it calls are not what is under test.
+]]
+function Env.provide(modulePath: string, value: any)
+	local handle = Env.handleFor(REPO_ROOT .. "/" .. modulePath)
+	if not handle then
+		error(`[harness] no module at {modulePath}`)
+	end
+	moduleResults[handle.__file] = value
 end
 
 --[[
@@ -1198,8 +1387,6 @@ end
 local clientMethodsInstalled = false
 
 function Env.enableClientRuntime()
-	local signal = inertSignal
-
 	-- A real Camera, not a stand-in: client code parents things to it and hands
 	-- it to functions that demand an Instance. ViewportSize only exists while a
 	-- game runs, so it has no stored default — writing one makes it readable.
@@ -1217,16 +1404,30 @@ function Env.enableClientRuntime()
 	if not clientMethodsInstalled then
 		clientMethodsInstalled = true
 
-		roblox.implementMethod("Workspace", "Raycast", function()
+		roblox.implementMethod("Workspace", "Raycast", function(_self, origin, direction, params)
 			record("workspace:Raycast")
-			return nil
+			-- A scenario that needs a wall installs a handler; without one the world
+			-- is empty, as it always was. Two names because two suites grew one each.
+			local handler = Env.raycastHandler or Env.raycast
+			return if handler then handler(origin, direction, params) else nil
 		end)
-		roblox.implementMethod("Workspace", "GetPartBoundsInBox", function()
-			return {}
+		-- Nothing overlaps anything without physics; a scenario that needs a
+		-- pad with somebody on it installs Env.partBoundsHandler(cframe, size,
+		-- params) and answers with the parts it wants found.
+		roblox.implementMethod("Workspace", "GetPartBoundsInBox", function(_self, cframe, size, params)
+			local handler = Env.partBoundsHandler
+			return if handler then handler(cframe, size, params) else {}
 		end)
 		roblox.implementMethod("Workspace", "GetServerTimeNow", function()
-			return os.clock()
+			return Env.now()
 		end)
+		-- Playback exists only in a running game. Recorded rather than silent,
+		-- so a check can still ask whether a sound was played.
+		for _, method in { "Play", "Stop", "Pause", "Resume" } do
+			roblox.implementMethod("Sound", method, function()
+				record(`Sound:{method}`)
+			end)
+		end
 	end
 
 	-- The server creates ReplicatedStorage.Remotes at boot, so on a real client
@@ -1246,7 +1447,9 @@ function Env.enableClientRuntime()
 		remote = {
 			Name = name,
 			ClassName = "RemoteEvent",
-			OnClientEvent = signal(),
+			-- Live, so a suite can deliver a server event through the client's own
+			-- handler instead of writing the state the handler would have written.
+			OnClientEvent = liveSignal(),
 			FireServer = function()
 				record("remote:FireServer")
 			end,
@@ -1299,6 +1502,15 @@ function Env.service(name: string)
 end
 
 --[[
+	Swap a service for one a scenario built itself, before any module that reads
+	it is loaded (modules keep the table they were handed). For code that parents
+	real Instances to a Player, which a table cannot be.
+]]
+function Env.setService(name: string, value: any)
+	services[name] = value
+end
+
+--[[
 	Which device the sandbox pretends to be. Desktop by default, so every
 	scenario written before this existed keeps the machine it was written for.
 
@@ -1314,6 +1526,10 @@ function Env.setDevice(profile: string)
 		Env.device = { TouchEnabled = true, KeyboardEnabled = false, MouseEnabled = false }
 	elseif profile == "desktop" then
 		Env.device = { TouchEnabled = false, KeyboardEnabled = true, MouseEnabled = true }
+	elseif profile == "gamepad" then
+		-- A console, or a PC with only a pad plugged in: no touch, no mouse, no
+		-- keyboard. Movement and camera come from Roblox's default controls.
+		Env.device = { TouchEnabled = false, KeyboardEnabled = false, MouseEnabled = false, GamepadEnabled = true }
 	elseif profile == "touchLaptop" then
 		-- Touch AND a mouse. Must keep desktop behaviour: treating this as a
 		-- phone would take the cursor away from someone who has one.
@@ -1322,6 +1538,17 @@ function Env.setDevice(profile: string)
 		error(`[harness] unknown device profile "{profile}"`, 2)
 	end
 	buildServices()
+end
+
+--[[
+	Reports what the player last used, the way UserInputService does when they
+	switch from the touchscreen to the keyboard or back. `name` is an
+	Enum.UserInputType member name.
+]]
+function Env.setLastInputType(name: string)
+	local item = (roblox.Enum.UserInputType :: any)[name]
+	Env.lastInputType = item
+	services.UserInputService.LastInputTypeChanged:Fire(item)
 end
 
 --[[
@@ -1400,7 +1627,10 @@ function Env.reset()
 	-- the new client's state.
 	table.clear(parked)
 	table.clear(Env.spawnErrors)
+	table.clear(Env.warnings)
 	Env.virtualTime = 0
+	Env.raycast = nil
+	Env.lastInputType = nil
 	buildServices()
 end
 

@@ -34,6 +34,14 @@
 	`onChanged` fires on every step so a sensitivity change can be felt while
 	dragging; `onCommitted` fires once on release, which is what the caller should
 	use for anything that costs something — a network save, for instance.
+
+	A MOUSE press jumps to the pointer at once. A TOUCH does not: the sliders sit
+	in a vertical ScrollingFrame, on a phone a large share of which is slider
+	track, and a finger that lands on one to scroll the panel used to set the
+	value where it touched down and save it on release. So a touch waits to see
+	what it is. Sideways past DRAG_SLOP pixels it is a drag and follows the
+	finger; upwards or downwards it is a scroll and this slider never hears of
+	it; lifted without going anywhere it is a tap and goes to that point.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -51,7 +59,13 @@ Slider.__index = Slider
 
 local ROW_HEIGHT = 62
 local TRACK_HEIGHT = 6
+-- The part of the row that answers a touch: the knob's height and then some,
+-- which is what a thumb can actually hit.
+local HIT_HEIGHT = 32
 local KNOB_SIZE = 18
+-- How far a finger may wander before it has decided what it is doing. Real
+-- pixels: a thumb resting on glass moves a few without meaning to.
+local DRAG_SLOP = 8
 
 --[[
 	Where a screen-space X sits along `track`, as 0..1.
@@ -81,6 +95,12 @@ function Slider.create(props: { [string]: any })
 	self._onCommitted = props.onCommitted
 	self._value = SettingsConfig.clamp(definition.id, props.value)
 	self._dragging = false
+	-- The touch that has landed on the track and not yet decided: its
+	-- InputObject and where it began.
+	self._pending = nil
+	-- The InputObject of the touch that is dragging, so a second finger
+	-- elsewhere on the screen cannot steer the knob or end the drag.
+	self._dragInput = nil
 
 	local accent = props.accentColor or UITheme.Colors.Accent
 
@@ -122,20 +142,37 @@ function Slider.create(props: { [string]: any })
 	hint.ZIndex = 3
 	hint.Parent = root
 
-	-- The track is a button purely so it receives input; it draws as a bar.
+	--[[
+		The track is an invisible button HIT_HEIGHT tall, with the visible bar
+		centred inside it. The bar itself used to be the button, and it is 6 px
+		tall: a thumb had to land on a strip about a millimetre and a half high,
+		and a touch on the knob's upper or lower half, or anywhere else in the
+		row, did nothing. Same width as the bar, so the value under a finger is
+		computed exactly as before.
+	]]
 	local track = Instance.new("TextButton")
 	track.Name = "Track"
 	track.Text = ""
 	track.AutoButtonColor = false
 	track.AnchorPoint = Vector2.new(0, 0.5)
 	track.Position = UDim2.new(0, 0, 0, 48)
-	track.Size = UDim2.new(1, 0, 0, TRACK_HEIGHT)
-	track.BackgroundColor3 = UITheme.Colors.PanelDark
+	track.Size = UDim2.new(1, 0, 0, HIT_HEIGHT)
+	track.BackgroundTransparency = 1
 	track.BorderSizePixel = 0
 	track.ZIndex = 3
 	track.Parent = root
-	UITheme.corner(UITheme.Radius.Pill).Parent = track
 	self._track = track
+
+	local bar = Instance.new("Frame")
+	bar.Name = "Bar"
+	bar.AnchorPoint = Vector2.new(0, 0.5)
+	bar.Position = UDim2.fromScale(0, 0.5)
+	bar.Size = UDim2.new(1, 0, 0, TRACK_HEIGHT)
+	bar.BackgroundColor3 = UITheme.Colors.PanelDark
+	bar.BorderSizePixel = 0
+	bar.ZIndex = 3
+	bar.Parent = track
+	UITheme.corner(UITheme.Radius.Pill).Parent = bar
 
 	local fill = Instance.new("Frame")
 	fill.Name = "Fill"
@@ -143,7 +180,7 @@ function Slider.create(props: { [string]: any })
 	fill.BackgroundColor3 = accent
 	fill.BorderSizePixel = 0
 	fill.ZIndex = 4
-	fill.Parent = track
+	fill.Parent = bar
 	UITheme.corner(UITheme.Radius.Pill).Parent = fill
 	self._fill = fill
 
@@ -155,7 +192,7 @@ function Slider.create(props: { [string]: any })
 	knob.BackgroundColor3 = UITheme.Colors.Text
 	knob.BorderSizePixel = 0
 	knob.ZIndex = 5
-	knob.Parent = track
+	knob.Parent = bar
 	UITheme.corner(UITheme.Radius.Pill).Parent = knob
 	UITheme.stroke(accent, 2).Parent = knob
 	self._knob = knob
@@ -186,27 +223,52 @@ function Slider.create(props: { [string]: any })
 	self._applyFraction = applyFraction
 
 	trove:Connect(track.InputBegan, function(input: InputObject)
-		if
-			input.UserInputType ~= Enum.UserInputType.MouseButton1
-			and input.UserInputType ~= Enum.UserInputType.Touch
-		then
-			return
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			self._pending = nil
+			self._dragging = true
+			-- Jump to where the track was pressed: clicking a point on a slider
+			-- should go there, not nudge from wherever the knob happened to be.
+			applyFraction(fractionFor(track, input.Position.X), true)
+		elseif input.UserInputType == Enum.UserInputType.Touch and not self._dragging then
+			-- Replaces whatever was pending: a touch that never reported its
+			-- end (the app lost focus mid-gesture) must not leave the slider
+			-- waiting for it forever.
+			self._pending = { input = input, x = input.Position.X, y = input.Position.Y }
 		end
-
-		self._dragging = true
-		-- Jump to where the track was pressed: clicking a point on a slider
-		-- should go there, not nudge from wherever the knob happened to be.
-		applyFraction(fractionFor(track, input.Position.X), true)
 	end)
 
 	trove:Connect(UserInputService.InputChanged, function(input: InputObject)
+		local pending = self._pending
+		if pending then
+			if input ~= pending.input then
+				return
+			end
+
+			local dx = math.abs(input.Position.X - pending.x)
+			local dy = math.abs(input.Position.Y - pending.y)
+			if math.max(dx, dy) < DRAG_SLOP then
+				return
+			end
+
+			self._pending = nil
+			if dy > dx then
+				-- Vertical: the panel is being scrolled, not the slider dragged.
+				return
+			end
+			self._dragging = true
+			self._dragInput = input
+			applyFraction(fractionFor(track, input.Position.X), true)
+			return
+		end
+
 		if not self._dragging then
 			return
 		end
-		if
-			input.UserInputType ~= Enum.UserInputType.MouseMovement
-			and input.UserInputType ~= Enum.UserInputType.Touch
-		then
+		if self._dragInput then
+			if input ~= self._dragInput then
+				return
+			end
+		elseif input.UserInputType ~= Enum.UserInputType.MouseMovement then
 			return
 		end
 
@@ -214,17 +276,32 @@ function Slider.create(props: { [string]: any })
 	end)
 
 	trove:Connect(UserInputService.InputEnded, function(input: InputObject)
+		local pending = self._pending
+		if pending and input == pending.input then
+			-- Never went anywhere: a tap. It goes to the point touched, and is
+			-- saved if that moved the slider.
+			self._pending = nil
+			local before = self._value
+			applyFraction(fractionFor(track, input.Position.X), true)
+			if self._value ~= before and self._onCommitted then
+				self._onCommitted(self._value)
+			end
+			return
+		end
+
 		if not self._dragging then
 			return
 		end
-		if
-			input.UserInputType ~= Enum.UserInputType.MouseButton1
-			and input.UserInputType ~= Enum.UserInputType.Touch
-		then
+		if self._dragInput then
+			if input ~= self._dragInput then
+				return
+			end
+		elseif input.UserInputType ~= Enum.UserInputType.MouseButton1 then
 			return
 		end
 
 		self._dragging = false
+		self._dragInput = nil
 		if self._onCommitted then
 			self._onCommitted(self._value)
 		end

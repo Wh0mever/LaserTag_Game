@@ -9,6 +9,9 @@
 	  2. Load Controllers (input, camera, weapons, VFX) — they own game feel.
 	  3. Load UI screens once controllers exist, so screens can subscribe to
 	     controller signals during their own init().
+
+	ResetButton and ClientState sit beside this file rather than in a folder the
+	Loader walks: they are required by whoever needs them, not run as modules.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -31,7 +34,20 @@ print(`[LaserTag] Client booting ({Constants.VERSION})`)
 pcall(function()
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
+	-- Our scoreboard replaces it. Left on, Roblox's list sat in the top-right
+	-- corner over the kill feed, and Tab opened both at once.
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
 end)
+
+-- Roblox's own Reset Character option is a way out of a lost duel; it is off
+-- for the length of a match. Started first so it is already following the
+-- player when the first match begins.
+local resetOk, resetErr = pcall(function()
+	require(script.ResetButton).watch()
+end)
+if not resetOk then
+	warn(`[LaserTag] Reset button control failed to start: {resetErr}`)
+end
 
 local clientRoot = script
 

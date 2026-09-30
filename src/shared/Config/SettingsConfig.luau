@@ -44,7 +44,7 @@ SettingsConfig.Definitions = {
 		id = "Perspective",
 		kind = "choice",
 		label = "ВИД",
-		hint = "От третьего лица видно себя и углы; от первого — точнее прицел",
+		hint = "Сзади видно углы; от первого лица точнее прицел",
 		default = "Third",
 		options = {
 			{ id = "Third", label = "ОТ ТРЕТЬЕГО ЛИЦА" },
@@ -54,7 +54,11 @@ SettingsConfig.Definitions = {
 	{
 		id = "Sensitivity",
 		label = "ЧУВСТВИТЕЛЬНОСТЬ МЫШИ",
-		hint = "Насколько поворачивается вид при том же движении мыши",
+		hint = "Скорость поворота вида от мыши",
+		-- It drives UserInputService.MouseDeltaSensitivity, which a phone does
+		-- not have: Roblox exposes no sensitivity for its touch camera at all.
+		-- Shown on a phone, this slider moved and changed nothing.
+		requires = "mouse",
 		min = 0.2,
 		max = 3,
 		default = 1,

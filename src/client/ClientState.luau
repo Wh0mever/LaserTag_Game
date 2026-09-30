@@ -24,7 +24,7 @@
 	  Respawned      ()
 	  HitConfirmed   (payload: table)          -- {victimUserId, damage, isHeadshot, hitPos, killed}
 	  DamageTaken    (payload: table)          -- {attackerUserId, damage, fromPosition}
-	  QueueChanged   (mapId, count, needed, countdown)   -- mirrors the remote args
+	  QueueChanged   (mapId, count, needed, countdown, closing)   -- mirrors the remote args
 	  ShotFired      (shooterUserId, weaponId, muzzlePos, hitPos, color) -- mirrors the remote args
 	  AttributeChanged (name: string, value: any)        -- for the replicated player attributes
 ]]
@@ -71,12 +71,17 @@ ClientState.spin = { nextFreeAt = 0, pity = 0 }
 ClientState.settings = SettingsConfig.defaults()
 
 ClientState.match = { mapId = nil, phase = "Idle", timeLeft = 0, scores = { A = 0, B = 0 }, data = {} }
-ClientState.queue = { mapId = nil, count = 0, needed = 0, countdown = nil }
+ClientState.queue = { mapId = nil, count = 0, needed = 0, countdown = nil, closing = false }
 
 ClientState.ammo = { weaponId = Constants.SLOTS[Constants.DEFAULT_SLOT], mag = 0, magSize = 0, reloading = false }
 ClientState.currentSlot = Constants.DEFAULT_SLOT
 ClientState.isDead = false
 ClientState.isTouch = false
+-- While the reward wheel is turning, the coin counter waits: the server pays
+-- the prize before it answers, so the counter would count up and give the
+-- result away before the wheel had landed. SpinScreen raises this and lowers
+-- it when the wheel stops.
+ClientState.holdCoinDisplay = false
 
 --------------------------------------------------------------------------------
 -- Signals
@@ -159,6 +164,23 @@ end
 ]]
 function ClientState.getMapId(): string
 	return player:GetAttribute("InMatch") or ""
+end
+
+--[[
+	Whether the phone chrome is the right chrome: a touchscreen and nothing else.
+
+	ClientState.isTouch is TouchEnabled alone, and a touchscreen laptop reports
+	that as true while also having a mouse and a keyboard. Layouts that swap
+	keys for thumbs (the key badges and the cursor-release hint, the folded
+	menu, the welcome card's controls) go by this instead, so a Surface player
+	is not shown a thumbstick they do not have and denied the key that frees
+	their cursor.
+
+	A function, not a field: a keyboard or mouse can be plugged into a tablet
+	after the client has booted, and the answer must follow it.
+]]
+function ClientState.isTouchOnly(): boolean
+	return UserInputService.TouchEnabled and not UserInputService.MouseEnabled and not UserInputService.KeyboardEnabled
 end
 
 function ClientState.isInMatch(): boolean
@@ -286,9 +308,17 @@ local function onMatchTick(mapId: string, timeLeft: number, scoreA: number, scor
 	ClientState.MatchChanged:Fire(match)
 end
 
-local function onQueueUpdate(mapId: string, count: number, needed: number, countdown: number?)
-	ClientState.queue = { mapId = mapId, count = count or 0, needed = needed or 0, countdown = countdown }
-	ClientState.QueueChanged:Fire(mapId, count or 0, needed or 0, countdown)
+local function onQueueUpdate(mapId: string, count: number, needed: number, countdown: number?, closing: boolean?)
+	ClientState.queue = {
+		mapId = mapId,
+		count = count or 0,
+		needed = needed or 0,
+		countdown = countdown,
+		-- The match behind the pad is in its last minute and will seat nobody,
+		-- which is what the sign says too. Absent from an older server: not closing.
+		closing = closing == true,
+	}
+	ClientState.QueueChanged:Fire(mapId, count or 0, needed or 0, countdown, closing == true)
 end
 
 local function onAmmoSync(weaponId: string, mag: number, magSize: number, reloading: boolean, ackSeq: number?)

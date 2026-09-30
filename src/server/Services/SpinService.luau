@@ -44,16 +44,18 @@ local Validators = require(script.Parent.Parent.Net.Validators)
 local SpinService = {}
 SpinService.Priority = 6
 
--- Rate limit from the network contract. Three per ten seconds is generous for a
--- wheel whose animation alone takes several seconds, and caps how fast a script
--- could burn a balance on extra spins.
-local SPIN_RATE, SPIN_WINDOW = 3, 10
+-- Rate limit from the network contract. It has to sit ABOVE the wheel's own
+-- pace: at three per ten seconds a player spinning again the moment the 3.2 s
+-- animation stopped had every fourth spin refused — and every refusal counted
+-- towards the session's kick. The in-flight lock and the coin price are what
+-- stop abuse; this only caps a script.
+local SPIN_RATE, SPIN_WINDOW = 5, 10
 
 local ERRORS = {
-	NoProfile = "Your data is still loading",
-	InFlight = "Your wheel is still spinning",
-	NeedCoins = `An extra spin costs {SpinConfig.EXTRA_SPIN_COST} coins`,
-	Failed = "The wheel is unavailable right now",
+	NoProfile = "Ваши данные ещё загружаются",
+	InFlight = "Колесо ещё крутится",
+	NeedCoins = `Дополнительное вращение стоит {SpinConfig.EXTRA_SPIN_COST} монет`,
+	Failed = "Колесо сейчас недоступно",
 }
 
 local rng = Random.new()

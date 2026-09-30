@@ -142,9 +142,15 @@ function Validators.getRootPart(player: any): BasePart?
 end
 
 --[[
-	Where the server believes the player's eyes are. Derived from the root part
-	rather than the Head so a client that deletes or detaches its own Head cannot
-	move the reference point used to bound shot origins.
+	Where the character's eyes are right now. Derived from the root part rather
+	than the Head so a client that deletes or detaches its own Head cannot move
+	it.
+
+	Live, which means client-owned: the client simulates its character and the
+	server accepts what it reports, so this is a claim about where the player is.
+	Shots are not resolved from it. Combat/CharacterTracker.eyePosition is the
+	position the server holds a player to, and the one to use for anything that
+	must not be spoofable.
 ]]
 function Validators.getHeadPosition(player: any): Vector3?
 	local root = Validators.getRootPart(player)

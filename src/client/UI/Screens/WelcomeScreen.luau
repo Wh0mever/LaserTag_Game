@@ -31,6 +31,7 @@
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
 assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.json")
@@ -102,14 +103,30 @@ local function steps(): { { title: string, body: string } }
 end
 
 local function controlLines(): { { action: string, keys: string } }
-	if ClientState.isTouch then
+	if ClientState.isTouchOnly() then
 		return {
 			{ action = "Движение", keys = "Левый стик" },
 			{ action = "Обзор", keys = "Свайп по правой половине" },
 			{ action = "Огонь", keys = "Кнопка огня" },
 			{ action = "Перезарядка и смена", keys = "Кнопки рядом с огнём" },
-			{ action = "Меню", keys = "Кнопки слева" },
-			{ action = "Вид", keys = "Кнопка ВИД" },
+			{ action = "Выбор оружия", keys = "Кнопки внизу по центру" },
+			{ action = "Меню", keys = "Кнопка ☰ слева вверху" },
+			{ action = "Таблица счёта", keys = "Нажми на счёт вверху" },
+			{ action = "Вид от 1-го / 3-го лица", keys = "Кнопка с глазом" },
+		}
+	end
+
+	-- A controller and nothing else: a console, or a pad on a PC with no keyboard
+	-- in reach. Same buttons as the settings panel's ГЕЙМПАД list.
+	if UserInputService.GamepadEnabled and not UserInputService.KeyboardEnabled then
+		return {
+			{ action = "Движение и обзор", keys = "Левый и правый стик" },
+			{ action = "Огонь", keys = "RT" },
+			{ action = "Перезарядка", keys = "X" },
+			{ action = "Смена оружия", keys = "LB  ·  RB" },
+			{ action = "Таблица счёта", keys = "View" },
+			{ action = "Скины и закрыть окно", keys = "Y" },
+			{ action = "Магазин, друзья, колесо", keys = "D-pad" },
 		}
 	end
 

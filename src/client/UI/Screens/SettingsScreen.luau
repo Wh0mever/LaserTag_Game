@@ -21,6 +21,7 @@
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
 assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.json")
@@ -41,9 +42,13 @@ SettingsScreen.Priority = 34
 
 -- Reading order for the key list, so it does not come out in whatever order
 -- pairs() happens to walk the table.
+-- The row of panel actions at the foot of the list.
+local ACTION_HEIGHT = 36
+local ACTION_GAP = 10
+
 local KEY_ROWS = {
 	{ action = "Движение", keys = "W A S D" },
-	{ action = "Прыжок", keys = "Space" },
+	{ action = "Прыжок", keys = "Пробел" },
 	{ action = "Огонь", keys = "Левая кнопка мыши" },
 	{ action = "Перезарядка", keys = Constants.KEYBINDS.Reload },
 	{ action = "Слоты оружия", keys = "1 2 3" },
@@ -54,7 +59,24 @@ local KEY_ROWS = {
 	{ action = "Настройки", keys = Constants.KEYBINDS.Settings },
 	{ action = "Сменить вид", keys = Constants.KEYBINDS.Perspective },
 	{ action = "Таблица счёта", keys = "Tab" },
-	{ action = "Освободить курсор", keys = "Right Ctrl" },
+	{ action = "Освободить курсор", keys = "Правый Ctrl" },
+}
+
+-- The same actions on a controller (InputController binds them). A, B and the
+-- sticks are Roblox's own, so they are listed as what they do there.
+local PAD_ROWS = {
+	{ action = "Движение", keys = "Левый стик" },
+	{ action = "Камера", keys = "Правый стик" },
+	{ action = "Прыжок", keys = "A" },
+	{ action = "Огонь", keys = "RT" },
+	{ action = "Перезарядка", keys = "X" },
+	{ action = "Оружие", keys = "LB / RB" },
+	{ action = "Таблица счёта", keys = "View" },
+	{ action = "Скины (закрыть окно)", keys = "Y" },
+	{ action = "Магазин", keys = "D-pad вверх" },
+	{ action = "Друзья", keys = "D-pad вправо" },
+	{ action = "Колесо", keys = "D-pad вниз" },
+	{ action = "Настройки", keys = "D-pad влево" },
 }
 
 local trove = Trove.new()
@@ -72,23 +94,23 @@ local function pushControlValues()
 	end
 end
 
-local function buildKeyList(parent: Instance, order: number)
+local function buildKeyList(parent: Instance, order: number, name: string, title: string, rows, visible: boolean)
 	local root = Instance.new("Frame")
-	root.Name = "Keys"
+	root.Name = name
 	root.LayoutOrder = order
-	root.Size = UDim2.new(1, 0, 0, 18 + #KEY_ROWS * 18)
+	root.Size = UDim2.new(1, 0, 0, 18 + #rows * 18)
 	root.BackgroundTransparency = 1
+	root.Visible = visible
 	root.ZIndex = 3
 	root.Parent = parent
 
-	local header =
-		UITheme.label("УПРАВЛЕНИЕ", UITheme.TextSizes.Small, UITheme.Colors.TextDim, UITheme.Fonts.Bold)
+	local header = UITheme.label(title, UITheme.TextSizes.Small, UITheme.Colors.TextDim, UITheme.Fonts.Bold)
 	header.Name = "Header"
 	header.Size = UDim2.new(1, 0, 0, 16)
 	header.ZIndex = 3
 	header.Parent = root
 
-	for index, entry in KEY_ROWS do
+	for index, entry in rows do
 		local row = Instance.new("Frame")
 		row.Name = entry.action
 		row.Position = UDim2.new(0, 0, 0, 18 + (index - 1) * 18)
@@ -112,6 +134,8 @@ local function buildKeyList(parent: Instance, order: number)
 		keys.ZIndex = 3
 		keys.Parent = row
 	end
+
+	return root
 end
 
 function SettingsScreen.init()
@@ -129,7 +153,7 @@ function SettingsScreen.init()
 			UIController.notifyClosed("Settings")
 		end,
 		title = "НАСТРОЙКИ",
-		subtitle = "Применяется сразу и запоминается до следующего входа",
+		subtitle = "Применяется сразу и запоминается",
 		size = UDim2.fromScale(0.48, 0.72),
 		parent = gui,
 		accentColor = UITheme.Colors.Accent,
@@ -160,6 +184,11 @@ function SettingsScreen.init()
 	-- The control follows from the setting's kind, so adding a setting to
 	-- SettingsConfig is the whole of adding it to this panel.
 	for index, definition in SettingsConfig.Definitions do
+		-- A setting for hardware this device does not have is a control that
+		-- does nothing, so it is not offered.
+		if definition.requires == "mouse" and not UserInputService.MouseEnabled then
+			continue
+		end
 		local control
 		if definition.kind == "choice" then
 			control = ChoiceRow.create({
@@ -201,7 +230,40 @@ function SettingsScreen.init()
 		end
 	end
 
-	buildKeyList(body, #SettingsConfig.Definitions + 1)
+	-- A list of keys on a device with no keys is a list of things the player
+	-- cannot do. A touchscreen laptop has a keyboard and keeps it; a console has
+	-- only the pad, so each list follows its own hardware. A pad plugged in
+	-- after the panel was built is picked up by the events below.
+	local count = #SettingsConfig.Definitions
+	buildKeyList(body, count + 1, "Keys", "УПРАВЛЕНИЕ", KEY_ROWS, UserInputService.KeyboardEnabled)
+	local padList =
+		buildKeyList(body, count + 2, "PadKeys", "ГЕЙМПАД", PAD_ROWS, UserInputService.GamepadEnabled)
+	local function syncPadList()
+		padList.Visible = UserInputService.GamepadEnabled
+	end
+	trove:Connect(UserInputService.GamepadConnected, syncPadList)
+	trove:Connect(UserInputService.GamepadDisconnected, syncPadList)
+
+	--[[
+		The panel's two actions, at the end of the list rather than in the title
+		bar. They used to sit beside the close button, which on a phone put
+		"КАК ИГРАТЬ" across the panel's own title and pushed it past the left
+		edge — a title bar has room for a title and a close button, not three
+		buttons. Down here there is a full row for them on every screen.
+	]]
+	local actions = Instance.new("Frame")
+	actions.Name = "Actions"
+	actions.LayoutOrder = count + 3
+	actions.Size = UDim2.new(1, 0, 0, ACTION_HEIGHT)
+	actions.BackgroundTransparency = 1
+	actions.ZIndex = 3
+	actions.Parent = body
+
+	local actionsLayout = Instance.new("UIListLayout")
+	actionsLayout.FillDirection = Enum.FillDirection.Horizontal
+	actionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	actionsLayout.Padding = UDim.new(0, ACTION_GAP)
+	actionsLayout.Parent = actions
 
 	-- The only way back to the welcome card, which otherwise shows once on a
 	-- first join and is gone. Required lazily to keep the two screens from
@@ -209,10 +271,9 @@ function SettingsScreen.init()
 	local howTo = Button.create({
 		name = "HowToPlay",
 		text = "КАК ИГРАТЬ",
-		size = UDim2.fromOffset(126, 30),
-		position = UDim2.new(1, -232, 0, 13),
-		anchorPoint = Vector2.new(1, 0),
-		parent = panel.body,
+		size = UDim2.new(0.5, -ACTION_GAP / 2, 1, 0),
+		layoutOrder = 1,
+		parent = actions,
 		color = UITheme.Colors.PanelLight,
 		onActivated = function()
 			local ok, WelcomeScreen = pcall(require, script.Parent.WelcomeScreen)
@@ -221,18 +282,17 @@ function SettingsScreen.init()
 			end
 		end,
 	})
-	howTo.instance.ZIndex = 4
+	howTo.label.TextSize = UITheme.TextSizes.Small
 	trove:Add(function()
 		howTo:destroy()
 	end)
 
 	local reset = Button.create({
 		name = "Reset",
-		text = "СБРОСИТЬ НАСТРОЙКИ",
-		size = UDim2.fromOffset(168, 30),
-		position = UDim2.new(1, -56, 0, 13),
-		anchorPoint = Vector2.new(1, 0),
-		parent = panel.body,
+		text = "СБРОСИТЬ ВСЁ",
+		size = UDim2.new(0.5, -ACTION_GAP / 2, 1, 0),
+		layoutOrder = 2,
+		parent = actions,
 		onActivated = function()
 			for id, value in SettingsConfig.defaults() do
 				ClientState.applySetting(id, value)
@@ -241,7 +301,7 @@ function SettingsScreen.init()
 			pushControlValues()
 		end,
 	})
-	reset.instance.ZIndex = 4
+	reset.label.TextSize = UITheme.TextSizes.Small
 	trove:Add(function()
 		reset:destroy()
 	end)

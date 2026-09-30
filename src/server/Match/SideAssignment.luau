@@ -33,6 +33,11 @@ SideAssignment.ALREADY_THERE = "alreadyThere"
 SideAssignment.UNKNOWN_TEAM = "unknownTeam"
 SideAssignment.NOT_PLAYING = "notPlaying"
 SideAssignment.WOULD_UNBALANCE = "wouldUnbalance"
+-- Refusals that are about WHEN, not about the teams. Decided by MatchRuntime,
+-- which knows the clock and the character; listed here so every reason the
+-- client may be told lives in one place.
+SideAssignment.TOO_LATE = "tooLate"
+SideAssignment.NOT_ALIVE = "notAlive"
 
 -- How far apart the two sides may end up. One, not zero: an odd roster can
 -- never be even, and refusing every move on a 5-player match would make the

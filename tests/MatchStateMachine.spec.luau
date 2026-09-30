@@ -157,6 +157,12 @@ return function(t)
 	t.equal(ended and ended.winnerTeam, "A", "the higher score wins")
 	t.equal(ended and ended.scores.A, 3, "endMatch carries the final scores")
 	t.equal(ended and ended.aborted, false, "a played-out match is not aborted")
+	t.equal(ended and ended.reason, nil, "and a match played to the clock is not a forfeit")
+	t.equal(
+		ended and ended.elapsed,
+		CONFIG.matchDuration,
+		"endMatch says how long the match ran, which is what a payout is scaled by"
+	)
 	t.equal(
 		broadcastFor(effects, "Results"),
 		nil,
@@ -173,6 +179,40 @@ return function(t)
 	t.expect(findEffect(effects, "returnToHub") ~= nil, "returning to Idle sends the roster to the hub")
 	t.expect(findEffect(effects, "resetQueue") ~= nil, "returning to Idle drops the queue")
 	t.equal(effects[1].type, "broadcast", "the Idle broadcast goes out before the roster is emptied")
+
+	--------------------------------------------------------------------------
+	-- How long the match has run
+	--------------------------------------------------------------------------
+
+	local clocked = startedMatch(2)
+	t.equal(MatchStateMachine.elapsed(clocked), 0, "a match that has just started has run for no time")
+	MatchStateMachine.handle(clocked, { type = "tick", dt = 7 })
+	t.equal(MatchStateMachine.elapsed(clocked), 7, "elapsed follows the match clock")
+	t.equal(
+		MatchStateMachine.elapsed(MatchStateMachine.new(CONFIG)),
+		0,
+		"a match that is not running has no elapsed time"
+	)
+
+	MatchStateMachine.handle(clocked, { type = "playerLeft", remainingA = 1, remainingB = 1 })
+	MatchStateMachine.handle(clocked, { type = "playerLeft", remainingA = 1, remainingB = 0 })
+	_, effects = MatchStateMachine.handle(clocked, { type = "tick", dt = CONFIG.emptyTeamGrace })
+	local forfeitEnd = findEffect(effects, "endMatch")
+	t.equal(
+		forfeitEnd and forfeitEnd.elapsed,
+		7 + CONFIG.emptyTeamGrace,
+		"a forfeit reports the time up to the moment the grace ran out, not the whole match"
+	)
+
+	local limited = startedMatch(2)
+	MatchStateMachine.handle(limited, { type = "playerLeft", remainingA = 1, remainingB = 1 })
+	MatchStateMachine.handle(limited, { type = "tick", dt = 9 })
+	local limitEffects = nil
+	for _ = 1, limited.scoreLimit do
+		_, limitEffects = MatchStateMachine.handle(limited, { type = "kill", teamId = "A" })
+	end
+	local limitEnd = findEffect(limitEffects, "endMatch")
+	t.equal(limitEnd and limitEnd.elapsed, 9, "a match ended by the score limit reports when that was")
 
 	--------------------------------------------------------------------------
 	-- Countdown aborts when the queue drops below MIN_PLAYERS
@@ -232,15 +272,27 @@ return function(t)
 	_, effects = MatchStateMachine.handle(deserted, { type = "playerLeft", remainingA = 2, remainingB = 0 })
 	t.equal(deserted.phase, "InProgress", "an emptied team does not end the match immediately")
 	t.equal(deserted.emptyTeamTimeLeft, CONFIG.emptyTeamGrace, "an emptied team opens the grace timer")
-	t.equal(#effects, 0, "opening the grace timer produces no effects")
+	-- The players left on the map are told, or they wait in an empty arena with no
+	-- idea why the match has not ended or what will happen.
+	local graceStarted = findEffect(effects, "graceStarted")
+	t.expect(graceStarted ~= nil, "opening the grace timer tells the runtime, so it can tell the players")
+	t.equal(graceStarted and graceStarted.seconds, CONFIG.emptyTeamGrace, "and says how long the grace lasts")
+	t.equal(graceStarted and graceStarted.emptyTeam, "B", "and which side is empty")
+	t.equal(#effects, 1, "and that is all it produces")
+
+	_, effects = MatchStateMachine.handle(deserted, { type = "playerLeft", remainingA = 1, remainingB = 0 })
+	t.equal(#effects, 0, "a further departure inside the grace does not announce it again")
 
 	MatchStateMachine.handle(deserted, { type = "tick", dt = CONFIG.emptyTeamGrace - 1 })
 	t.equal(deserted.phase, "InProgress", "the match survives until the grace period is up")
 
 	-- A team that refills before the grace expires cancels the countdown to the
 	-- early finish entirely.
-	MatchStateMachine.handle(deserted, { type = "playerLeft", remainingA = 2, remainingB = 1 })
+	_, effects = MatchStateMachine.handle(deserted, { type = "playerLeft", remainingA = 2, remainingB = 1 })
 	t.equal(deserted.emptyTeamTimeLeft, nil, "a refilled team clears the grace timer")
+	t.expect(findEffect(effects, "graceCancelled") ~= nil, "and the players are told the match goes on")
+	_, effects = MatchStateMachine.handle(deserted, { type = "playerLeft", remainingA = 2, remainingB = 2 })
+	t.equal(findEffect(effects, "graceCancelled"), nil, "a roster change with no grace running cancels nothing")
 	MatchStateMachine.handle(deserted, { type = "tick", dt = CONFIG.emptyTeamGrace })
 	t.equal(deserted.phase, "InProgress", "a refilled team keeps the match alive")
 
@@ -254,6 +306,11 @@ return function(t)
 	t.expect(desertedEnd ~= nil, "an emptied team emits endMatch")
 	t.equal(desertedEnd and desertedEnd.winnerTeam, "A", "the side still standing wins even while behind on score")
 	t.equal(desertedEnd and desertedEnd.aborted, false, "an early finish still pays out")
+	t.equal(
+		desertedEnd and desertedEnd.reason,
+		"forfeit",
+		"an early finish says the opponents left, so the results can explain a win the scoreline contradicts"
+	)
 
 	--------------------------------------------------------------------------
 	-- Emptied roster: abort straight to Idle, no rewards, no Results

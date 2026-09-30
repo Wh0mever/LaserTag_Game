@@ -43,6 +43,24 @@ local WeaponConfig = require(Shared.Config.WeaponConfig)
 local DataService = {}
 DataService.Priority = 1
 DataService.ProfileLoadedSignal = Signal.new()
+-- (player, lifetimeKills), fired as this server lets a profile go. The player
+-- may already be leaving, so a listener works from the numbers it is handed.
+DataService.ProfileReleasingSignal = Signal.new()
+
+--[[
+	One equipped-skin slot per weapon, derived from WeaponConfig.Order rather
+	than written out. It was written out as Rifle and Pistol, and when the Lance
+	was added nobody added it here: ShopLogic.canEquip treats a missing slot as
+	an unknown weapon, so no skin could ever be put on the Lance. Reconcile
+	backfills the new key into existing profiles on their next load.
+]]
+local function defaultEquippedSkins(): { [string]: string }
+	local slots = {}
+	for _, weaponId in WeaponConfig.Order do
+		slots[weaponId] = SkinCatalog.DEFAULT_SKIN_ID
+	end
+	return slots
+end
 
 -- Bump DataVersion when a field changes meaning rather than when one is added:
 -- Profile:Reconcile() already backfills new keys from this template.
@@ -57,10 +75,7 @@ local PROFILE_TEMPLATE = {
 		BestKillsInMatch = 0,
 	},
 	OwnedSkins = {},
-	EquippedSkins = {
-		Rifle = SkinCatalog.DEFAULT_SKIN_ID,
-		Pistol = SkinCatalog.DEFAULT_SKIN_ID,
-	},
+	EquippedSkins = defaultEquippedSkins(),
 	Spin = {
 		LastFreeSpinAt = 0,
 		Pity = 0,
@@ -72,9 +87,17 @@ local PROFILE_TEMPLATE = {
 	Settings = SettingsConfig.defaults(),
 }
 
+-- A deep copy of what a brand-new profile holds, for checks that a field is
+-- present for everything that needs one (a skin slot for every weapon).
+function DataService.newProfileTemplate()
+	return TableUtil.deepClone(PROFILE_TEMPLATE)
+end
+
 local KEY_PREFIX = "Player_"
-local LOAD_FAILED_MESSAGE = "Could not load your data. Please rejoin."
-local RELEASED_MESSAGE = "Your data was opened on another server. Please rejoin."
+local LOAD_FAILED_MESSAGE =
+	"Не удалось загрузить ваши данные. Зайдите в игру ещё раз."
+local RELEASED_MESSAGE =
+	"Ваши данные открыты на другом сервере. Зайдите в игру ещё раз."
 
 local profileStore = nil
 local profiles: { [Player]: any } = {}
@@ -334,8 +357,29 @@ function DataService.loadPlayer(player: Player)
 	profile:Reconcile()
 
 	profile:ListenToRelease(function()
+		-- Every release this server asks for (the player leaving, a load abandoned
+		-- below) has already dropped the profile from `profiles` and marked the
+		-- player unloaded before it fires. Only a release nobody here asked for is
+		-- a lost session lock.
+		if profiles[player] ~= profile then
+			return
+		end
+
 		profiles[player] = nil
 		player:SetAttribute("Loaded", false)
+
+		-- The vendored ProfileService binds its own BindToClose: it raises
+		-- ServiceLocked and releases every profile before ours gets to run, so at
+		-- shutdown this is the first (and often only) place that sees the release.
+		-- Nothing was taken from anyone, so nobody is kicked, and the numbers are
+		-- announced from here: the profile is already inactive, getData() is nil
+		-- and the shutdown flush would find nothing to write. Profile.Data itself
+		-- stays readable.
+		if ProfileService.ServiceLocked then
+			DataService.ProfileReleasingSignal:Fire(player, profile.Data.Stats.Kills)
+			return
+		end
+
 		player:Kick(RELEASED_MESSAGE)
 	end)
 
@@ -363,6 +407,13 @@ function DataService.releasePlayer(player: Player)
 
 	if profile then
 		player:SetAttribute("Loaded", false)
+
+		-- Announced before the release because this is the last moment the
+		-- numbers are guaranteed to be there, and announced for every way a
+		-- profile is released so no listener depends on which handler ran first.
+		if profile:IsActive() then
+			DataService.ProfileReleasingSignal:Fire(player, profile.Data.Stats.Kills)
+		end
 		profile:Release()
 	end
 end

@@ -13,7 +13,9 @@
 
 	State layout, per key:
 		timestamps    ascending list of accepted request times still in-window
-		violations    how many times this key has hit the limit since the last reset
+		violations    how many times this key has hit the limit recently (see
+		              DEFAULT_VIOLATION_DECAY_SECONDS) or since the last reset
+		lastViolationAt `now` of the newest violation, what the decay measures from
 		cooldownUntil `now` value before which every request is dropped flat
 ]]
 
@@ -23,13 +25,25 @@ export type Config = {
 	maxRequests: number,
 	windowSeconds: number,
 	cooldownSeconds: number?,
+	violationDecaySeconds: number?,
 }
 
 export type Entry = {
 	timestamps: { number },
 	violations: number,
+	lastViolationAt: number?,
 	cooldownUntil: number,
 }
+
+--[[
+	How long a violation is remembered. Five of them end in a kick, and they used
+	to be kept for the whole session: a player who tapped a button too fast a few
+	times an evening, minutes apart, was eventually disconnected for it. A
+	violation says something about the last minute of a player's behaviour and
+	nothing about the last hour. Abuse that keeps going is unaffected, because
+	each violation is recent when the next arrives.
+]]
+RateLimiterCore.DEFAULT_VIOLATION_DECAY_SECONDS = 60
 
 export type State = {
 	entries: { [string]: Entry },
@@ -93,7 +107,12 @@ function RateLimiterCore.check(state: State, key: string, now: number, config: C
 	prune(entry, now - config.windowSeconds)
 
 	if #entry.timestamps >= config.maxRequests then
+		local decay = config.violationDecaySeconds or RateLimiterCore.DEFAULT_VIOLATION_DECAY_SECONDS
+		if entry.lastViolationAt and now - entry.lastViolationAt > decay then
+			entry.violations = 0
+		end
 		entry.violations += 1
+		entry.lastViolationAt = now
 
 		local cooldownSeconds = config.cooldownSeconds
 		if cooldownSeconds and cooldownSeconds > 0 then
@@ -110,6 +129,54 @@ end
 function RateLimiterCore.violations(state: State, key: string): number
 	local entry = state.entries[key]
 	return if entry then entry.violations else 0
+end
+
+--[[
+	Text that is safe to put in a log line when a client chose it.
+
+	A rejection reason can carry whatever the client sent, so it is cut to
+	`maxLength` and stripped of control characters: without the first one packet
+	could write a page of console, and without the second a newline inside it
+	could forge a second line that looks like the server's own.
+]]
+function RateLimiterCore.cleanForLog(text: any, maxLength: number): string
+	local cleaned = string.sub(tostring(text), 1, maxLength)
+	cleaned = string.gsub(cleaned, "%c", "?")
+	return cleaned
+end
+
+--[[
+	A budget of one log line per key per interval.
+
+	Every rejected request used to log, and a client can send them as fast as its
+	rate limit lets it: the console filled with one player's noise and the lines
+	that mattered scrolled away. The first rejection in an interval is logged; the
+	rest are only counted, and the count comes out with the next line that is
+	allowed so nothing is hidden, just summarised.
+
+	Returns (shouldLog, suppressed): `suppressed` is how many were held back since
+	the last line that was logged.
+]]
+function RateLimiterCore.newLogGate(): { [string]: { lastAt: number, suppressed: number } }
+	return {}
+end
+
+function RateLimiterCore.logGate(gate, key: string, now: number, intervalSeconds: number): (boolean, number)
+	local slot = gate[key]
+	if not slot then
+		gate[key] = { lastAt = now, suppressed = 0 }
+		return true, 0
+	end
+
+	if now - slot.lastAt < intervalSeconds then
+		slot.suppressed += 1
+		return false, 0
+	end
+
+	local suppressed = slot.suppressed
+	slot.lastAt = now
+	slot.suppressed = 0
+	return true, suppressed
 end
 
 --[[

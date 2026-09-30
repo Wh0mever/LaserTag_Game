@@ -27,6 +27,7 @@ local CurrencyLabel = require(script.Parent.Parent.Components.CurrencyLabel)
 local Panel = require(script.Parent.Parent.Components.Panel)
 local RemoteNames = require(Shared.RemoteNames)
 local SkinCatalog = require(Shared.Config.SkinCatalog)
+local TextUtil = require(Shared.Util.TextUtil)
 local Trove = require(Shared.Util.Trove)
 local UIController = require(script.Parent.Parent.UIController)
 local UITheme = require(script.Parent.Parent.UITheme)
@@ -145,7 +146,7 @@ local function buy(skinId: string)
 			end
 			ClientState.ownedSkins[skinId] = true
 			local skin = SkinCatalog.get(skinId)
-			toast(`{skin and skin.displayName or skinId} unlocked`, false)
+			toast(`{skin and skin.displayName or skinId} — теперь ваш!`, false)
 		else
 			toast(result.err or "Сервер отклонил покупку", true)
 		end
@@ -206,7 +207,12 @@ local function buildCard(skinId: string, index: number, parent: Instance)
 	name.ZIndex = 3
 	name.Parent = card
 
-	local rarityLabel = UITheme.label(string.upper(skin.rarity), UITheme.TextSizes.Tiny, rarity, UITheme.Fonts.Bold)
+	local rarityLabel = UITheme.label(
+		TextUtil.upper(SkinCatalog.rarityLabel(skinId)),
+		UITheme.TextSizes.Tiny,
+		rarity,
+		UITheme.Fonts.Bold
+	)
 	rarityLabel.Name = "Rarity"
 	rarityLabel.Position = UDim2.new(0, 12, 0, 80)
 	rarityLabel.Size = UDim2.new(1, -24, 0, 16)
@@ -265,11 +271,13 @@ function ShopScreen.init()
 			UIController.notifyClosed("Shop")
 		end,
 		title = "МАГАЗИН",
-		subtitle = "Только внешний вид — скин не меняет урон и точность",
+		subtitle = "Скин меняет только внешний вид",
 		size = UDim2.fromScale(0.66, 0.72),
 		parent = gui,
 		accentColor = UITheme.Colors.Coin,
 		closeOnOverlay = false,
+		-- The close button and the balance chip beside it.
+		headerInset = 56 + 130 + 8,
 	})
 	trove:Add(function()
 		panel:destroy()

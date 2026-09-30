@@ -11,10 +11,17 @@
 
 local WeaponConfig = {}
 
+--[[
+	`shortName` is for places a full name cannot fit: hotbar slots, tabs, the
+	ammo readout on a phone. "ИМПУЛЬСНАЯ ВИНТОВКА" is 19 letters of bold caps,
+	and in a 128 px hotbar slot it ran across the next two slots.
+]]
+
 WeaponConfig.Weapons = {
 	Rifle = {
 		id = "Rifle",
 		displayName = "ИМПУЛЬСНАЯ ВИНТОВКА",
+		shortName = "ВИНТОВКА",
 		slot = 1,
 		automatic = true,
 
@@ -45,12 +52,16 @@ WeaponConfig.Weapons = {
 		recoilRecovery = 10,
 
 		beamWidth = 0.28,
-		muzzleOffset = { x = 0, y = 0, z = -2.4 },
+		-- The end of the barrel in GunModelFactory's layout (tests/harness/vfx
+		-- checks it): beams and flashes start here, so half way along would put
+		-- the flash inside the gun.
+		muzzleOffset = { x = 0, y = 0, z = -2.9 },
 	},
 
 	Pistol = {
 		id = "Pistol",
 		displayName = "ИОННЫЙ ПИСТОЛЕТ",
+		shortName = "ПИСТОЛЕТ",
 		slot = 2,
 		automatic = false,
 
@@ -80,12 +91,13 @@ WeaponConfig.Weapons = {
 		recoilRecovery = 8,
 
 		beamWidth = 0.22,
-		muzzleOffset = { x = 0, y = 0, z = -1.4 },
+		muzzleOffset = { x = 0, y = 0, z = -1.55 },
 	},
 
 	Lance = {
 		id = "Lance",
 		displayName = "ДУГОВАЯ ПИКА",
+		shortName = "ПИКА",
 		slot = 3,
 		automatic = false,
 
@@ -111,15 +123,19 @@ WeaponConfig.Weapons = {
 		recoilRecovery = 5,
 
 		beamWidth = 0.36,
-		muzzleOffset = { x = 0, y = 0, z = -3.2 },
+		muzzleOffset = { x = 0, y = 0, z = -3.9 },
 	},
 }
 
 WeaponConfig.Order = { "Rifle", "Pistol", "Lance" }
 
--- Extra inaccuracy while moving faster than this (studs/second).
-WeaponConfig.MOVING_SPEED_THRESHOLD = 8
-WeaponConfig.MOVING_SPREAD_PENALTY_DEG = 0.5
+--[[
+	How long a weapon swap locks out firing, in seconds. The client's raise
+	animation matches it so the gun is fireable the moment it finishes coming up,
+	and the server enforces it (less a little for the network): it is a rule, not
+	an animation, so both sides read it from here.
+]]
+WeaponConfig.SWITCH_TIME = 0.35
 
 -- The server allows a shot origin to differ from the server-known eye position
 -- by at most this many studs, which tolerates normal latency but rejects

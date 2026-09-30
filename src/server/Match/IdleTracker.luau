@@ -27,11 +27,14 @@
 
 	Between the two is walking, which is activity.
 
-	Explicit signals — firing a shot — go through `markActive`, so a marksman
-	holding an angle without moving is not mistaken for an absent player. That
-	matters here specifically: the Arc Lance is designed to be played by holding
-	a lane, and punishing exactly the playstyle the weapon exists for would be a
-	own goal.
+	Explicit signals go through `markActive`. A shot goes through `markShot`, which
+	only counts one that shows somebody is aiming: firing used to count outright,
+	and holding the trigger with a weighted mouse button (or an autoclicker) fires
+	forever at one fixed direction, so an absent player was never removed. A shot
+	counts if it hurt an enemy, or if it starts a new burst (spray index 1) aimed
+	more than a few degrees away from the last burst that counted. That still
+	covers a marksman holding a lane with the Arc Lance, who turns to each target
+	and hits it; it does not cover a player firing at the same wall.
 ]]
 
 local IdleTracker = {}
@@ -49,6 +52,9 @@ IdleTracker.DEFAULTS = {
 	-- Seconds of no activity before the player is told, and then removed.
 	warnAfter = 45,
 	removeAfter = 75,
+	-- Degrees a new burst must be aimed away from the last one that counted to
+	-- be somebody aiming rather than a trigger held down.
+	burstTurnDegrees = 3,
 }
 
 local function isFiniteNumber(value: any): boolean
@@ -110,6 +116,60 @@ function IdleTracker.markActive(tracker, id: any, now: number)
 	entry.warned = false
 end
 
+local function unit(direction: any): { x: number, y: number, z: number }?
+	if not isPosition(direction) then
+		return nil
+	end
+	local length = math.sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z)
+	if length < 1e-6 then
+		return nil
+	end
+	return { x = direction.x / length, y = direction.y / length, z = direction.z / length }
+end
+
+--[[
+	Report one accepted shot and say whether it counted as somebody being there.
+
+	`shot` is { damaged: boolean?, sprayIndex: number?, direction: {x, y, z}? }:
+	whether it hurt an enemy, where in a burst it was, and the direction it was
+	aimed. See the header for the rule and why plain firing is not enough.
+]]
+function IdleTracker.markShot(tracker, id: any, now: number, shot: any): boolean
+	if id == nil or not isFiniteNumber(now) or type(shot) ~= "table" then
+		return false
+	end
+
+	if shot.damaged == true then
+		IdleTracker.markActive(tracker, id, now)
+		return true
+	end
+
+	-- Only the first shot of a burst is a decision to shoot; the rest of a held
+	-- trigger is the same decision continuing.
+	if shot.sprayIndex ~= 1 then
+		return false
+	end
+
+	local aim = unit(shot.direction)
+	if not aim then
+		return false
+	end
+
+	local entry = entryFor(tracker, id, now)
+	local previous = entry.lastBurstAim
+	if previous then
+		local dot = math.clamp(aim.x * previous.x + aim.y * previous.y + aim.z * previous.z, -1, 1)
+		if math.deg(math.acos(dot)) <= tracker.config.burstTurnDegrees then
+			return false
+		end
+	end
+
+	entry.lastBurstAim = aim
+	entry.lastActiveAt = now
+	entry.warned = false
+	return true
+end
+
 --[[
 	Feed one position sample. `position` may be nil — a dead player between
 	respawns has no character — in which case nothing is learned and the clock
@@ -157,7 +217,7 @@ function IdleTracker.reset(tracker, id: any, now: number)
 	if id == nil or not isFiniteNumber(now) then
 		return
 	end
-	tracker.entries[id] = { lastActiveAt = now, position = nil, warned = false }
+	tracker.entries[id] = { lastActiveAt = now, position = nil, warned = false, lastBurstAim = nil }
 end
 
 function IdleTracker.forget(tracker, id: any)

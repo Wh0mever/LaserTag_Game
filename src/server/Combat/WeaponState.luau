@@ -31,7 +31,12 @@ local WeaponState = {}
 export type Entry = {
 	mag: number,
 	reloadingUntil: number,
+	-- Where the fire-rate schedule stands: the slot the last accepted shot
+	-- occupied. Not when it arrived (see MAX_LATE).
 	lastShotAt: number,
+	-- When the last accepted shot actually arrived, which is what the spray
+	-- reset measures its pause against.
+	lastArrivalAt: number,
 	sprayIndex: number,
 	lastSeq: number,
 	reloadToken: number,
@@ -42,15 +47,67 @@ export type Entry = {
 -- life start the recoil pattern at index 1 and never be gated.
 local NEVER = -math.huge
 
--- Slack on the fire-rate gate. A client schedules shots on its own render loop
--- and the network adds jitter on top, so consecutive requests arrive a frame
--- early about as often as a frame late; without this the server would eat
--- roughly one rifle shot in six from a player doing nothing wrong. Sustained
--- rate is capped by the ShootRequest rate limit, not by this number, so the
--- slack cannot be spent as a permanent fire-rate increase.
-local FIRE_RATE_GRACE = 0.015
+--[[
+	Slack on the fire-rate gate. A client schedules shots on its own render loop
+	and the network adds jitter on top, so consecutive requests arrive a frame
+	early about as often as a frame late; with the slack under one 60 Hz frame
+	the server dropped about one honest rifle shot in five at 20 ms of jitter.
+	Two frames covers it.
+
+	The slack is not a faster weapon. The gate is anchored to the cadence, not to
+	when packets happened to arrive: an accepted shot occupies the slot it was
+	due in, so an early one borrows from the next interval instead of shifting the
+	schedule earlier. However the arrivals are spaced, the rate that can be
+	sustained never exceeds one shot per fireRate.
+]]
+local FIRE_RATE_GRACE = 0.04
+
+--[[
+	How far behind the schedule a shot may arrive before the schedule moves for
+	it.
+
+	A phone's connection holds a packet up now and then, and the next one, sent on
+	time, lands closer behind it than a rifle's interval. If a late shot were
+	booked where it arrived, the honest shot after it would be early against that
+	booking and refused; at 60 to 100 ms of delay that was one shot in five. So a
+	shot that arrives late still occupies the slot it was due in, and only
+	lateness beyond this pushes the schedule later.
+
+	It also bounds the catch-up. A shot due long ago (the client sat quiet, or the
+	link stalled and delivered what it had queued) is booked this far before its
+	arrival, so the shots behind it may arrive that much ahead of the cadence.
+	Together with FIRE_RATE_GRACE no shot lands more than 0.19 s before its slot:
+	for the rifle that is one extra round at the start of a burst, and a stalled
+	link's queue is honoured only that far. Keep the sum under twice the rifle's
+	interval or it gains a second one. The rate itself is untouched: a slot is a
+	full interval wide.
+]]
+local MAX_LATE = 0.15
+
+-- Extra time past a weapon's sprayResetTime before the server treats a pause as
+-- a real one. The client resets on its own gap between shots; the server sees
+-- that gap plus network jitter, so without this a burst the client draws as
+-- unbroken restarts on the server about half the time it sits near the boundary.
+local SPRAY_RESET_GRACE = 0.05
+
+-- How early a shot may arrive and still find the reload finished. The client
+-- starts its reload one trip before the server hears of it and its first shot
+-- after it takes one trip back, so the two land on the same server instant
+-- give or take jitter; a shot exactly on the line is refused half the time
+-- without this.
+local RELOAD_GRACE = 0.08
+
+-- The same tolerance for the weapon-swap lockout. The client waits out
+-- WeaponConfig.SWITCH_TIME from the key press; the server measures from when the
+-- request arrived and to when the shot arrived, and both had a trip to make.
+local SWITCH_GRACE = 0.08
 
 local states: { [Player]: { [string]: Entry } } = {}
+
+-- When each player last changed weapon by asking the server to, on the server's
+-- clock. Kept beside the per-weapon entries rather than inside them: the swap is
+-- a fact about the player, and the entries are keyed by weapon id.
+local switchedAt: { [Player]: number } = {}
 
 local function freshEntry(weaponId: string): Entry
 	local weapon = WeaponConfig.get(weaponId)
@@ -58,6 +115,7 @@ local function freshEntry(weaponId: string): Entry
 		mag = if weapon then weapon.magSize else 0,
 		reloadingUntil = 0,
 		lastShotAt = NEVER,
+		lastArrivalAt = NEVER,
 		sprayIndex = 0,
 		lastSeq = 0,
 		reloadToken = 0,
@@ -111,16 +169,37 @@ function WeaponState.reset(player: Player)
 		local carried = previous and previous[weaponId]
 		if carried then
 			entry.lastSeq = carried.lastSeq
+			-- The reload token carries across for the same reason, in the other
+			-- direction: a timer scheduled on the previous life is still pending
+			-- and holds the token it was given. Restarting the count at zero let
+			-- the new life's first reload hand out that same number, and the old
+			-- timer then finished it early. One past the old value is a number no
+			-- pending timer can hold.
+			entry.reloadToken = carried.reloadToken + 1
 		end
 
 		perPlayer[weaponId] = entry
 	end
 
 	states[player] = perPlayer
+	-- A fresh spawn owes nothing to the last life's swap: the client clears its
+	-- own lockout on respawn, so an honest player may fire straight away.
+	switchedAt[player] = nil
 end
 
 function WeaponState.clear(player: Player)
 	states[player] = nil
+	switchedAt[player] = nil
+end
+
+--[[
+	Note that the player asked to change weapon, at `now`. Firing is refused for
+	most of WeaponConfig.SWITCH_TIME afterwards. Without it the per-weapon fire
+	rates are independent, so a modified client could swap weapons and fire each
+	one in the same frame and land all three shots at once.
+]]
+function WeaponState.markSwitch(player: Player, now: number)
+	switchedAt[player] = now
 end
 
 function WeaponState.isReloading(player: Player, weaponId: string, now: number): boolean
@@ -129,12 +208,29 @@ function WeaponState.isReloading(player: Player, weaponId: string, now: number):
 end
 
 --[[
+	Finish a reload whose time has come but whose timer has not run yet.
+
+	The timer is a task.delay, which fires on the first frame after the reload's
+	time is up. A shot or a reload request arriving inside that gap saw a
+	magazine that was still empty and was refused for it. Settling here means the
+	state is right whenever it is read; the timer then finds nothing left to do
+	and CombatService's next AmmoSync carries the news.
+]]
+local function settleReload(entry: Entry, weapon: any, now: number)
+	if entry.reloadingUntil > 0 and entry.reloadingUntil - RELOAD_GRACE <= now then
+		entry.mag = weapon.magSize
+		entry.reloadingUntil = 0
+		entry.sprayIndex = 0
+	end
+end
+
+--[[
 	Spend one round.
 
-	Returns (false, 0) when the shot is not owed: empty magazine, mid-reload, or
-	faster than the weapon's fire rate. On success returns the spray index the
-	shot was fired at, which is what the caller feeds to
-	SprayPatterns.getServerSpreadDeg.
+	Returns (false, 0) when the shot is not owed: empty magazine, mid-reload,
+	just after a weapon swap, or faster than the weapon's fire rate. On success
+	returns the spray index the shot was fired at, which is what the caller feeds
+	to SprayPatterns.getServerSpreadDeg.
 ]]
 function WeaponState.consumeShot(player: Player, weaponId: string, now: number): (boolean, number)
 	local weapon = WeaponConfig.get(weaponId)
@@ -144,7 +240,8 @@ function WeaponState.consumeShot(player: Player, weaponId: string, now: number):
 
 	local entry = WeaponState.get(player, weaponId)
 
-	if entry.reloadingUntil > now then
+	settleReload(entry, weapon, now)
+	if entry.reloadingUntil > 0 then
 		return false, 0
 	end
 
@@ -152,14 +249,25 @@ function WeaponState.consumeShot(player: Player, weaponId: string, now: number):
 		return false, 0
 	end
 
-	local sinceLastShot = now - entry.lastShotAt
-	if sinceLastShot < weapon.fireRate - FIRE_RATE_GRACE then
+	local swapped = switchedAt[player]
+	if swapped and now - swapped < WeaponConfig.SWITCH_TIME - SWITCH_GRACE then
 		return false, 0
 	end
 
-	entry.sprayIndex = SprayPatterns.nextIndex(weaponId, entry.sprayIndex, sinceLastShot, weapon.sprayResetTime)
+	local dueAt = entry.lastShotAt + weapon.fireRate
+	if now < dueAt - FIRE_RATE_GRACE then
+		return false, 0
+	end
+
+	-- The pause is measured between arrivals, as the client measures its own
+	-- between shots. The schedule's slot would overstate it by up to MAX_LATE.
+	-- Never negative: a clock that steps back would read as "fired in the past".
+	local sinceLastShot = math.max(now - entry.lastArrivalAt, 0)
+	entry.sprayIndex =
+		SprayPatterns.nextIndex(weaponId, entry.sprayIndex, sinceLastShot, weapon.sprayResetTime, SPRAY_RESET_GRACE)
 	entry.mag -= 1
-	entry.lastShotAt = now
+	entry.lastArrivalAt = now
+	entry.lastShotAt = math.max(dueAt, now - MAX_LATE)
 
 	return true, entry.sprayIndex
 end
@@ -180,7 +288,8 @@ function WeaponState.beginReload(player: Player, weaponId: string, now: number):
 	end
 
 	local entry = WeaponState.get(player, weaponId)
-	if entry.reloadingUntil > now or entry.mag >= weapon.magSize then
+	settleReload(entry, weapon, now)
+	if entry.reloadingUntil > 0 or entry.mag >= weapon.magSize then
 		return false, 0
 	end
 

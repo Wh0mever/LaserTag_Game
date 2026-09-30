@@ -150,6 +150,13 @@ player:SetAttribute("InMatch", "Dust")
 check(ClientState.isInMatch(), "setting the InMatch attribute puts the client in a match")
 check(MobileControls.areButtonsBound(), "the touch buttons appear when the match starts")
 
+-- A phone has a touchscreen and nothing else, so what the "last input" was
+-- (the engine can report a stray mouse-type event from a paired accessory) never
+-- takes its fire control away.
+Env.setLastInputType("MouseMovement")
+check(MobileControls.areButtonsBound(), "a phone keeps its controls whatever it last reported")
+Env.setLastInputType("Touch")
+
 local controls = MobileControls.controls()
 
 -- The three tap controls are real buttons, so a tap is their Activated event.
@@ -238,6 +245,8 @@ for _, id in { "Fire", "Reload", "Switch", "View" } do
 			node.Size.X.Offset > 0 and node.Size.X.Offset == node.Size.Y.Offset,
 			`{id} is a round control with a real size (got {node.Size.X.Offset})`
 		)
+		-- Smaller than the fire circle on purpose, never smaller than a thumb.
+		check(node.Size.X.Offset >= 44, `{id} is at least 44 px across on this phone (got {node.Size.X.Offset})`)
 		check(
 			rects[id].left >= 0
 				and rects[id].top >= 0
@@ -381,6 +390,52 @@ check(
 	`the switch button picks another slot (got {tostring(slotSeen)})`
 )
 slotConn:Disconnect()
+
+--[[
+	Two quick taps.
+
+	The switch button used to compute the next slot from ClientState.currentSlot,
+	which only moves when the server's answer arrives. A second tap inside that
+	round trip therefore asked for the same slot as the first, the weapon client
+	dropped it as "already holding that", and a player tapping twice for the lance
+	got the pistol. Run against the real weapon client, with no server echo
+	between the taps, because the echo is exactly what is missing.
+]]
+heading("Switching quickly")
+
+local WeaponClient = Env.load("src/client/Controllers/WeaponClient")
+local weaponInitOk, weaponInitErr = pcall(WeaponClient.init)
+check(weaponInitOk, `the weapon client initialises on a phone: {tostring(weaponInitErr)}`)
+
+if weaponInitOk then
+	local body = roblox.Instance.new("Model")
+	local bodyHumanoid = roblox.Instance.new("Humanoid")
+	bodyHumanoid.MaxHealth = 100
+	bodyHumanoid.Health = 100
+	bodyHumanoid.Parent = body
+	player.Character = body
+	ClientState.isDead = false
+	ClientState.match.phase = "InProgress"
+	player:SetAttribute("CurrentWeapon", "Rifle")
+
+	check(WeaponClient.getWeaponId() == "Rifle", "the rifle is in hand")
+	tap("Switch")
+	check(WeaponClient.getWeaponId() == "Pistol", `one tap goes to the pistol (holding {WeaponClient.getWeaponId()})`)
+	check(ClientState.currentSlot == 1, "and the server has not answered yet")
+	tap("Switch")
+	check(
+		WeaponClient.getWeaponId() == "Lance",
+		`a second tap before the answer goes on to the lance (holding {WeaponClient.getWeaponId()})`
+	)
+	tap("Switch")
+	check(
+		WeaponClient.getWeaponId() == "Rifle",
+		`and a third wraps round to the rifle (holding {WeaponClient.getWeaponId()})`
+	)
+
+	WeaponClient.stop()
+	player.Character = nil
+end
 
 -- The one that was cosmetic. It flipped the saved preference and moved nothing,
 -- so the stored setting disagreed with the screen and followed the player to
@@ -640,6 +695,225 @@ check(not ClientState.isInMatch(), "clearing the attribute leaves the match")
 check(not MobileControls.areButtonsBound(), "no fire button in the hub")
 
 --------------------------------------------------------------------------------
+-- The scoreboard on a phone
+--
+-- It opened on Tab and nothing else, so a phone player never saw it for a
+-- whole match. Tapping the score at the top is the way in now.
+--------------------------------------------------------------------------------
+
+heading("Scoreboard on a phone")
+
+local ScoreboardScreen = Env.load("src/client/UI/Screens/ScoreboardScreen")
+local boardOk, boardErr = pcall(ScoreboardScreen.init)
+check(boardOk, `the scoreboard initialises on a phone: {tostring(boardErr)}`)
+
+player:SetAttribute("InMatch", "Dust")
+UIController.closeMenu("Side")
+
+-- The screen's content parent, not the ScreenGui: on a scaled screen the two
+-- differ, and the widgets are in the first.
+local boardGui = UIController.getScreenRoot("Scoreboard")
+local scoreTap = boardGui and boardGui:FindFirstChild("ScoreTap")
+local board = boardGui and boardGui:FindFirstChild("Board")
+check(scoreTap ~= nil and scoreTap.Visible, "in a match the score at the top can be tapped")
+if scoreTap and board then
+	scoreTap.Activated:Fire()
+	check(board.Visible, "tapping the score opens the scoreboard")
+	scoreTap.Activated:Fire()
+	check(not board.Visible, "tapping it again closes it")
+
+	scoreTap.Activated:Fire()
+	Env.advance(6)
+	check(not board.Visible, "left alone, it closes itself — there is no key to let go of")
+
+	player:SetAttribute("InMatch", "")
+	check(not scoreTap.Visible, "in the hub there is nothing to tap: the board is for a match")
+end
+
+--------------------------------------------------------------------------------
+-- The scoreboard with a full lobby
+--
+-- Rows were a plain Frame with no clipping and no cap. On a 640x294 phone the
+-- board has room for four of them, so a 10v10 match drew the rest below the
+-- panel, over the HUD and off the bottom of the screen, and the players at the
+-- bottom of a list are the ones who most want to see where they stand.
+--------------------------------------------------------------------------------
+
+heading("Scoreboard with a full lobby")
+
+do
+	local PlayersService = Env.service("Players")
+	local realGetPlayers = PlayersService.GetPlayers
+
+	local function fakePlayer(name: string, team: string, kills: number)
+		return {
+			DisplayName = name,
+			GetAttribute = function(_self, key: string)
+				if key == "InMatch" then
+					return "Dust"
+				elseif key == "TeamId" then
+					return team
+				elseif key == "MatchKills" then
+					return kills
+				end
+				return nil
+			end,
+		}
+	end
+
+	local function lobby(localKills: number)
+		player:SetAttribute("InMatch", "Dust")
+		-- Entering a match asks which side to take; the board waits for menus.
+		UIController.closeMenu("Side")
+		player:SetAttribute("TeamId", "A")
+		player:SetAttribute("MatchKills", localKills)
+		local roster = { player }
+		for index = 1, 9 do
+			table.insert(roster, fakePlayer(`Alpha{index}`, "A", index))
+		end
+		for index = 1, 10 do
+			table.insert(roster, fakePlayer(`Bravo{index}`, "B", index))
+		end
+		PlayersService.GetPlayers = function()
+			return roster
+		end
+	end
+
+	local function rowsOf(teamId: string): any
+		return board and board:FindFirstChild(teamId) and board[teamId]:FindFirstChild("Rows")
+	end
+
+	local function visibleRows(list: any): number
+		local count = 0
+		for _, row in list:GetChildren() do
+			if row.Name == "Row" and row.Visible then
+				count += 1
+			end
+		end
+		return count
+	end
+
+	local function canvasTop(list: any): number
+		local ok, position = pcall(function()
+			return list.CanvasPosition.Y
+		end)
+		return if ok then position else -1
+	end
+
+	local step = 30 + 4 -- a row and the gap under it
+
+	if board and scoreTap then
+		-- The last place on the team: nine others out-kill the local player.
+		lobby(0)
+		player:SetAttribute("InMatch", "Dust")
+		scoreTap.Activated:Fire()
+		check(board.Visible, "the board opens for a full lobby")
+
+		local listA, listB = rowsOf("A"), rowsOf("B")
+		check(listA ~= nil and listB ~= nil, "both teams have a list of rows")
+		if listA and listB then
+			for name, list in { A = listA, B = listB } do
+				check(list.ClassName == "ScrollingFrame", `team {name}'s rows scroll (they are a {list.ClassName})`)
+				check(
+					list.ClassName == "ScrollingFrame" and list.ScrollingDirection == roblox.Enum.ScrollingDirection.Y,
+					`team {name}'s rows scroll vertically only`
+				)
+				check(
+					list.ClassName == "ScrollingFrame" and list.AutomaticCanvasSize == roblox.Enum.AutomaticSize.Y,
+					`team {name}'s canvas grows with its rows`
+				)
+			end
+			check(board.ClipsDescendants, "nothing the board holds can be drawn outside it")
+
+			check(visibleRows(listA) == 10, `all ten of team A are listed (got {visibleRows(listA)})`)
+			check(visibleRows(listB) == 10, `all ten of team B are listed (got {visibleRows(listB)})`)
+
+			-- The local player is 10th of 10; opening the board scrolls to them
+			-- rather than leaving them below the fold.
+			local expected = 9 * step * UIController.scale
+			check(
+				math.abs(canvasTop(listA) - expected) < 1,
+				`the board scrolls to the local player's row (canvas at {canvasTop(listA)}, wanted {expected})`
+			)
+			check(canvasTop(listB) == 0, "and leaves the other team's list at the top")
+		end
+
+		scoreTap.Activated:Fire()
+		check(not board.Visible, "tapping again closes it")
+
+		-- First place: nothing to scroll to.
+		lobby(50)
+		scoreTap.Activated:Fire()
+		local listA2 = rowsOf("A")
+		check(listA2 ~= nil and canvasTop(listA2) == 0, "a player at the top of their team sees the top of the list")
+		scoreTap.Activated:Fire()
+
+		-- Far enough down to scroll, near enough that the row is on the first page.
+		lobby(8)
+		scoreTap.Activated:Fire()
+		local listA3 = rowsOf("A")
+		check(
+			listA3 ~= nil and canvasTop(listA3) == 0,
+			"a player who is on the first page of the list is not scrolled away from the top"
+		)
+		scoreTap.Activated:Fire()
+	end
+
+	PlayersService.GetPlayers = realGetPlayers
+	player:SetAttribute("InMatch", "")
+	player:SetAttribute("MatchKills", nil)
+end
+
+--------------------------------------------------------------------------------
+-- The scoreboard does not sit on top of a menu
+--
+-- It draws above the menus (its ScreenGui outranks them), so a Tab held with the
+-- shop open put the roster over the shop, and on a phone the tap zone over the
+-- timer stayed live over every panel and opened it from the panel's title bar.
+--------------------------------------------------------------------------------
+
+heading("Scoreboard and menus")
+
+if board and scoreTap then
+	player:SetAttribute("InMatch", "Dust")
+	UIController.closeMenu("Side")
+	InputController.ScoreboardHeld:Fire(false)
+	check(scoreTap.Visible, "in a match with nothing open the score can be tapped")
+
+	UIController.openMenu("Shop")
+	check(UIController.isAnyMenuOpen(), "the shop is open")
+	check(not scoreTap.Visible, "with a menu open the tap zone is out of the way")
+
+	scoreTap.Activated:Fire()
+	check(not board.Visible, "a tap that arrives anyway does not draw the board on an open menu")
+	InputController.ScoreboardHeld:Fire(true)
+	check(not board.Visible, "and neither does Tab held over it")
+	InputController.ScoreboardHeld:Fire(false)
+
+	UIController.closeMenu("Shop")
+	check(scoreTap.Visible, "closing the menu gives the score back its tap")
+	InputController.ScoreboardHeld:Fire(true)
+	check(board.Visible, "and Tab works again")
+	InputController.ScoreboardHeld:Fire(false)
+	check(not board.Visible, "letting go closes it")
+
+	-- The other order was already right, and stays right.
+	InputController.ScoreboardHeld:Fire(true)
+	UIController.openMenu("Shop")
+	check(not board.Visible, "a menu opening takes the board away")
+	UIController.closeMenu("Shop")
+	InputController.ScoreboardHeld:Fire(false)
+
+	-- A panel that closes itself (its own X) says so through notifyClosed, not
+	-- closeMenu; the tap zone has to come back for that path too.
+	UIController.openMenu("Shop")
+	shopOpen = false
+	UIController.notifyClosed("Shop")
+	check(scoreTap.Visible, "a menu that closed itself also gives the tap back")
+end
+player:SetAttribute("InMatch", "")
+
+--------------------------------------------------------------------------------
 -- A touchscreen laptop is not a phone
 --
 -- The device test is "touch AND no mouse", not "touch". Someone on a Surface or
@@ -667,8 +941,286 @@ local laptopOk, laptopErr = pcall(function()
 
 	check(State.isTouch, "a touchscreen laptop still reports touch")
 	check(MouseLock.isEnabled(), "a touchscreen laptop keeps its cursor manager")
+
+	--[[
+		The same person sees the desktop chrome. ClientState.isTouch is plain
+		TouchEnabled, which is true here, and the side buttons and the welcome
+		card used to read it: no key badges, no cursor-release hint, a folded
+		hamburger and a card describing a thumbstick, to someone holding a mouse
+		and keyboard that the cursor manager above is already treating as one.
+	]]
+	check(type(State.isTouchOnly) == "function", "ClientState has one shared touch-only test")
+	check(
+		type(State.isTouchOnly) == "function" and not State.isTouchOnly(),
+		"a touchscreen laptop is not a touch-only device"
+	)
+
+	local LaptopUI = Env.load("src/client/UI/UIController")
+	LaptopUI.init()
+	local LaptopSide = Env.load("src/client/UI/Screens/SideButtonsScreen")
+	LaptopSide.init()
+	local LaptopWelcome = Env.load("src/client/UI/Screens/WelcomeScreen")
+	LaptopWelcome.init()
+	local LaptopHUD = Env.load("src/client/UI/Screens/HUDScreen")
+	LaptopHUD.init()
+
+	-- The hotbar of the desktop HUD carries its key badges; the phone's, which
+	-- has no keys to press, does not.
+	local badges = 0
+	for _, descendant in LaptopUI.getScreenRoot("HUD"):GetDescendants() do
+		if descendant.Name == "KeyHint" then
+			badges += 1
+		end
+	end
+	check(badges > 0, "the laptop's hotbar carries key badges: it got the desktop HUD, not the phone's")
+
+	local sideRoot = LaptopUI.getScreenRoot("SideButtons"):FindFirstChild("Root")
+	local menu = sideRoot:FindFirstChild("Menu")
+	local list = menu:FindFirstChild("Buttons")
+	check(sideRoot:FindFirstChild("MouseHint").Visible, "the cursor-release hint is shown to a laptop")
+	check(LaptopSide.isExpanded(), "the side stack starts open on a laptop")
+	check(list.Visible, "and is on screen")
+	check(list:FindFirstChild("Shop"):FindFirstChild("KeyHint") ~= nil, "the buttons carry their key badges")
+	check(menu.AnchorPoint.Y == 0.5, "the stack is centred down the edge, not pinned to the corner")
+	check(list.Size.X.Offset == list.Shop.Size.X.Offset, "and runs down the edge, not along it")
+
+	local words = {}
+	for _, descendant in LaptopUI.getScreenRoot("WelcomeMenu"):GetDescendants() do
+		if descendant.ClassName == "TextLabel" then
+			words[descendant.Text] = true
+		end
+	end
+	check(words["W A S D  ·  Space"] == true, "the welcome card explains WASD to a laptop")
+	check(words["Левый стик"] == nil, "and does not describe a thumbstick")
+
+	-- Asked when used: a keyboard plugged into a tablet after boot changes the
+	-- answer, and nothing cached the old one.
+	local Input = Env.service("UserInputService")
+	Input.TouchEnabled, Input.MouseEnabled, Input.KeyboardEnabled = true, false, false
+	check(State.isTouchOnly(), "touch and nothing else is touch-only")
+	Input.KeyboardEnabled = true
+	check(not State.isTouchOnly(), "a keyboard makes it not touch-only, as soon as it is there")
+	Input.KeyboardEnabled, Input.MouseEnabled = false, true
+	check(not State.isTouchOnly(), "and so does a mouse")
 end)
 check(laptopOk, `the touchscreen laptop boots: {tostring(laptopErr)}`)
+
+--------------------------------------------------------------------------------
+-- A touchscreen laptop keeps the desktop's screen
+--
+-- It has a mouse and a keyboard, so the fire circle over the arena is for a
+-- finger that has not touched the glass yet: the cluster waits for the first
+-- touch and gives way again the moment a key or the mouse is used.
+--------------------------------------------------------------------------------
+
+heading("Touchscreen laptop: the fire cluster")
+
+Env.setDevice("touchLaptop")
+Env.reset()
+
+local clusterOk, clusterErr = pcall(function()
+	Env.enableClientRuntime()
+	local State = Env.load("src/client/ClientState")
+	local Perspective = Env.load("src/client/Controllers/PerspectiveController")
+	local Settings = Env.load("src/client/Controllers/SettingsController")
+	local MouseLock = Env.load("src/client/Controllers/MouseLockController")
+
+	State.init()
+	Perspective.init()
+	Settings.init()
+	MouseLock.init()
+
+	local Input = Env.load("src/client/Controllers/InputController")
+	local UI = Env.load("src/client/UI/UIController")
+	local Touch = Env.load("src/client/Controllers/MobileControlsController")
+	Input.init()
+	UI.init()
+	Touch.init()
+	local laptopPlayer = Env.service("Players").LocalPlayer
+	laptopPlayer:SetAttribute("InMatch", "Dust")
+
+	check(Touch.isActive(), "a touchscreen laptop can show touch controls")
+	check(not Touch.isTouchInUse(), "but it starts as a desktop: nobody has touched the glass")
+	check(not Touch.areButtonsBound(), "so the arena has no fire circles over it")
+
+	Env.setLastInputType("Touch")
+	check(Touch.isTouchInUse() and Touch.areButtonsBound(), "the first touch brings the cluster up")
+
+	Env.setLastInputType("MouseMovement")
+	check(not Touch.areButtonsBound(), "moving the mouse takes it away again")
+	Env.setLastInputType("Touch")
+	check(Touch.areButtonsBound(), "and touching the glass brings it back")
+	Env.setLastInputType("Keyboard")
+	check(not Touch.areButtonsBound(), "as does pressing a key")
+
+	-- A trigger held on the glass must not outlive the controls that hold it.
+	Env.setLastInputType("Touch")
+	local laptopFire = Touch.controls().Fire
+	Env.placeGui(laptopFire, 100, 100, 100, 100)
+	local laptopTouch = Env.touchBegan(150, 150)
+	check(Input.isFireHeld(), "a finger on the fire circle holds the trigger")
+	Env.setLastInputType("MouseMovement")
+	check(not Input.isFireHeld(), "switching to the mouse lets go of it")
+	Env.touchEnded(laptopTouch)
+end)
+check(clusterOk, `the touchscreen laptop fire cluster runs: {tostring(clusterErr)}`)
+
+--------------------------------------------------------------------------------
+-- Touchscreen laptop: a brushed screen does not cut the mouse's burst
+--
+-- The cluster hiding releases the trigger the CLUSTER holds. The left mouse
+-- button shares InputController's one trigger, and a finger that grazes the
+-- glass mid-spray shows the cluster, then the next mouse delta hides it again:
+-- that must not end a burst the mouse is still holding.
+--------------------------------------------------------------------------------
+
+heading("Touchscreen laptop: mouse and glass share one trigger")
+
+Env.setDevice("touchLaptop")
+Env.reset()
+
+local sharedOk, sharedErr = pcall(function()
+	Env.enableClientRuntime()
+	local State = Env.load("src/client/ClientState")
+	local Perspective = Env.load("src/client/Controllers/PerspectiveController")
+	local Settings = Env.load("src/client/Controllers/SettingsController")
+	local MouseLock = Env.load("src/client/Controllers/MouseLockController")
+
+	State.init()
+	Perspective.init()
+	Settings.init()
+	MouseLock.init()
+
+	local Input = Env.load("src/client/Controllers/InputController")
+	local UI = Env.load("src/client/UI/UIController")
+	local Touch = Env.load("src/client/Controllers/MobileControlsController")
+	Input.init()
+	UI.init()
+	Touch.init()
+	Env.service("Players").LocalPlayer:SetAttribute("InMatch", "Dust")
+
+	local UIS = Env.service("UserInputService")
+	local mouseButton = {
+		UserInputType = roblox.Enum.UserInputType.MouseButton1,
+		UserInputState = roblox.Enum.UserInputState.Begin,
+	}
+	UIS.InputBegan:Fire(mouseButton, false)
+	check(Input.isFireHeld(), "the left mouse button holds the trigger")
+
+	Env.setLastInputType("Touch")
+	check(Touch.areButtonsBound(), "a finger brushing the glass brings the cluster up")
+	check(Input.isFireHeld(), "the cluster appearing does not touch the mouse's burst")
+	Env.setLastInputType("MouseMovement")
+	check(not Touch.areButtonsBound(), "the next mouse movement hides it again")
+	check(Input.isFireHeld(), "and the mouse, still held, keeps firing")
+
+	mouseButton.UserInputState = roblox.Enum.UserInputState.End
+	UIS.InputEnded:Fire(mouseButton, false)
+	check(not Input.isFireHeld(), "releasing the button ends the burst")
+
+	-- The finger's own trigger is still let go when the cluster leaves.
+	Env.setLastInputType("Touch")
+	Env.placeGui(Touch.controls().Fire, 100, 100, 100, 100)
+	local finger = Env.touchBegan(150, 150)
+	check(Input.isFireHeld() and Touch.isTriggerHeld(), "a finger on the fire circle holds the trigger")
+	Env.setLastInputType("MouseMovement")
+	check(not Input.isFireHeld() and not Touch.isTriggerHeld(), "the finger's trigger goes with its cluster")
+	Env.touchEnded(finger)
+end)
+check(sharedOk, `the shared trigger scenario runs: {tostring(sharedErr)}`)
+
+--------------------------------------------------------------------------------
+-- Facing on a phone
+--
+-- The body follows the camera in third person on every device, but a phone has
+-- no cursor manager, so "a menu is open" has to come from the UI itself.
+--------------------------------------------------------------------------------
+
+heading("Facing on a phone")
+
+Env.setDevice("phone")
+Env.reset()
+
+local facingOk, facingErr = pcall(function()
+	Env.enableClientRuntime()
+	local State = Env.load("src/client/ClientState")
+	local Input = Env.load("src/client/Controllers/InputController")
+	local Perspective = Env.load("src/client/Controllers/PerspectiveController")
+	local Settings = Env.load("src/client/Controllers/SettingsController")
+	local UI = Env.load("src/client/UI/UIController")
+	local MouseLock = Env.load("src/client/Controllers/MouseLockController")
+	local Animator = Env.load("src/client/Controllers/CharacterAnimator")
+
+	local phonePlayer = Env.service("Players").LocalPlayer
+	local body = roblox.Instance.new("Model")
+	local humanoid = roblox.Instance.new("Humanoid")
+	humanoid.MaxHealth = 100
+	humanoid.Health = 100
+	humanoid.Sit = false
+	humanoid.AutoRotate = true
+	humanoid.Parent = body
+	local root = roblox.Instance.new("Part")
+	root.Name = "HumanoidRootPart"
+	root.Position = roblox.Vector3.new(0, 5, 0)
+	root.Parent = body
+	phonePlayer.Character = body
+
+	State.init()
+	Input.init()
+	Perspective.init()
+	Settings.init()
+	UI.init()
+	MouseLock.init()
+	Animator.init()
+	Animator.start()
+	phonePlayer:SetAttribute("InMatch", "Dust")
+
+	local phoneCamera = Env.service("Workspace").CurrentCamera
+	local function look(yawDegrees: number)
+		local yaw = math.rad(yawDegrees)
+		local from = roblox.Vector3.new(0, 8, 0)
+		phoneCamera.CFrame = roblox.CFrame.lookAt(from, from + roblox.Vector3.new(-math.sin(yaw), 0, -math.cos(yaw)))
+	end
+	local function facing(): number
+		local a, b = root.CFrame.LookVector, phoneCamera.CFrame.LookVector
+		return a.X * b.X + a.Z * b.Z
+	end
+
+	root.CFrame = roblox.CFrame.lookAt(roblox.Vector3.new(0, 5, 0), roblox.Vector3.new(5, 5, 0))
+	look(0)
+	for _ = 1, 3 do
+		Env.stepRender()
+	end
+	check(facing() > 0.999, "a phone player's body turns to where the camera looks")
+	check(not humanoid.AutoRotate, "and the humanoid stops turning to its walk")
+
+	local open = false
+	UI.registerMenu("Shop", {
+		open = function()
+			open = true
+		end,
+		close = function()
+			open = false
+		end,
+		isOpen = function()
+			return open
+		end,
+	})
+	UI.openMenu("Shop")
+	look(120)
+	for _ = 1, 3 do
+		Env.stepRender()
+	end
+	check(humanoid.AutoRotate, "with a menu open on a phone the humanoid is handed back")
+	check(facing() < 0.5, "and the body is not spun round behind the menu")
+	UI.closeMenu("Shop")
+	Env.stepRender()
+	check(facing() > 0.999, "closing it picks the aim up again")
+
+	Animator.stop()
+	check(humanoid.AutoRotate, "stopping hands the humanoid back")
+end)
+check(facingOk, `the phone facing scenario runs: {tostring(facingErr)}`)
 
 --------------------------------------------------------------------------------
 -- Result

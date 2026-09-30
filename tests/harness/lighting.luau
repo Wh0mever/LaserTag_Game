@@ -89,6 +89,27 @@ check(bloom.Enabled, "bloom is enabled")
 check(colorCorrection.Enabled, "colour correction is enabled")
 check(atmosphere.Density > 0, "the atmosphere has some density")
 
+-- The mock accepts any property that exists in the class database; the engine
+-- refuses the ones that are not scriptable. Env scans sources for those writes
+-- (see Env.unwritableAssignments), and this proves the scan itself works: it
+-- flags Lighting.Technology and leaves writable properties alone.
+heading("Unwritable properties")
+
+local sample = table.concat({
+	'local Lighting = game:GetService("Lighting")',
+	"Lighting.Technology = Enum.Technology.Future",
+	"Lighting.Brightness = 2",
+	'local part = Instance.new("Part")',
+	"part.Anchored = true",
+	"-- Lighting.Technology = Enum.Technology.Voxel",
+}, "\n")
+local problems = Env.unwritableAssignments("sample", sample)
+check(#problems == 1, `exactly the Technology write is flagged (got {#problems})`)
+check(
+	problems[1] ~= nil and string.find(problems[1], "Lighting.Technology", 1, true) ~= nil,
+	"the message names the property"
+)
+
 --------------------------------------------------------------------------------
 -- The rig's own numbers
 --

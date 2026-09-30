@@ -48,15 +48,40 @@ local WeaponClient = {}
 -- After VFXController (8), whose shot feedback this module drives.
 WeaponClient.Priority = 9
 
--- How long a weapon swap locks out firing. Matches ViewmodelController's raise
--- animation so the gun is fireable exactly when it finishes coming up.
-local SWITCH_TIME = 0.35
+--[[
+	How long a switch may go unanswered before the server's weapon wins.
+
+	The server can drop an equip request without replying (the player died a
+	moment before it arrived, or the rate limit). The client had already swapped
+	its own gun, the server's attribute never changed, and nothing ever told the
+	client otherwise: for the rest of that life every shot named a weapon the
+	server did not think was in hand and was silently thrown away, while the
+	client drew beams, played sounds and counted ammo down.
+]]
+local EQUIP_CONFIRM_TIMEOUT = 1
 
 -- How long after a local shot a HIGHER server magazine count is treated as
 -- stale. Roughly one generous round trip: long enough that a burst never sees
 -- its own rounds handed back, short enough that a genuine correction (a shot
 -- the server refused) lands within a frame or two of the player noticing.
 local RECONCILE_GRACE = 0.35
+
+--[[
+	How much of a frame's lateness the next shot is allowed to inherit.
+
+	Shots leave on Heartbeat, so a shot is only ever sent on a frame. The first
+	frame at or after the interval is late by whatever was left of the frame
+	before it, and if that remainder were simply thrown away every shot would pay
+	it again: the rifle fired about a quarter slower at 30 fps than at 240. So a
+	shot that leaves late books its slot as the moment it was due, not the moment
+	it left, and the lateness is handed to the next interval.
+
+	Bounded, because it is time given back: the shortest gap the client can send
+	is the interval less this, which must stay well inside what the server
+	tolerates (WeaponState.FIRE_RATE_GRACE, 40 ms) or the server would refuse the
+	very shots this makes possible.
+]]
+local FIRE_CARRY = 0.012
 
 -- Rate limit for the empty-magazine click so holding the trigger on an empty
 -- gun does not machine-gun the sound.
@@ -69,12 +94,28 @@ local trove = Trove.new()
 
 -- weaponId -> predicted state. magSize is seeded from config and replaced by
 -- whatever the server reports.
-local predicted: { [string]: { mag: number, magSize: number, reloading: boolean, reloadUntil: number, lastShotAt: number } } =
+local predicted: {
+	[string]: {
+		mag: number,
+		magSize: number,
+		reloading: boolean,
+		reloadUntil: number,
+		-- The last shot sent with this weapon, numbered as the server's per-weapon
+		-- acknowledgement (AmmoSync's ackSeq) is.
+		lastSeq: number,
+		lastShotAt: number,
+	},
+} =
 	{}
 
 local currentWeaponId = Constants.SLOTS[Constants.DEFAULT_SLOT]
 local seq = 0
 local switchUntil = 0
+-- A switch this client asked for and the server has not yet echoed back.
+-- While it is pending, an echo of an OLDER switch is stale and ignored; if it
+-- is never confirmed, the server's weapon is adopted instead.
+local pendingWeapon: string? = nil
+local pendingUntil = 0
 local lastLocalShotAt = NEVER
 local lastEmptyClickAt = NEVER
 
@@ -107,6 +148,7 @@ local function stateFor(weaponId: string)
 			magSize = if weapon then weapon.magSize else 0,
 			reloading = false,
 			reloadUntil = 0,
+			lastSeq = 0,
 			lastShotAt = NEVER,
 		}
 		predicted[weaponId] = state
@@ -188,9 +230,16 @@ local function aimDirection(cameraCF: CFrame, origin: Vector3, range: number): V
 	params.FilterDescendantsInstances = { player.Character }
 	params.IgnoreWater = true
 
+	-- Start the trace level with the head, not at the camera. In third person
+	-- the camera is 12 studs back and to the right; a pillar or door frame in
+	-- those 12 studs caught the trace, put the aim point BEHIND the player, and
+	-- the shot went out backwards. Nothing between the camera and the player is
+	-- anything the player could be aiming at.
+	local depth = math.max((origin - cameraCF.Position):Dot(cameraCF.LookVector), 0)
+	local start = cameraCF.Position + cameraCF.LookVector * depth
 	local reach = cameraCF.LookVector * range
-	local hit = workspace:Raycast(cameraCF.Position, reach, params)
-	local target = if hit then hit.Position else cameraCF.Position + reach
+	local hit = workspace:Raycast(start, reach, params)
+	local target = if hit then hit.Position else start + reach
 
 	local offset = target - origin
 	if offset.Magnitude < 1e-3 then
@@ -208,7 +257,13 @@ end
 	here rather than assumed.
 ]]
 local function canAct(): boolean
-	return isAlive() and ClientState.isInMatch() and not UIController.isAnyMenuOpen()
+	-- Not during Results: the match is over and the server rejects every shot,
+	-- but the client went on drawing beams and counting ammo down for ten
+	-- seconds of a scoreboard.
+	return isAlive()
+		and ClientState.isInMatch()
+		and ClientState.match.phase ~= "Results"
+		and not UIController.isAnyMenuOpen()
 end
 
 function WeaponClient.canFire(): boolean
@@ -284,9 +339,16 @@ local function tryFire(now: number)
 	local origin = eyePosition() or cameraCF.Position
 	local direction = aimDirection(cameraCF, origin, weapon.range)
 
+	-- A shot that follows another by about the interval is part of a burst and
+	-- inherits a bounded share of its own lateness (see FIRE_CARRY). One that
+	-- follows a pause starts a fresh schedule exactly on this frame.
+	local late = now - (state.lastShotAt + weapon.fireRate)
+	local inherited = if late < weapon.fireRate then math.min(late, FIRE_CARRY) else 0
+
 	seq += 1
+	state.lastSeq = seq
 	state.mag -= 1
-	state.lastShotAt = now
+	state.lastShotAt = now - inherited
 	lastLocalShotAt = now
 
 	if shootRemote then
@@ -328,11 +390,13 @@ local function adoptWeapon(weaponId: string, announce: boolean)
 	previous.reloadUntil = 0
 
 	currentWeaponId = weaponId
-	switchUntil = os.clock() + SWITCH_TIME
+	switchUntil = os.clock() + WeaponConfig.SWITCH_TIME
 
 	if announce and equipRemote then
 		local weapon = WeaponConfig.get(weaponId)
 		equipRemote:FireServer(weapon.slot)
+		pendingWeapon = weaponId
+		pendingUntil = os.clock() + EQUIP_CONFIRM_TIMEOUT
 	end
 
 	ViewmodelController.setWeapon(weaponId)
@@ -370,11 +434,41 @@ local function reconcile(ammo)
 	local state = stateFor(ammo.weaponId)
 
 	state.magSize = if type(ammo.magSize) == "number" and ammo.magSize > 0 then ammo.magSize else state.magSize
-	state.reloading = ammo.reloading == true
-	-- The sync only says "reloading", not how much is left, so the local clock
-	-- restarts from now. It runs slightly long by the latency of this packet,
-	-- which the completion sync then corrects.
-	state.reloadUntil = if state.reloading then os.clock() + weapon.reloadTime else 0
+
+	local serverReloading = ammo.reloading == true
+	local wasReloading = state.reloading
+
+	-- The server works through shots in order and sends a sync after each, every
+	-- one saying "not reloading". The rifle empties and reloads by itself, so the
+	-- reload request goes out behind the last shots and the server is still
+	-- answering those when the client is already reloading; each of them would
+	-- cancel the reload and the HUD would flick reload, empty, reload as the
+	-- server caught up. A sync that has not yet accounted for the reload request
+	-- (`ackSeq` no later than the last shot this weapon fired, which is what the
+	-- request was sent behind: nothing fires while it reloads) and shows a
+	-- magazine that is not full cannot be the reload finishing, so it is not
+	-- allowed to end one. The completion sync carries a full magazine and still
+	-- does.
+	local predatesReload = wasReloading
+		and not serverReloading
+		and type(ammo.ackSeq) == "number"
+		and ammo.ackSeq <= state.lastSeq
+		and ammo.mag < state.magSize
+
+	if not predatesReload then
+		state.reloading = serverReloading
+		if not serverReloading then
+			state.reloadUntil = 0
+		elseif not wasReloading then
+			-- The server started a reload this client did not ask for. The sync only
+			-- says "reloading", not how much is left, so the clock starts now.
+			state.reloadUntil = os.clock() + weapon.reloadTime
+		end
+		-- Otherwise this is the answer to the reload the client started itself, and
+		-- its deadline stands. The reload began on the key press, a whole round
+		-- trip before this packet could arrive; restarting the clock here made
+		-- every reload as long as the weapon's plus the player's ping.
+	end
 
 	-- A server count higher than ours is either a correction for a shot it
 	-- refused, or a sync that left before our latest shots arrived. `ackSeq`
@@ -395,9 +489,25 @@ end
 -- Per-frame
 --------------------------------------------------------------------------------
 
+--[[
+	Settle an unconfirmed switch on the server's side of it. See
+	EQUIP_CONFIRM_TIMEOUT.
+]]
+local function adoptServerWeapon()
+	pendingWeapon = nil
+	local serverWeapon = player:GetAttribute("CurrentWeapon")
+	if WeaponConfig.exists(serverWeapon) and serverWeapon ~= currentWeaponId then
+		adoptWeapon(serverWeapon, false)
+	end
+end
+
 local function onHeartbeat()
 	local now = os.clock()
 	local state = stateFor(currentWeaponId)
+
+	if pendingWeapon and now >= pendingUntil then
+		adoptServerWeapon()
+	end
 
 	-- Local reload completion. The server's AmmoSync is authoritative and will
 	-- overwrite this, but finishing on the local clock means the HUD stops
@@ -452,6 +562,8 @@ local function resetLoadout()
 
 	switchUntil = 0
 	lastLocalShotAt = NEVER
+	-- A new life starts holding whatever the server spawned the character with.
+	adoptServerWeapon()
 	publish()
 end
 
@@ -486,8 +598,19 @@ function WeaponClient.init()
 		reconcile(ammo)
 	end))
 
-	-- The server's own view of what is in hand, which wins over the prediction.
+	-- The server's own view of what is in hand, which wins over the prediction —
+	-- except for the echo of a switch that a newer one has already replaced.
+	-- Pressing 2 then 1 inside one round trip used to bounce back to the pistol
+	-- when its echo arrived, and then to the rifle again, each bounce restarting
+	-- the switch lockout.
 	trove:Add(ClientState.SlotChanged:Connect(function(_slot: number, weaponId: string)
+		if pendingWeapon and os.clock() < pendingUntil then
+			if weaponId == pendingWeapon then
+				pendingWeapon = nil
+			end
+			return
+		end
+		pendingWeapon = nil
 		adoptWeapon(weaponId, false)
 	end))
 

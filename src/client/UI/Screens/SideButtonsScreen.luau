@@ -10,9 +10,11 @@
 	click and a menu opened by a keypress go through the same exclusivity rules.
 
 	On a small screen the labels are dropped and the buttons collapse to their
-	icons. The trigger is UIController.ScaleChanged, which already fires on the
-	Constants.SMALL_SCREEN_WIDTH crossing — a second viewport watcher here could
-	only disagree with it.
+	icons. A screen that is being scaled down is small by definition; on a
+	touchscreen the row also has to FIT, and a tablet or a phone past 700x360 is
+	not scaled at all yet still cannot hold six labelled buttons across (the row
+	is over a thousand units long). So the decision is wantsCompact, asked of
+	the canvas the screen lays out in, and asked again on every resize.
 
 	THE STACK FOLDS AWAY. Five buttons down the left edge is a reasonable amount
 	of chrome on a monitor and half the screen on a phone, where it sat over the
@@ -25,7 +27,6 @@
 	costs a keyboard player nothing.
 ]]
 
-local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
@@ -44,8 +45,15 @@ local SideButtonsScreen = {}
 SideButtonsScreen.Priority = 22
 
 local BUTTON_HEIGHT = 46
-local BUTTON_WIDTH = 150
+-- Fits the longest label ("НАСТРОЙКИ") with its icon and the room the key badge
+-- keeps free; at 150 the last letter ran under the badge.
+local BUTTON_WIDTH = 176
 local COMPACT_WIDTH = 52
+-- On a touchscreen the buttons are bigger. At the phone's 0.82 a 52x46 icon
+-- button is 43x38 px, and this is the way into the shop, the settings and every
+-- other panel; 56x54 is 46x44.
+local TOUCH_BUTTON_HEIGHT = 54
+local TOUCH_COMPACT_WIDTH = 56
 local BUTTON_GAP = 10
 
 -- The toggle's three bars, drawn as Frames rather than written as a glyph.
@@ -74,6 +82,22 @@ local buttons: { any } = {}
 -- Touch devices start folded: on a phone the stack covers the arena. A mouse
 -- and keyboard has both the room and the hotkeys, so it starts open.
 local expanded = true
+-- Whether this is a touchscreen and nothing else (ClientState.isTouchOnly), read
+-- once when the screen is built: the tree's whole shape follows from it, and a
+-- layout that changed its mind under a live tree would be half of each. A
+-- touchscreen laptop is NOT this - it has the keys the badges name.
+local touchLayout = false
+
+local function buttonHeight(): number
+	return if touchLayout then TOUCH_BUTTON_HEIGHT else BUTTON_HEIGHT
+end
+
+local function buttonWidth(isCompact: boolean): number
+	if not isCompact then
+		return BUTTON_WIDTH
+	end
+	return if touchLayout then TOUCH_COMPACT_WIDTH else COMPACT_WIDTH
+end
 local coins: any = nil
 local mouseHint: TextLabel? = nil
 -- nil until the first pass so the initial call always applies, including the
@@ -83,6 +107,37 @@ local compact: boolean? = nil
 --------------------------------------------------------------------------------
 -- Layout
 --------------------------------------------------------------------------------
+
+-- Kept clear on both sides of the touch row.
+local ROW_MARGIN = 16
+
+--[[
+	Whether the buttons drop their labels. Pure over its arguments, so the
+	harness can ask it at any size.
+
+	A scaled-down screen is always compact. On a touchscreen the row also goes
+	compact whenever the labelled row (the toggle and the five buttons side by
+	side, with the margin at both ends) is wider than the canvas: 1138 units,
+	which a scale of 1 leaves only to a screen 1138 wide. On a mouse-and-keyboard
+	machine the stack runs down the edge rather than across, so it does not need
+	to fit anything.
+]]
+function SideButtonsScreen.wantsCompact(canvasWidth: number, scale: number, touch: boolean): boolean
+	if scale < 1 then
+		return true
+	end
+	if not touch then
+		return false
+	end
+
+	local across = ROW_MARGIN * 2 + (#MENUS + 1) * BUTTON_WIDTH + #MENUS * BUTTON_GAP
+	return across > canvasWidth
+end
+
+local function wantsCompactNow(): boolean
+	local canvas = UIController.getCanvasSize()
+	return SideButtonsScreen.wantsCompact(if canvas then canvas.X else math.huge, UIController.scale, touchLayout)
+end
 
 --[[
 	Shows or hides the stack. The panel sizes itself from its children, so a
@@ -102,32 +157,49 @@ local function setExpanded(value: boolean)
 	end
 end
 
+--[[
+	On a touchscreen the stack opens SIDEWAYS, to the right of the toggle.
+
+	Downwards, on a phone, the five buttons ran from under the coin counter to
+	past the bottom edge: the wheel and the settings were off the screen with no
+	other way to reach them, and the rest sat over the thumbstick, where a thumb
+	landing to walk opened the shop instead. A row beside the toggle stays in
+	the top-left corner, which on a touchscreen nothing else wants.
+]]
+local function stackSize(width: number): UDim2
+	local count = #MENUS
+	if touchLayout then
+		return UDim2.fromOffset(count * width + (count - 1) * BUTTON_GAP, buttonHeight())
+	end
+	return UDim2.fromOffset(width, count * buttonHeight() + (count - 1) * BUTTON_GAP)
+end
+
 local function applyCompact(isCompact: boolean)
 	if isCompact == compact then
 		return
 	end
 	compact = isCompact
-	local width = isCompact and COMPACT_WIDTH or BUTTON_WIDTH
+	local width = buttonWidth(isCompact)
 
 	if panel then
 		panel.Size = UDim2.fromOffset(width, 0)
 	end
 	if stack then
-		stack.Size = UDim2.fromOffset(width, #MENUS * BUTTON_HEIGHT + (#MENUS - 1) * BUTTON_GAP)
+		stack.Size = stackSize(width)
 	end
 	if toggle then
-		toggle.instance.Size = UDim2.fromOffset(width, BUTTON_HEIGHT)
+		toggle.instance.Size = UDim2.fromOffset(width, buttonHeight())
 		toggle:setText(if isCompact then "" elseif expanded then "СКРЫТЬ" else "МЕНЮ")
 	end
 
 	for index, entry in MENUS do
 		local button = buttons[index]
 		if button then
-			button.instance.Size = UDim2.fromOffset(width, BUTTON_HEIGHT)
+			button.instance.Size = UDim2.fromOffset(width, buttonHeight())
 			button:setText(isCompact and "" or entry.label)
 			-- A touch device has no key to hint at, and the badge would only
 			-- crowd an icon-sized button.
-			button:setKeyHint(if isCompact or ClientState.isTouch then nil else entry.key)
+			button:setKeyHint(if isCompact or touchLayout then nil else entry.key)
 		end
 	end
 end
@@ -141,8 +213,11 @@ local function refreshMouseHint(unlocked: boolean)
 		return
 	end
 
-	local key = Constants.KEYBINDS.MouseUnlock == "RightControl" and "Right Ctrl" or Constants.KEYBINDS.MouseUnlock
-	mouseHint.Text = if unlocked then `MOUSE FREE — {key} to lock` else `UNLOCK MOUSE — {key}`
+	local key = Constants.KEYBINDS.MouseUnlock == "RightControl" and "Правый Ctrl"
+		or Constants.KEYBINDS.MouseUnlock
+	mouseHint.Text = if unlocked
+		then `КУРСОР СВОБОДЕН — {key}, чтобы вернуть`
+		else `ОСВОБОДИТЬ КУРСОР — {key}`
 	mouseHint.TextColor3 = if unlocked then UITheme.Colors.Accent else UITheme.Colors.TextDim
 end
 
@@ -185,10 +260,26 @@ end
 	top of the display and Roblox's top bar is drawn over the first ~36 pixels
 	of it. Anything placed at a small y is not merely cramped, it is invisible —
 	which is exactly what happened to the coin counter.
+
+	The bar is in real pixels and this screen is scaled, so it goes through
+	UIController.getTopBarOffset rather than being added as it stands; see there.
 ]]
 local function topLeftBelowRobloxBar(extraY: number): UDim2
-	local inset = GuiService:GetGuiInset()
-	return UDim2.new(0, 16, 0, inset.Y + extraY)
+	return UDim2.new(0, 16, 0, UIController.getTopBarOffset() + extraY)
+end
+
+-- Where the coin chip and the touch menu row sit, again: the bar's share of
+-- the canvas changes with the scale, and the bar itself with the device.
+local COINS_BELOW_BAR = 8
+local MENU_BELOW_BAR = 56
+
+local function placeBelowBar()
+	if coins then
+		coins.instance.Position = topLeftBelowRobloxBar(COINS_BELOW_BAR)
+	end
+	if panel and touchLayout then
+		panel.Position = topLeftBelowRobloxBar(MENU_BELOW_BAR)
+	end
 end
 
 local function buildStack(parent: Instance)
@@ -196,16 +287,16 @@ local function buildStack(parent: Instance)
 	-- stack away actually reclaims the space rather than leaving a hole.
 	local holder = Instance.new("Frame")
 	holder.Name = "Menu"
-	holder.AnchorPoint = if ClientState.isTouch then Vector2.new(0, 0) else Vector2.new(0, 0.5)
-	holder.Position = if ClientState.isTouch then topLeftBelowRobloxBar(56) else UDim2.new(0, 16, 0.5, 0)
+	holder.AnchorPoint = if touchLayout then Vector2.new(0, 0) else Vector2.new(0, 0.5)
+	holder.Position = if touchLayout then topLeftBelowRobloxBar(MENU_BELOW_BAR) else UDim2.new(0, 16, 0.5, 0)
 	holder.Size = UDim2.fromOffset(BUTTON_WIDTH, 0)
-	holder.AutomaticSize = Enum.AutomaticSize.Y
+	holder.AutomaticSize = if touchLayout then Enum.AutomaticSize.XY else Enum.AutomaticSize.Y
 	holder.BackgroundTransparency = 1
 	holder.Parent = parent
 	panel = holder
 
 	local panelLayout = Instance.new("UIListLayout")
-	panelLayout.FillDirection = Enum.FillDirection.Vertical
+	panelLayout.FillDirection = if touchLayout then Enum.FillDirection.Horizontal else Enum.FillDirection.Vertical
 	panelLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 	panelLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	panelLayout.Padding = UDim.new(0, BUTTON_GAP)
@@ -217,7 +308,7 @@ local function buildStack(parent: Instance)
 		-- Created with an icon so the Button lays out the slot; the glyph itself
 		-- is replaced by drawn bars immediately below.
 		icon = " ",
-		size = UDim2.fromOffset(BUTTON_WIDTH, BUTTON_HEIGHT),
+		size = UDim2.fromOffset(BUTTON_WIDTH, buttonHeight()),
 		layoutOrder = 0,
 		parent = holder,
 		onActivated = function()
@@ -232,13 +323,13 @@ local function buildStack(parent: Instance)
 	local list = Instance.new("Frame")
 	list.Name = "Buttons"
 	list.LayoutOrder = 1
-	list.Size = UDim2.fromOffset(BUTTON_WIDTH, #MENUS * BUTTON_HEIGHT + (#MENUS - 1) * BUTTON_GAP)
+	list.Size = stackSize(BUTTON_WIDTH)
 	list.BackgroundTransparency = 1
 	list.Parent = holder
 	stack = list
 
 	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.FillDirection = if touchLayout then Enum.FillDirection.Horizontal else Enum.FillDirection.Vertical
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Padding = UDim.new(0, BUTTON_GAP)
@@ -250,7 +341,7 @@ local function buildStack(parent: Instance)
 			text = entry.label,
 			icon = entry.icon,
 			keyHint = entry.key,
-			size = UDim2.fromOffset(BUTTON_WIDTH, BUTTON_HEIGHT),
+			size = UDim2.fromOffset(BUTTON_WIDTH, buttonHeight()),
 			layoutOrder = index,
 			parent = list,
 			onActivated = function()
@@ -272,9 +363,9 @@ local function buildFooter(parent: Instance)
 	hint.AnchorPoint = Vector2.new(1, 1)
 	-- Clear of the HUD ammo counter, which owns the bottom-right corner.
 	hint.Position = UDim2.new(1, -24, 1, -92)
-	hint.Size = UDim2.fromOffset(240, 18)
+	hint.Size = UDim2.fromOffset(320, 18)
 	hint.TextXAlignment = Enum.TextXAlignment.Right
-	hint.Visible = not ClientState.isTouch
+	hint.Visible = not touchLayout
 	hint.Parent = parent
 	mouseHint = hint
 
@@ -293,6 +384,7 @@ end
 
 function SideButtonsScreen.init()
 	ClientState.init()
+	touchLayout = ClientState.isTouchOnly()
 
 	local gui = UIController.getScreenGui("SideButtons", Constants.DISPLAY_ORDER.SideButtons)
 	if not gui then
@@ -312,7 +404,7 @@ function SideButtonsScreen.init()
 	coins = CurrencyLabel.create({
 		name = "Coins",
 		parent = root,
-		position = topLeftBelowRobloxBar(8),
+		position = topLeftBelowRobloxBar(COINS_BELOW_BAR),
 		anchorPoint = Vector2.new(0, 0),
 		value = ClientState.coins,
 	})
@@ -324,22 +416,44 @@ function SideButtonsScreen.init()
 	buildFooter(root)
 
 	trove:Add(ClientState.CoinsChanged:Connect(function(newCoins: number)
+		if ClientState.holdCoinDisplay then
+			return
+		end
 		coins:set(newCoins)
 	end))
 
 	trove:Add(ClientState.ProfileChanged:Connect(function()
+		if ClientState.holdCoinDisplay then
+			return
+		end
 		-- The profile snapshot is a full reload, not a reward: no count-up.
 		coins:setInstant(ClientState.coins)
 	end))
 
 	trove:Add(InputController.MouseUnlockToggled:Connect(refreshMouseHint))
-	trove:Add(UIController.ScaleChanged:Connect(function(scale: number)
-		applyCompact(scale < 1)
+	-- A resize can change the scale, the room left for the row, or the bar
+	-- above it, and either signal can come without the other: the scale alone
+	-- when the camera is replaced, the viewport alone when the scale rounds to
+	-- the same value.
+	local function reflow()
+		applyCompact(wantsCompactNow())
+		placeBelowBar()
+	end
+	trove:Add(UIController.ScaleChanged:Connect(reflow))
+	trove:Add(UIController.ViewportChanged:Connect(reflow))
+
+	-- On a touchscreen, opening a menu folds the row away again. It opened it
+	-- to get somewhere; left open, it stays in the top-left for the rest of
+	-- the match, one mis-tap from a shop.
+	trove:Add(UIController.MenuVisibilityChanged:Connect(function(_name: string, visible: boolean)
+		if visible and touchLayout and expanded then
+			setExpanded(false)
+		end
 	end))
 
 	refreshMouseHint(InputController.isMouseUnlocked())
-	applyCompact(UIController.scale < 1)
-	setExpanded(not ClientState.isTouch)
+	applyCompact(wantsCompactNow())
+	setExpanded(not touchLayout)
 end
 
 --[[
@@ -363,6 +477,7 @@ function SideButtonsScreen.stop()
 	stack = nil
 	coins = nil
 	mouseHint = nil
+	touchLayout = false
 end
 
 return SideButtonsScreen

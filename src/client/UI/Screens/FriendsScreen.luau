@@ -3,6 +3,13 @@
 	FriendsScreen.luau
 	Two lists: friends already in this server, and friends online somewhere else.
 
+	The first comes from the server (GetFriendsRequest). The second is asked of
+	the engine right here: Player:GetFriendsOnlineAsync answers only for the
+	LocalPlayer, and the IsOnline field the server used to read from
+	Players:GetFriendsAsync is no longer filled in, which left this list empty
+	for everyone. It is only a display list, so nothing here needs the server's
+	word for it.
+
 	GetFriendsRequest is rate limited to 2 calls per 10 seconds on the server, so
 	the refresh button enforces its own cooldown rather than letting an impatient
 	player spend the budget and get kicked for it. A refresh in flight disables
@@ -13,6 +20,7 @@
 	back.
 ]]
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
@@ -24,6 +32,7 @@ local Constants = require(Shared.Constants)
 local ListRow = require(script.Parent.Parent.Components.ListRow)
 local Panel = require(script.Parent.Parent.Components.Panel)
 local RemoteNames = require(Shared.RemoteNames)
+local TextUtil = require(Shared.Util.TextUtil)
 local Trove = require(Shared.Util.Trove)
 local UIController = require(script.Parent.Parent.UIController)
 local UITheme = require(script.Parent.Parent.UITheme)
@@ -36,6 +45,15 @@ FriendsScreen.Priority = 30
 local REFRESH_COOLDOWN = 6
 local ROW_HEIGHT = 48
 local NEVER = -math.huge
+
+-- A panel nobody scrolls past does not need an account's whole friends list;
+-- the engine caps a single answer at 200 anyway.
+local MAX_ONLINE = 50
+
+local ONLINE_EMPTY_TEXT = "Сейчас никого из друзей нет в сети"
+-- Not the same claim as the line above: that one says the list is empty, this
+-- one says the list could not be fetched.
+local ONLINE_FAILED_TEXT = "Не удалось узнать, кто в сети"
 
 local trove = Trove.new()
 local panel: any = nil
@@ -91,7 +109,7 @@ local function fill(section, entries, valueText: string, accent: Color3)
 			value = valueText,
 			valueColor = accent,
 			accentColor = accent,
-			icon = string.upper(string.sub(display, 1, 1)),
+			icon = TextUtil.upper(TextUtil.firstChar(display)),
 			layoutOrder = index,
 		})
 		count += 1
@@ -104,6 +122,55 @@ end
 --------------------------------------------------------------------------------
 -- Fetching
 --------------------------------------------------------------------------------
+
+--[[
+	Friends who are online and not in this room, or nil when the engine could
+	not say. `inServer` is the server's own list; the live roster is excluded as
+	well, because that list can be up to FRIENDS_CACHE_SECONDS old and somebody
+	who joined since would otherwise be listed as being elsewhere.
+]]
+local function friendsElsewhere(inServer: { any }?): { any }?
+	local me = Players.LocalPlayer
+	local ok, friends = pcall(function()
+		return me:GetFriendsOnlineAsync(MAX_ONLINE)
+	end)
+	if not ok or type(friends) ~= "table" then
+		return nil
+	end
+
+	local exclude: { [number]: boolean } = { [me.UserId] = true }
+	for _, entry in inServer or {} do
+		if type(entry) == "table" and type(entry.userId) == "number" then
+			exclude[entry.userId] = true
+		end
+	end
+	for _, other in Players:GetPlayers() do
+		exclude[other.UserId] = true
+	end
+
+	local entries = {}
+	for _, friend in friends do
+		if type(friend) ~= "table" or friend.IsOnline == false then
+			continue
+		end
+
+		local userId = tonumber(friend.VisitorId)
+		if not userId or exclude[userId] then
+			continue
+		end
+
+		exclude[userId] = true
+		local name = tostring(friend.UserName or userId)
+		local displayName = tostring(friend.DisplayName or "")
+		table.insert(entries, {
+			userId = userId,
+			name = name,
+			displayName = if displayName ~= "" then displayName else name,
+		})
+	end
+
+	return entries
+end
 
 local function setButton(text: string, enabled: boolean)
 	if refreshButton and refreshButton.instance.Parent then
@@ -137,6 +204,9 @@ local function fetch()
 			result = ok and response or nil
 		end
 
+		local inServer = if type(result) == "table" then result.inServer else nil
+		local online = friendsElsewhere(inServer)
+
 		pending = false
 		-- Stays disabled for the rest of the cooldown window, then comes back.
 		setButton("ОБНОВИТЬ", false)
@@ -145,16 +215,17 @@ local function fetch()
 		end)
 
 		releaseAll()
+		sections.online.empty.Text = if online then ONLINE_EMPTY_TEXT else ONLINE_FAILED_TEXT
+		fill(sections.online, online or {}, "В СЕТИ", UITheme.Colors.AccentAlt)
+
 		if type(result) ~= "table" then
 			fill(sections.inServer, {}, "", UITheme.Colors.Positive)
-			fill(sections.online, {}, "", UITheme.Colors.AccentAlt)
 			sections.inServer.empty.Text = "Не удалось загрузить список друзей"
 			return
 		end
 
 		sections.inServer.empty.Text = "Друзей на этом сервере пока нет"
-		fill(sections.inServer, result.inServer or {}, "ЗДЕСЬ", UITheme.Colors.Positive)
-		fill(sections.online, result.online or {}, "В СЕТИ", UITheme.Colors.AccentAlt)
+		fill(sections.inServer, inServer or {}, "ЗДЕСЬ", UITheme.Colors.Positive)
 	end)
 end
 
@@ -225,9 +296,11 @@ function FriendsScreen.init()
 			UIController.notifyClosed("Friends")
 		end,
 		title = "ДРУЗЬЯ",
-		subtitle = "Кто сейчас в игре и на этом сервере",
+		subtitle = "Кто в игре и на этом сервере",
 		size = UDim2.fromScale(0.56, 0.68),
 		parent = gui,
+		-- The close button and the ОБНОВИТЬ button beside it.
+		headerInset = 56 + 104 + 8,
 		accentColor = UITheme.Colors.Positive,
 		closeOnOverlay = false,
 	})
@@ -254,13 +327,7 @@ function FriendsScreen.init()
 		1,
 		body
 	)
-	buildSection(
-		"online",
-		"В СЕТИ, НО В ДРУГОМ МЕСТЕ",
-		"Сейчас никого из друзей нет в сети",
-		2,
-		body
-	)
+	buildSection("online", "В СЕТИ, НО В ДРУГОМ МЕСТЕ", ONLINE_EMPTY_TEXT, 2, body)
 
 	refreshButton = Button.create({
 		name = "Refresh",

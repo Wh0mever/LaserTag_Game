@@ -16,6 +16,11 @@
 		closeOnOverlay: boolean?,      -- default true; clicking the backdrop closes
 		name: string?,
 		onClose: (() -> ())?,          -- called the moment :close() runs, before the tween
+		headerInset: number?,          -- px kept free at the right of the title bar
+		                               -- (default 48: the close button). A screen
+		                               -- that puts its own widget there, like the
+		                               -- shop's balance, widens this so the title
+		                               -- and subtitle stop at it instead of under it.
 	}
 
 	Returns an object:
@@ -47,6 +52,11 @@ Panel.__index = Panel
 
 local DEFAULT_SIZE = UDim2.fromScale(0.52, 0.62)
 local TITLE_BAR_HEIGHT = 52
+-- With a subtitle the bar is taller and the title a size smaller. At 52 px the
+-- title's box was 20 px tall for 26 px text, so every titled panel printed its
+-- title across the top of its own subtitle.
+local TITLE_BAR_HEIGHT_WITH_SUBTITLE = 62
+local DEFAULT_HEADER_INSET = 48
 local CLOSED_SCALE = 0.92
 local OVERLAY_TRANSPARENCY = 0.45
 local SHADOW_TRANSPARENCY = 0.6
@@ -61,6 +71,9 @@ function Panel.create(props: { [string]: any })
 
 	local accent = props.accentColor or UITheme.Colors.Accent
 	local trove = Trove.new()
+	local hasSubtitle = props.subtitle ~= nil and props.subtitle ~= ""
+	local barHeight = if hasSubtitle then TITLE_BAR_HEIGHT_WITH_SUBTITLE else TITLE_BAR_HEIGHT
+	local inset = props.headerInset or DEFAULT_HEADER_INSET
 
 	local root = Instance.new("Frame")
 	root.Name = props.name or `{props.title or "Panel"}Panel`
@@ -123,16 +136,20 @@ function Panel.create(props: { [string]: any })
 
 	local titleBar = Instance.new("Frame")
 	titleBar.Name = "TitleBar"
-	titleBar.Size = UDim2.new(1, 0, 0, TITLE_BAR_HEIGHT)
+	titleBar.Size = UDim2.new(1, 0, 0, barHeight)
 	titleBar.BackgroundTransparency = 1
 	titleBar.ZIndex = 3
 	titleBar.Parent = body
 	UITheme.padding(18, 10).Parent = titleBar
 
-	local titleLabel =
-		UITheme.label(props.title or "", UITheme.TextSizes.Title, UITheme.Colors.Text, UITheme.Fonts.Heading)
+	local titleLabel = UITheme.label(
+		props.title or "",
+		if hasSubtitle then UITheme.TextSizes.Heading + 2 else UITheme.TextSizes.Title,
+		UITheme.Colors.Text,
+		UITheme.Fonts.Heading
+	)
 	titleLabel.Name = "Title"
-	titleLabel.Size = UDim2.new(1, -48, props.subtitle and 0.62 or 1, 0)
+	titleLabel.Size = UDim2.new(1, -inset, if hasSubtitle then 0.6 else 1, 0)
 	titleLabel.ZIndex = 3
 	titleLabel.Parent = titleBar
 
@@ -140,15 +157,15 @@ function Panel.create(props: { [string]: any })
 	subtitleLabel.Name = "Subtitle"
 	subtitleLabel.AnchorPoint = Vector2.new(0, 1)
 	subtitleLabel.Position = UDim2.fromScale(0, 1)
-	subtitleLabel.Size = UDim2.new(1, -48, 0.38, 0)
-	subtitleLabel.Visible = props.subtitle ~= nil and props.subtitle ~= ""
+	subtitleLabel.Size = UDim2.new(1, -inset, 0.4, 0)
+	subtitleLabel.Visible = hasSubtitle
 	subtitleLabel.ZIndex = 3
 	subtitleLabel.Parent = titleBar
 
 	local underline = Instance.new("Frame")
 	underline.Name = "Underline"
 	underline.AnchorPoint = Vector2.new(0.5, 0)
-	underline.Position = UDim2.new(0.5, 0, 0, TITLE_BAR_HEIGHT)
+	underline.Position = UDim2.new(0.5, 0, 0, barHeight)
 	underline.Size = UDim2.new(1, -36, 0, 2)
 	underline.BackgroundColor3 = accent
 	underline.BorderSizePixel = 0
@@ -158,8 +175,8 @@ function Panel.create(props: { [string]: any })
 
 	local content = Instance.new("Frame")
 	content.Name = "Content"
-	content.Position = UDim2.new(0, 0, 0, TITLE_BAR_HEIGHT + 8)
-	content.Size = UDim2.new(1, 0, 1, -(TITLE_BAR_HEIGHT + 8))
+	content.Position = UDim2.new(0, 0, 0, barHeight + 8)
+	content.Size = UDim2.new(1, 0, 1, -(barHeight + 8))
 	content.BackgroundTransparency = 1
 	content.BorderSizePixel = 0
 	content.ZIndex = 3
@@ -192,6 +209,11 @@ function Panel.create(props: { [string]: any })
 		position = UDim2.new(1, -14, 0, 10),
 		anchorPoint = Vector2.new(1, 0),
 		color = UITheme.Colors.PanelLight,
+		-- 54 units square answers a touch: 44 px at the phone's 0.82, where the
+		-- drawn 32 was 26. Reaches to the panel's edge on the right and stops
+		-- short of whatever a screen puts beside the X (ОБНОВИТЬ is 10 units
+		-- away) on the left.
+		hitPadding = Rect.new(8, 11, 14, 11),
 		parent = body,
 		onActivated = function()
 			self:close()

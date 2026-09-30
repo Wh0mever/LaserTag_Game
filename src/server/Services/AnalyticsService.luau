@@ -34,10 +34,13 @@ local FUNNEL_NAME = "MatchFunnel"
 
 -- Reported to the dashboard as the progression "level" for a match. This game
 -- has no levels, so every match is the same one and the interesting dimension
--- is the map, carried in the statistics table instead.
+-- is the map, which is the progression path itself.
 local PROGRESSION_LEVEL = 1
+local PROGRESSION_LEVEL_NAME = "Match"
 
-local available = true
+-- Methods that threw or do not exist. Per method, not per service: one call
+-- site with a bad signature must not silence the events that work.
+local disabledMethods: { [string]: boolean } = {}
 local matchSessions: { [Player]: { id: string, mapId: string, kills: number, startedAt: number } } = {}
 
 --------------------------------------------------------------------------------
@@ -47,26 +50,28 @@ local matchSessions: { [Player]: { id: string, mapId: string, kills: number, sta
 --[[
 	Call an AnalyticsService method, swallowing anything it throws.
 
-	After the first failure the whole service is switched off for the rest of the
-	server's life: if it is unavailable it will stay unavailable, and retrying
-	every event would turn one broken dependency into a warning per kill.
+	After a method's first failure that method is switched off for the rest of
+	the server's life: if it is unavailable it will stay unavailable, and
+	retrying every event would turn one broken call into a warning per kill. The
+	other methods keep reporting, since a bad signature in one place says nothing
+	about the rest.
 ]]
 local function report(methodName: string, ...): boolean
-	if not available then
+	if disabledMethods[methodName] then
 		return false
 	end
 
 	local method = (RobloxAnalytics :: any)[methodName]
 	if type(method) ~= "function" then
-		available = false
-		warn(`[Analytics] AnalyticsService has no {methodName}; analytics disabled for this server`)
+		disabledMethods[methodName] = true
+		warn(`[Analytics] AnalyticsService has no {methodName}; it is disabled for this server`)
 		return false
 	end
 
 	local ok, err = pcall(method, RobloxAnalytics, ...)
 	if not ok then
-		available = false
-		warn(`[Analytics] {methodName} failed, analytics disabled for this server: {err}`)
+		disabledMethods[methodName] = true
+		warn(`[Analytics] {methodName} failed, it is disabled for this server: {err}`)
 	end
 	return ok
 end
@@ -153,7 +158,7 @@ end
 --[[
 	The end of a match for one player, and the only place a match reports.
 ]]
-function AnalyticsService.matchFinished(player: Player, won: boolean, teamScore: number, enemyScore: number)
+function AnalyticsService.matchFinished(player: Player, won: boolean, _teamScore: number, _enemyScore: number)
 	local session = matchSessions[player]
 	if not session then
 		return
@@ -163,20 +168,28 @@ function AnalyticsService.matchFinished(player: Player, won: boolean, teamScore:
 
 	report("LogFunnelStepEvent", player, FUNNEL_NAME, session.id, 3, "Finished")
 
+	-- The engine's argument order is path, status, level, levelName, fields. It
+	-- was once path, status, a statistics table, level: the call threw inside
+	-- report(), which switched the whole service off for the server's life.
 	report(
 		"LogProgressionEvent",
 		player,
 		session.mapId,
 		if won then Enum.AnalyticsProgressionType.Complete else Enum.AnalyticsProgressionType.Fail,
+		PROGRESSION_LEVEL,
+		PROGRESSION_LEVEL_NAME,
 		{
-			Kills = session.kills,
-			TeamScore = teamScore,
-			EnemyScore = enemyScore,
-			-- Whole seconds: a player who leaves early is the signal, and
-			-- sub-second precision would only spread the buckets thinner.
-			DurationSeconds = math.floor(os.clock() - session.startedAt),
-		},
-		PROGRESSION_LEVEL
+			-- Only CustomField01..03 are read for breakdowns, and every distinct
+			-- combination counts against a per-experience cap. So the fields are
+			-- the two figures that tell a healthy match from a sick one: what the
+			-- player did and how long they stayed. Whole minutes: a player who
+			-- leaves early is the signal, and finer buckets would only thin it
+			-- out. The score line is left out, its range would eat the cap alone.
+			[Enum.AnalyticsCustomFieldKeys.CustomField01.Name] = tostring(session.kills),
+			[Enum.AnalyticsCustomFieldKeys.CustomField02.Name] = tostring(
+				math.floor((os.clock() - session.startedAt) / 60)
+			),
+		}
 	)
 end
 
@@ -190,10 +203,12 @@ end
 	matches the odds it advertises.
 ]]
 function AnalyticsService.spinResolved(player: Player, segmentIndex: number, rewardKind: string, paidCoins: number)
+	-- The engine only breaks a custom event down by CustomField01..03; under any
+	-- other key the segment and payout would arrive and never be queryable.
 	report("LogCustomEvent", player, "SpinResolved", 1, {
-		segment = tostring(segmentIndex),
-		reward = rewardKind,
-		paid = tostring(paidCoins),
+		[Enum.AnalyticsCustomFieldKeys.CustomField01.Name] = tostring(segmentIndex),
+		[Enum.AnalyticsCustomFieldKeys.CustomField02.Name] = rewardKind,
+		[Enum.AnalyticsCustomFieldKeys.CustomField03.Name] = tostring(paidCoins),
 	})
 end
 
@@ -205,8 +220,9 @@ function AnalyticsService.cleanupPlayer(player: Player)
 	matchSessions[player] = nil
 end
 
+-- True while every method is still working; false once any has been switched off.
 function AnalyticsService.isAvailable(): boolean
-	return available
+	return next(disabledMethods) == nil
 end
 
 function AnalyticsService.init()

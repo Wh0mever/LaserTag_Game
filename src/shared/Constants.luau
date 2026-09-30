@@ -33,6 +33,13 @@ Constants.WALK_SPEED = 18
 Constants.JUMP_POWER = 50
 Constants.RESPAWN_SECONDS = 3
 Constants.SPAWN_PROTECTION_SECONDS = 3
+-- How long a player entering a match has to pick a side. The question is on
+-- screen for this long, the server accepts a switch for this long (plus a
+-- little for the round trip) and not after, and the player is protected for
+-- this long on entry — they cannot shoot while the question is up, so without
+-- that they would be a target that cannot answer back. Firing ends the
+-- protection early, exactly as it does on a normal spawn.
+Constants.SIDE_CHOICE_SECONDS = 10
 Constants.HEAD_OFFSET_Y = 1.5 -- eye height above HumanoidRootPart
 
 -- Teams. Team A is green, Team B is magenta/pink (matches the HUD score chips).
@@ -94,12 +101,28 @@ Constants.DISPLAY_ORDER = {
 	Toast = 50,
 	Menu = 80,
 	Results = 90,
+	-- The server's own words to a player ("you are about to be sent to the hub").
+	-- Above every menu and the results screen, or a phone player with a panel
+	-- open never sees it; still below a modal, which has to be answered first.
+	Notice = 95,
 	Modal = 100,
 }
 
--- Viewport width below which the UI scales down for phones.
-Constants.SMALL_SCREEN_WIDTH = 600
-Constants.SMALL_SCREEN_UI_SCALE = 0.8
+--[[
+	How the interface shrinks on small screens. See UIController.computeScale.
+
+	The scale is the smaller of height / UI_REFERENCE_HEIGHT and
+	width / UI_REFERENCE_WIDTH, clamped to [UI_MIN_SCALE, 1]. HEIGHT leads
+	because a phone is held sideways: Roblox reports a typical one as about
+	640x294, which is wide enough to pass for a small laptop and a third as tall
+	as a monitor. The rule this replaced shrank the UI only below 600 wide, so
+	it never fired on a real phone and every panel was drawn at monitor size
+	on a screen 294 tall — the shop's buy buttons fell off the bottom and the
+	settings header buttons slid across the title.
+]]
+Constants.UI_REFERENCE_HEIGHT = 360
+Constants.UI_REFERENCE_WIDTH = 700
+Constants.UI_MIN_SCALE = 0.7
 
 -- Default remote rate limiting. Individual remotes override these.
 Constants.REMOTE_DEFAULTS = {
@@ -107,7 +130,7 @@ Constants.REMOTE_DEFAULTS = {
 	windowSeconds = 5,
 	cooldownSeconds = 2,
 	kickAfterViolations = 5,
-	kickMessage = "Too many requests. Please rejoin.",
+	kickMessage = "Слишком много запросов. Зайдите в игру ещё раз.",
 }
 
 -- Kill feed / damage display tuning.

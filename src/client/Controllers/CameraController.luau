@@ -10,11 +10,21 @@
 
 	Recoil
 	------
-	`addRecoilOffset(pitchDeg, yawDeg, recoveryRate?)` accumulates a view kick.
-	The offset is re-applied in full every frame from a BindToRenderStep bound
-	just after Enum.RenderPriority.Camera, because Roblox's camera module rebuilds
-	Camera.CFrame from scratch each frame from raw mouse deltas — a one-shot
-	rotation would be erased on the very next frame.
+	`addRecoilOffset(pitchDeg, yawDeg, recoveryRate?)` accumulates a view kick,
+	which decays back to zero. Each frame, from a BindToRenderStep bound just
+	after Enum.RenderPriority.Camera, the camera is turned by the CHANGE in the
+	offset since the last frame — never by the whole offset.
+
+	That distinction is the whole bug this used to have. Roblox's camera module
+	does not rebuild its aim from scratch: BaseCamera reads its starting look
+	direction back from Camera.CFrame every frame
+	(CalculateNewLookCFrameFromArg -> GetCameraLookVector). A rotation applied
+	here is therefore still there next frame, and re-applying the full, slowly
+	decaying offset every frame added it up again and again: one Lance shot with
+	a 2.6 degree kick left the view 32 degrees higher for good, and a rifle burst
+	walked the aim into the sky — faster the higher the frame rate. That was the
+	"camera spins while I shoot". Applying the difference makes the view kick by
+	exactly the offset and come back down by exactly as much.
 
 	Applying the kick to the camera (rather than to a cosmetic viewmodel) means it
 	also moves the aim, which is the point: the spray pattern has to be fought.
@@ -68,6 +78,10 @@ local SHOULDER_MARGIN = 0.85
 -- shoulder, looking at their chest.
 local DEATH_CAM_BACK = 9
 local DEATH_CAM_UP = 4.5
+-- The eye never comes closer to the target than this, however near the wall is,
+-- and stops this far short of a wall it would otherwise sit in.
+local DEATH_CAM_MIN_DISTANCE = 1.5
+local DEATH_CAM_WALL_MARGIN = 0.5
 -- Higher converges faster. 6 lands the camera in roughly half a second, which
 -- fits inside Constants.RESPAWN_SECONDS with time left to watch the killer.
 local DEATH_CAM_STIFFNESS = 6
@@ -78,6 +92,10 @@ local trove = Trove.new()
 local camera: Camera? = workspace.CurrentCamera
 local recoilPitch = 0
 local recoilYaw = 0
+-- How much of the offset the camera has already been turned by. The next frame
+-- applies only recoil - applied.
+local appliedPitch = 0
+local appliedYaw = 0
 local recoveryRate = DEFAULT_RECOIL_RECOVERY
 -- Roblox's own default; replaced by the player's setting once the profile
 -- arrives, and re-applied whenever the engine hands out a new Camera.
@@ -90,6 +108,10 @@ local shoulderFilterFor: Model? = nil
 
 local deathCamActive = false
 local deathTargetPart: BasePart? = nil
+-- Rebuilt per target: assigning FilterDescendantsInstances allocates, and the
+-- death view probes every frame.
+local deathParams: RaycastParams? = nil
+local deathParamsFor: BasePart? = nil
 local deathLastCFrame: CFrame? = nil
 -- Bumped on every death so a stale watchdog from a previous death cannot cut a
 -- later one short. Cheaper and safer than cancelling the thread: the watchdog
@@ -164,9 +186,16 @@ function CameraController.setRecoilRecovery(rate: number)
 	end
 end
 
+--[[
+	Forget the offset without turning the camera. For a respawn or the death
+	camera, where the view is set afresh anyway and undoing the last kick would
+	only jolt it.
+]]
 function CameraController.resetRecoil()
 	recoilPitch = 0
 	recoilYaw = 0
+	appliedPitch = 0
+	appliedYaw = 0
 end
 
 function CameraController.isDeathCamActive(): boolean
@@ -223,6 +252,8 @@ local function stopDeathCam()
 
 	deathCamActive = false
 	deathTargetPart = nil
+	deathParams = nil
+	deathParamsFor = nil
 	deathLastCFrame = nil
 	deathGeneration += 1
 	restoreCamera()
@@ -261,8 +292,27 @@ local function updateDeathCam(cam: Camera, deltaTime: number)
 	if target and target.Parent then
 		local targetCFrame = target.CFrame
 		local focus = targetCFrame.Position + Vector3.new(0, 1.5, 0)
-		local eye = targetCFrame * CFrame.new(0, DEATH_CAM_UP, DEATH_CAM_BACK)
-		deathLastCFrame = CFrame.lookAt(eye.Position, focus)
+		local eyePosition = (targetCFrame * CFrame.new(0, DEATH_CAM_UP, DEATH_CAM_BACK)).Position
+
+		-- Pull the eye in along the way to the target until it clears whatever
+		-- is in between: a fixed spot behind and above lands inside the ceiling
+		-- of a corridor or the wall someone is standing against. Both bodies
+		-- are ignored, so the view is not blocked by what it is looking at.
+		if deathParamsFor ~= target or not deathParams then
+			local params = RaycastParams.new()
+			params.FilterType = Enum.RaycastFilterType.Exclude
+			params.FilterDescendantsInstances = { target.Parent, player.Character }
+			params.IgnoreWater = true
+			deathParams = params
+			deathParamsFor = target
+		end
+		local toEye = eyePosition - focus
+		local hit = workspace:Raycast(focus, toEye, deathParams)
+		if hit then
+			eyePosition = focus + toEye.Unit * math.max(hit.Distance - DEATH_CAM_WALL_MARGIN, DEATH_CAM_MIN_DISTANCE)
+		end
+
+		deathLastCFrame = CFrame.lookAt(eyePosition, focus)
 	elseif target then
 		deathTargetPart = nil
 	end
@@ -336,18 +386,27 @@ local function onRender(deltaTime: number)
 	-- actually sits rather than about the character's spine.
 	applyShoulderOffset(cam)
 
-	if recoilPitch == 0 and recoilYaw == 0 then
+	if recoilPitch == 0 and recoilYaw == 0 and appliedPitch == 0 and appliedYaw == 0 then
 		return
 	end
 
-	cam.CFrame = cam.CFrame * CFrame.Angles(math.rad(recoilPitch), math.rad(recoilYaw), 0)
+	-- Only what changed since last frame: the rest is already in Camera.CFrame,
+	-- because the camera module carried it over.
+	local deltaPitch = recoilPitch - appliedPitch
+	local deltaYaw = recoilYaw - appliedYaw
+	if deltaPitch ~= 0 or deltaYaw ~= 0 then
+		cam.CFrame = cam.CFrame * CFrame.Angles(math.rad(deltaPitch), math.rad(deltaYaw), 0)
+	end
+	appliedPitch = recoilPitch
+	appliedYaw = recoilYaw
 
 	local decay = math.exp(-recoveryRate * deltaTime)
 	recoilPitch *= decay
 	recoilYaw *= decay
 
-	-- Snap the tail of the exponential to zero so the offset stops costing a
-	-- CFrame multiply every frame for the rest of the round.
+	-- Snap the tail of the exponential to zero. The last sliver is still taken
+	-- back out next frame (as recoil - applied), so the view lands exactly where
+	-- it started.
 	if math.abs(recoilPitch) < 0.01 and math.abs(recoilYaw) < 0.01 then
 		recoilPitch = 0
 		recoilYaw = 0
@@ -380,6 +439,22 @@ function CameraController.init()
 		CameraController.resetRecoil()
 		stopDeathCam()
 		restoreCamera()
+	end))
+
+	-- The match ending cancels the respawn of a player killed just before it,
+	-- and the hub spawn comes only after the Results hold: the dead-body view
+	-- must not stay up over the results. Only a change of phase counts (the
+	-- 1 Hz tick repeats the phase), so a death in the hub keeps its own view.
+	local lastPhase = ClientState.match.phase
+	trove:Add(ClientState.MatchChanged:Connect(function(match)
+		local phase = match.phase
+		if phase == lastPhase then
+			return
+		end
+		lastPhase = phase
+		if phase == "Results" or phase == "Idle" then
+			stopDeathCam()
+		end
 	end))
 
 	trove:Connect(player.CharacterAdded, function()
