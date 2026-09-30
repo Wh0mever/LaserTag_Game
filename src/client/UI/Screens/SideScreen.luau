@@ -66,8 +66,9 @@ local REASONS = {
 
 -- After a refusal the side buttons rest this long. A child who is told "no"
 -- taps again, fast; every tap is a request, and a burst of them trips the
--- remote's rate limit, which is the road to being kicked for pressing a button.
-local REFUSAL_REST_SECONDS = 1.5
+-- remote's rate limit. Two seconds matches the server's own cooldown after a
+-- violation, so a button that comes back is a button the server will answer.
+local REFUSAL_REST_SECONDS = 2
 
 -- How long the question waits before answering itself with "stay". Shared with
 -- the server, which accepts a switch for this long and protects the player for
@@ -180,6 +181,20 @@ local function setBusy(busy: boolean)
 end
 
 --[[
+	Lock the team buttons for REFUSAL_REST_SECONDS, whatever the refusal was.
+	Whoever asked is still reading the reason, and a tap now would only be a
+	request that fails the same way.
+]]
+local function restButtons()
+	setBusy(true)
+	task.delay(REFUSAL_REST_SECONDS, function()
+		if not answered then
+			setBusy(false)
+		end
+	end)
+end
+
+--[[
 	Answer "leave me where I am" and get out of the way.
 
 	Nothing is sent. The server already put this player on a side when the match
@@ -221,7 +236,12 @@ local function choose(teamId: string)
 	setBusy(false)
 
 	if not ok or type(result) ~= "table" then
-		setStatus("Не получилось. Попробуй ещё раз.", UITheme.Colors.Negative)
+		-- The server answers every request it accepts, so silence means it
+		-- dropped this one, and the usual reason is taps arriving faster than it
+		-- takes them. Saying so, and resting the buttons, is what stops the next
+		-- tap being one more thing to drop.
+		setStatus("Слишком часто. Подожди пару секунд.", UITheme.Colors.Negative)
+		restButtons()
 		return
 	end
 
@@ -235,12 +255,7 @@ local function choose(teamId: string)
 	end
 
 	setStatus(REASONS[result.reason] or "Пока нельзя.", UITheme.Colors.Negative)
-	setBusy(true)
-	task.delay(REFUSAL_REST_SECONDS, function()
-		if not answered then
-			setBusy(false)
-		end
-	end)
+	restButtons()
 	-- A refusal is the case where the countdown matters most, so it is the case
 	-- where the way out has to be named out loud rather than left to a small ✕.
 	if stayButton then

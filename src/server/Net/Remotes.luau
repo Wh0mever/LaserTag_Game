@@ -27,6 +27,7 @@ assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.js
 
 local Constants = require(Shared.Constants)
 local RateLimiter = require(script.Parent.RateLimiter)
+local RateLimiterCore = require(script.Parent.RateLimiterCore)
 local RemoteNames = require(Shared.RemoteNames)
 
 local Remotes = {}
@@ -44,6 +45,28 @@ export type RegisterConfig = {
 
 local FOLDER_NAME = "Remotes"
 
+--[[
+	Remotes behind a button a person presses. Hitting the rate limit on one of
+	these is a child tapping a refused button again, not an attack, so it never
+	ends in a kick: the refusal is answered on screen and the requests are simply
+	dropped. Gameplay remotes (shooting, reloading, switching weapons) keep the
+	kick, because nothing legitimate asks for those faster than the limit.
+]]
+local SCREEN_REMOTES: { [string]: boolean } = {
+	[RemoteNames.ChooseSideRequest] = true,
+	[RemoteNames.TeamCountsRequest] = true,
+	[RemoteNames.SpinRequest] = true,
+	[RemoteNames.BuySkinRequest] = true,
+	[RemoteNames.EquipSkinRequest] = true,
+	[RemoteNames.SaveSettingsRequest] = true,
+	[RemoteNames.GetFriendsRequest] = true,
+}
+
+-- Longest piece of client-chosen text a log line may carry, and how often one
+-- player may write about one remote. See RateLimiterCore.logGate.
+local LOG_TEXT_LIMIT = 32
+local LOG_INTERVAL_SECONDS = 5
+
 local CLASS_BY_KIND: { [string]: string } = {
 	Event = "RemoteEvent",
 	Function = "RemoteFunction",
@@ -55,6 +78,7 @@ local cache: { [string]: Instance } = {}
 local connections: { [string]: RBXScriptConnection } = {}
 local registered: { [string]: boolean } = {}
 local cooldowns: { [Player]: { [string]: number } } = {}
+local logGates: { [Player]: any } = {}
 
 local function ensureFolder(): Folder
 	if remotesFolder and remotesFolder.Parent then
@@ -148,6 +172,32 @@ local function passesCooldown(player: Player, name: string, seconds: number): bo
 end
 
 --[[
+	Log one rejected request, at most once per player and remote every few
+	seconds, with the client's own words cut short.
+
+	Every rejection used to warn, and a client can cause them as fast as its rate
+	limit allows: the console filled with one player's noise, and because the
+	reason often carries what the client sent, that player also chose what the
+	console said. The first line in an interval goes out; the rest are counted and
+	summarised on the next one.
+]]
+local function logRejected(player: Player, name: string, what: string, detail: any)
+	local gate = logGates[player]
+	if not gate then
+		gate = RateLimiterCore.newLogGate()
+		logGates[player] = gate
+	end
+
+	local shouldLog, suppressed = RateLimiterCore.logGate(gate, name, os.clock(), LOG_INTERVAL_SECONDS)
+	if not shouldLog then
+		return
+	end
+
+	local more = if suppressed > 0 then ` (+{suppressed} more since)` else ""
+	warn(`[Remotes] {player.Name} {what} "{name}": {RateLimiterCore.cleanForLog(detail, LOG_TEXT_LIMIT)}{more}`)
+end
+
+--[[
 	Run one request through the pipeline. Returns a packed result list on success
 	(so a RemoteFunction can return every value the handler produced) and nil on
 	any rejection.
@@ -167,18 +217,18 @@ local function runPipeline(config: RegisterConfig, limits, cooldownSeconds: numb
 		-- feedback this pipeline exists to withhold.
 		local ran, ok, reason = pcall(config.Validator, player, ...)
 		if not ran then
-			warn(`[Remotes] Validator for "{config.Name}" errored: {tostring(ok)}`)
+			logRejected(player, config.Name, "triggered a validator error on", ok)
 			return nil
 		end
 		if not ok then
-			warn(`[Remotes] {player.Name} failed validation on "{config.Name}": {reason or "unspecified"}`)
+			logRejected(player, config.Name, "failed validation on", reason or "unspecified")
 			return nil
 		end
 	end
 
 	local packed = table.pack(pcall(config.Handler, player, ...))
 	if packed[1] ~= true then
-		warn(`[Remotes] Handler for "{config.Name}" errored: {tostring(packed[2])}`)
+		logRejected(player, config.Name, "triggered a handler error on", packed[2])
 		return nil
 	end
 
@@ -208,7 +258,8 @@ function Remotes.register(config: RegisterConfig)
 		maxRequests = config.RateLimit or defaults.maxRequests,
 		windowSeconds = config.WindowSeconds or defaults.windowSeconds,
 		cooldownSeconds = defaults.cooldownSeconds,
-		kickAfterViolations = config.KickAfterViolations or defaults.kickAfterViolations,
+		kickAfterViolations = config.KickAfterViolations
+			or (if SCREEN_REMOTES[config.Name] then 0 else defaults.kickAfterViolations),
 		kickMessage = defaults.kickMessage,
 	}
 	local cooldownSeconds = config.Cooldown or 0
@@ -274,6 +325,7 @@ end
 
 function Remotes.cleanupPlayer(player: Player)
 	cooldowns[player] = nil
+	logGates[player] = nil
 	RateLimiter.cleanupPlayer(player)
 end
 

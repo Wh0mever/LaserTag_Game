@@ -126,7 +126,7 @@ Constants.REMOTE_DEFAULTS = {
 	windowSeconds = 5,
 	cooldownSeconds = 2,
 	kickAfterViolations = 5,
-	kickMessage = "Too many requests. Please rejoin.",
+	kickMessage = "Слишком много запросов. Зайдите в игру ещё раз.",
 }
 
 -- Kill feed / damage display tuning.

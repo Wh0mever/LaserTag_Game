@@ -20,6 +20,8 @@ local SCENARIOS = {
 	{ name = "client", what = "every client module loads and boots" },
 	{ name = "mobile", what = "a phone can aim, shoot, reload and switch view" },
 	{ name = "match", what = "the match runtime's own rules: sides, late joins, results" },
+	{ name = "sides", what = "the side question answers a refusal or a dropped request with a rest and a reason" },
+	{ name = "net", what = "the remote pipeline: who is kicked, and what a client can make the log say" },
 }
 
 local failed = {}
