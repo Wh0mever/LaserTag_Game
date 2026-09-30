@@ -637,22 +637,107 @@ end
 
 heading("Paid kills")
 
+local PairLimiter = Env.load("src/server/Match/PairLimiter")
+
 do
-	local runtime, a1, b1 = runningMatch()
+	-- 2v2: the killer has two enemies to spread kills over, so taking the same
+	-- one again and again is the pattern the limit exists for.
+	local runtime, onA, onB = lopsided(2, 2)
+	local killer, victim = onA[1], onB[1]
 	local limit = EconomyConfig.MAX_PAID_KILLS_PER_PAIR
 	local firstUnpaid = nil
 	for kill = 1, limit + 3 do
-		local paidKill = runtime:registerKill(b1, a1, "Rifle", false)
+		local paidKill = runtime:registerKill(victim, killer, "Rifle", false)
 		if not paidKill and not firstUnpaid then
 			firstUnpaid = kill
 		end
 	end
 	check(firstUnpaid == limit + 1, `the same victim stops paying after {limit} kills (first unpaid: {firstUnpaid})`)
 	check(runtime.state.scores.A == limit + 3, "but every kill still scores for the team")
+	check(runtime:registerKill(onB[2], killer, "Rifle", false) == true, "another victim of the same killer is paid")
 
-	local other = runtime:registerKill(a1, b1, "Rifle", false)
+	local other = runtime:registerKill(killer, victim, "Rifle", false)
 	check(other == true, "the victim killing back is paid")
-	check(runtime:registerKill(b1, b1, "Rifle", false) == false, "a suicide pays nothing")
+	check(runtime:registerKill(victim, victim, "Rifle", false) == false, "a suicide pays nothing")
+end
+
+do
+	-- 1v1: every kill of the match is the same pair. The winner takes as many as
+	-- the score limit says (18) and is paid for every one.
+	local runtime, onA, onB = lopsided(1, 1)
+	local duelLimit = MatchStateMachine.scoreLimitFor(1, GameConfig.SCORE_LIMIT_PER_PLAYER)
+	runtime.state.scoreLimit = duelLimit
+	local unpaid = 0
+	for _ = 1, duelLimit do
+		if not runtime:registerKill(onB[1], onA[1], "Rifle", false) then
+			unpaid += 1
+		end
+	end
+	check(duelLimit > EconomyConfig.MAX_PAID_KILLS_PER_PAIR, "the score limit of a 1v1 is above the pair limit")
+	check(runtime.state.scores.A == duelLimit, `the duel was played to its score limit ({runtime.state.scores.A})`)
+	check(unpaid == 0, `a 1v1 winner is paid for all {duelLimit} kills ({unpaid} were not)`)
+	check(runtime.kills[onA[1]] == duelLimit, "and every one is on their tally")
+end
+
+do
+	-- 3v3 is a team match like any other.
+	local runtime, onA, onB = lopsided(3, 3)
+	local limit = EconomyConfig.MAX_PAID_KILLS_PER_PAIR
+	local lastPaid = 0
+	for kill = 1, limit + 1 do
+		if runtime:registerKill(onB[2], onA[3], "Rifle", false) then
+			lastPaid = kill
+		end
+	end
+	check(lastPaid == limit, `the {limit + 1}th kill of the same victim in a 3v3 is not paid (last paid: {lastPaid})`)
+end
+
+do
+	-- Leaving and coming back is a new Player object with the same UserId, and
+	-- must not be a way to start the count again.
+	local runtime, onA, onB = lopsided(2, 2)
+	local limit = EconomyConfig.MAX_PAID_KILLS_PER_PAIR
+	for _ = 1, limit do
+		runtime:registerKill(onB[1], onA[1], "Rifle", false)
+	end
+	check(runtime:registerKill(onB[1], onA[1], "Rifle", false) == false, "the limit is reached")
+
+	local userId = onA[1].UserId
+	runtime:onPlayerRemoving(onA[1])
+	local back = fakePlayer("A1 again")
+	back.UserId = userId
+	back:SetAttribute("InMatch", "")
+	runtime:_joinMidMatch({ back })
+	check(runtime.roster[back] == "A", "the returning killer is seated on the smaller side")
+	check(runtime:registerKill(onB[1], back, "Rifle", false) == false, "and the same victim is still not paid")
+
+	-- The same goes for the victim.
+	local victimId = onB[1].UserId
+	runtime:onPlayerRemoving(onB[1])
+	local victimBack = fakePlayer("B1 again")
+	victimBack.UserId = victimId
+	victimBack:SetAttribute("InMatch", "")
+	runtime:_joinMidMatch({ victimBack })
+	check(runtime.roster[victimBack] == "B", "the returning victim is seated on the smaller side")
+	check(
+		runtime:registerKill(victimBack, back, "Rifle", false) == false,
+		"and coming back as the victim does not reset it"
+	)
+end
+
+do
+	-- Nothing about a finished match is carried into the next one.
+	local runtime, onA, onB = lopsided(2, 2)
+	local limit = EconomyConfig.MAX_PAID_KILLS_PER_PAIR
+	for _ = 1, limit + 1 do
+		runtime:registerKill(onB[1], onA[1], "Rifle", false)
+	end
+	check(PairLimiter.count(runtime.killPairs, onA[1].UserId, onB[1].UserId) == limit + 1, "the pair was counted")
+	runtime:_returnToHub()
+	check(
+		PairLimiter.count(runtime.killPairs, onA[1].UserId, onB[1].UserId) == 0,
+		"sending the match back to the hub forgets the counts"
+	)
 end
 
 --------------------------------------------------------------------------------

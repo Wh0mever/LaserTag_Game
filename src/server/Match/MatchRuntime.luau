@@ -76,7 +76,8 @@ function MatchRuntime.new(mapId: string)
 		-- everyone dealt in at the start. The end-of-match payout is scaled by
 		-- how long they were actually there.
 		placedAt = {} :: { [Player]: number },
-		-- Kills per killer and victim, for the ones that stop paying.
+		-- Kills per killer and victim, for the ones that stop paying. Keyed by
+		-- UserId: a player who leaves and comes back is a new Player object.
 		killPairs = PairLimiter.new(EconomyConfig.MAX_PAID_KILLS_PER_PAIR),
 		pending = {} :: { { [string]: any } }, -- events raised while one is dispatching
 		dispatching = false,
@@ -514,6 +515,9 @@ function MatchRuntime:_returnToHub()
 	table.clear(self.kills)
 	table.clear(self.sideDeadline)
 	table.clear(self.placedAt)
+	-- Nothing of a finished match is carried into the next one, whichever way
+	-- that one starts.
+	PairLimiter.reset(self.killPairs)
 
 	for _, player in leaving do
 		if isPresent(player) then
@@ -627,8 +631,9 @@ end
 
 	Returns whether the kill should PAY: false for a kill that does not score
 	(a self-kill, a team kill) and for one of a victim the killer has already
-	killed the paid number of times this match. The caller that pays coins
-	(CombatService, through DataService.recordKill) skips the payout on false.
+	killed the paid number of times this match while there were other enemies to
+	take instead. The caller that pays coins (CombatService, through
+	DataService.recordKill) skips the payout on false.
 
 	The kill feed is NOT published here — CombatService owns KillFeedEvent, and
 	firing it from both sides would double every entry. The weapon and headshot
@@ -653,8 +658,12 @@ function MatchRuntime:registerKill(victim: Player, killer: Player?, _weaponId: s
 			-- hundreds of times an hour. It is reported once at match end.
 			AnalyticsService.killScored(killer)
 			-- The kill scores whatever this says; it only decides whether the
-			-- killer is paid for it. See PairLimiter.
-			paid = PairLimiter.record(self.killPairs, killer, victim)
+			-- killer is paid for it. See PairLimiter, which also says why a
+			-- killer facing a single enemy is always paid. The enemies are
+			-- counted off the roster as it is now, the victim included.
+			local a, b = self:_countTeams()
+			local enemies = if victimTeam == "A" then a elseif victimTeam == "B" then b else nil
+			paid = PairLimiter.record(self.killPairs, killer.UserId, victim.UserId, enemies)
 			self:_dispatch({ type = "kill", teamId = killerTeam })
 		end
 	end
