@@ -297,6 +297,14 @@ local roster: { any } = {}
 Players.GetPlayers = function()
 	return table.clone(roster)
 end
+Players.GetPlayerFromCharacter = function(_self, character: any)
+	for _, player in roster do
+		if player.Character == character then
+			return player
+		end
+	end
+	return nil
+end
 Players.PlayerAdded = Env.liveSignal()
 Players.PlayerRemoving = Env.liveSignal()
 
@@ -584,6 +592,508 @@ do
 	check(countSent("ShotFired", shooter) == 0, "the shooter drew their own beam and is not sent a second one")
 	check(countSent("ShotFired", elsewhere) == 0, "a match on another map is not sent it")
 	check(countSent("ShotFired", lobbyist) == 0, "and neither is the hub")
+end
+
+--------------------------------------------------------------------------------
+-- A little engine
+--
+-- Hit resolution is a raycast, and the sandbox has no physics. So the ray is
+-- cast here against axis-aligned boxes: enough geometry for bodies, hats and
+-- walls, and faithful on the two points that decide who gets hit -- a part with
+-- CanQuery off is invisible to it, and it honours the filter list and its type
+-- the way the engine does.
+--------------------------------------------------------------------------------
+
+local rays: { { origin: any, direction: any } } = {}
+
+local function rayBox(part: any, origin: any, unit: any, reach: number): number?
+	local center, half = part.Position, part.Size * 0.5
+	local nearest, farthest = 0, reach
+	local inside = true
+
+	for _, axis in { "X", "Y", "Z" } do
+		local o, d = origin[axis], unit[axis]
+		local low, high = center[axis] - half[axis], center[axis] + half[axis]
+		if o < low or o > high then
+			inside = false
+		end
+		if math.abs(d) < 1e-9 then
+			if o < low or o > high then
+				return nil
+			end
+		else
+			local t1, t2 = (low - o) / d, (high - o) / d
+			if t1 > t2 then
+				t1, t2 = t2, t1
+			end
+			nearest, farthest = math.max(nearest, t1), math.min(farthest, t2)
+			if nearest > farthest then
+				return nil
+			end
+		end
+	end
+
+	-- A ray that starts inside a part does not hit it; the engine skips it too.
+	if inside then
+		return nil
+	end
+	return nearest
+end
+
+local function passesFilter(part: any, params: any): boolean
+	local listed = false
+	for _, instance in params.FilterDescendantsInstances or {} do
+		if part == instance or part:IsDescendantOf(instance) then
+			listed = true
+			break
+		end
+	end
+	if params.FilterType == roblox.Enum.RaycastFilterType.Include then
+		return listed
+	end
+	return not listed
+end
+
+local function castRay(origin: any, direction: any, params: any)
+	table.insert(rays, { origin = origin, direction = direction })
+
+	local reach, unit = direction.Magnitude, direction.Unit
+	local hitPart, hitAt = nil, math.huge
+	for _, instance in world:GetDescendants() do
+		if instance:IsA("BasePart") and instance.CanQuery and passesFilter(instance, params) then
+			local distance = rayBox(instance, origin, unit, reach)
+			if distance and distance < hitAt then
+				hitPart, hitAt = instance, distance
+			end
+		end
+	end
+
+	if not hitPart then
+		return nil
+	end
+	return {
+		Instance = hitPart,
+		Position = origin + unit * hitAt,
+		Distance = hitAt,
+		Normal = Vector3.new(0, 1, 0),
+	}
+end
+
+-- Takes everyone off the field, the way a round ending would, so each scene
+-- starts with only the people it puts there.
+local function clearField()
+	for _, player in table.clone(roster) do
+		Players.PlayerRemoving:Fire(player)
+		if player.Character then
+			player.Character:Destroy()
+		end
+	end
+	table.clear(roster)
+	for _, instance in world:GetChildren() do
+		if instance:IsA("Model") or instance:IsA("BasePart") then
+			instance:Destroy()
+		end
+	end
+	table.clear(rays)
+	table.clear(pingSeconds)
+	clearSent()
+end
+
+local function moveTo(character: any, position: any)
+	place(character.HumanoidRootPart, position)
+	place(character.Head, position + Vector3.new(0, 1.5, 0))
+	place(character.UpperTorso, position + Vector3.new(0, 0.2, 0))
+end
+
+local function eyeOf(player: any): any
+	return player.Character.HumanoidRootPart.Position + Vector3.new(0, 1.5, 0)
+end
+
+-- One frame of the game: the clock moves, `update` places whatever moves, and
+-- Heartbeat fires -- physics first, then the scripts that read it.
+local function frame(dt: number, update: (() -> ())?)
+	Env.advance(dt)
+	if update then
+		update()
+	end
+	Env.stepHeartbeat(dt)
+end
+
+local function frames(seconds: number, update: (() -> ())?)
+	local dt = 1 / 60
+	local elapsed = 0
+	while elapsed < seconds - 1e-9 do
+		frame(dt, update)
+		elapsed += dt
+	end
+end
+
+local function lastMessage(name: string, recipient: any)
+	for index = #sent, 1, -1 do
+		if sent[index].name == name and sent[index].player == recipient then
+			return sent[index]
+		end
+	end
+	return nil
+end
+
+local function shootAt(player: any, weaponId: string, target: any): boolean
+	return shoot(player, weaponId, (target - eyeOf(player)).Unit)
+end
+
+--------------------------------------------------------------------------------
+-- Shooting at what the shooter saw
+--
+-- A player fires at what their screen shows, which is other players as they
+-- were a round trip and a little interpolation ago. Testing the shot against
+-- where targets are by the time it arrives misses everything that moves: at
+-- running speed a tenth of a second is nearly two studs, wider than a body.
+--------------------------------------------------------------------------------
+
+heading("Lag compensation")
+
+do
+	clearField()
+	Env.raycastHandler = castRay
+
+	local SPEED = 18
+	local shooter = newPlayer("Marksman", "Dust", "A")
+	local runner = newPlayer("Runner", "Dust", "B")
+	join(shooter)
+	join(runner)
+	spawnPlayer(shooter, Vector3.new(0, 3, 0))
+	local runnerBody, runnerHumanoid = spawnPlayer(runner, Vector3.new(-100, 3, -40))
+	Env.advance(5)
+
+	local startedAt = Env.virtualTime
+	local function runnerX(at: number): number
+		return -100 + SPEED * (at - startedAt)
+	end
+	local function run(seconds: number)
+		frames(seconds, function()
+			moveTo(runnerBody, Vector3.new(runnerX(Env.virtualTime), 3, -40))
+		end)
+	end
+	-- Long enough between shots for the rifle's spray to settle, so every attempt
+	-- is a first shot and only the rewind decides whether it lands.
+	local function rest()
+		run(0.4)
+	end
+	-- The runner's head as it was `secondsAgo`, which is what the shooter saw.
+	local function headThen(secondsAgo: number): any
+		return Vector3.new(runnerX(Env.virtualTime - secondsAgo), 4.5, -40)
+	end
+	local function landed(): boolean
+		return lastMessage("HitConfirmed", shooter) ~= nil
+	end
+	local function attempt(secondsAgo: number, ping: number): boolean
+		pingSeconds[shooter] = ping
+		-- A headshot is 44: without this the runner would be dead by the third try.
+		runnerHumanoid.Health = 100
+		clearSent()
+		shootAt(shooter, "Rifle", headThen(secondsAgo))
+		return landed()
+	end
+
+	run(1)
+	check(attempt(0.15, 0.05), "a shot at where the runner was 150 ms ago lands for a shooter with 50 ms of latency")
+	local beam = lastMessage("ShotFired", runner)
+	check(
+		beam ~= nil and math.abs(beam.args[4].X - headThen(0.15).X) < 1,
+		"and the beam ends where the shooter saw the runner, not where the runner has run to since"
+	)
+
+	rest()
+	check(
+		not attempt(0.25, 0),
+		"the rewind follows the shooter's own latency: with none, an aim 250 ms behind the runner misses"
+	)
+
+	rest()
+	check(attempt(0.1, 0), "and the interpolation delay alone is enough to hit a target seen 100 ms ago")
+
+	rest()
+	check(attempt(0.1, 0 / 0), "a latency reading that is not a number counts as none")
+
+	rest()
+	check(not attempt(0, 0.05), "aiming at where the runner is now misses what the shooter would have seen")
+
+	rest()
+	check(not attempt(0.5, 0.5), "the rewind is capped: a shooter cannot reach half a second into the past")
+	rest()
+	check(
+		attempt(0.3, 0.5),
+		"but the cap itself is honoured, so a bad connection is not left shooting behind everything"
+	)
+
+	-- Cover between the shooter and where the runner was seen still stops the shot.
+	rest()
+	local blocker = newPart(
+		"Blocker",
+		world,
+		headThen(0.15) * Vector3.new(0.25, 0, 0) + Vector3.new(0, 4.5, -10),
+		Vector3.new(4, 6, 1)
+	)
+	check(not attempt(0.15, 0.05), "cover between the shooter and the rewound target stops the shot")
+	blocker:Destroy()
+
+	-- A wall the runner has just gone behind. From the shooter's eye the runner
+	-- is in the open for x < 0 and covered for x >= 0.
+	local wall = newPart("Wall", world, Vector3.new(15, 10, -20), Vector3.new(30, 20, 1))
+	while runnerX(Env.virtualTime) < 1 do
+		run(1 / 60)
+	end
+	local okWall = attempt(0.15, 0.05)
+	check(okWall, "a runner who stepped behind cover after the shooter saw them in the open is still hit")
+	rest()
+	check(not attempt(0, 0.05), "and one aimed at where they are behind the wall is not")
+	wall:Destroy()
+
+	-- A new life starts a new history. The old one ends nowhere near the spawn.
+	run(0.3)
+	spawnPlayer(runner, Vector3.new(200, 3, -40))
+	frames(2 / 60)
+	pingSeconds[shooter] = 0.05
+	clearSent()
+	shootAt(shooter, "Rifle", Vector3.new(200, 4.5, -40))
+	check(landed(), "a player who has just respawned is hit where they stand, not where their last life was")
+end
+
+do
+	-- A teammate in the way still takes the shot, as before.
+	clearField()
+	Env.raycastHandler = castRay
+
+	local shooter = newPlayer("Marksman", "Dust", "A")
+	local ally = newPlayer("Ally", "Dust", "A")
+	local enemy = newPlayer("Enemy", "Dust", "B")
+	for _, player in { shooter, ally, enemy } do
+		join(player)
+	end
+	spawnPlayer(shooter, Vector3.new(0, 3, 0))
+	spawnPlayer(ally, Vector3.new(0, 3, -20))
+	local _, enemyHumanoid = spawnPlayer(enemy, Vector3.new(0, 3, -40))
+	Env.advance(5)
+	frames(0.5)
+
+	clearSent()
+	shootAt(shooter, "Rifle", Vector3.new(0, 4.5, -40))
+	check(
+		enemyHumanoid.Health == 100,
+		"a shot that meets a teammate first stops there and does not reach the enemy behind"
+	)
+	check(lastMessage("HitConfirmed", shooter) == nil, "and confirms no hit")
+end
+
+--------------------------------------------------------------------------------
+-- Hair, hats and hit boxes
+--
+-- Accessories are parts, and a ray hits parts. A shot at the head that meets the
+-- hair first is a hit on "Handle", which is not the head, so it paid body
+-- damage; a wide hat made the head a bigger target than it is.
+--------------------------------------------------------------------------------
+
+heading("Accessories")
+
+do
+	clearField()
+	Env.raycastHandler = castRay
+
+	local function addHair(character: any, size: number, offset: any?): any
+		local head = character.Head
+		local accessory = roblox.Instance.new("Accessory")
+		accessory.Name = "Hair"
+		local centre = head.Position + (offset or Vector3.new(0, 0, 0))
+		local handle = newPart("Handle", accessory, centre, Vector3.new(size, size, size))
+		local weld = roblox.Instance.new("Weld")
+		weld.Name = "AccessoryWeld"
+		weld.Part0 = head
+		weld.Part1 = handle
+		weld.Parent = handle
+		accessory.Parent = character
+		return handle
+	end
+
+	local shooter = newPlayer("Marksman", "Dust", "A")
+	local victim = newPlayer("Wearer", "Dust", "B")
+	join(shooter)
+	join(victim)
+	spawnPlayer(shooter, Vector3.new(0, 3, 0))
+	local character = spawnPlayer(victim, Vector3.new(0, 3, -30))
+	Env.advance(5)
+	frames(0.5)
+
+	-- Accessories arrive after the character, from the asset servers.
+	local hair = addHair(character, 1.6)
+	Env.instanceEvent(character, "DescendantAdded"):Fire(hair.Parent)
+	Env.instanceEvent(character, "DescendantAdded"):Fire(hair)
+	check(not hair.CanQuery, "an accessory that arrives after the character cannot be hit")
+
+	clearSent()
+	shootAt(shooter, "Rifle", Vector3.new(0, 4.5, -30))
+	local hit = lastMessage("HitConfirmed", shooter)
+	check(hit ~= nil and hit.args[3] == true, "a shot at the middle of a head that is wearing hair is a headshot")
+	check(hit ~= nil and hit.args[2] == 44, `and pays headshot damage (got {hit and hit.args[2]})`)
+
+	Env.advance(1)
+	clearSent()
+	shootAt(shooter, "Rifle", Vector3.new(0, 5.2, -30))
+	check(
+		lastMessage("HitConfirmed", shooter) == nil,
+		"a shot just over the head, through where the hair stands, misses"
+	)
+
+	-- Accessories that were already on the character when the game first saw it.
+	local worn = newPlayer("Early", "Dust", "B")
+	local wornCharacter = newCharacter(worn, Vector3.new(60, 3, -30))
+	local wornHair = addHair(wornCharacter, 1.6)
+	join(worn)
+	check(not wornHair.CanQuery, "an accessory already on the character is handled too")
+
+	-- The mapping in the resolver is the second line of defence, for a hat that
+	-- is somehow still hittable: it counts as the part it is worn on.
+	local bare = newPlayer("Bare", "Dust", "B")
+	local bareCharacter = newCharacter(bare, Vector3.new(-60, 3, -30))
+	local bareHair = addHair(bareCharacter, 1.6)
+	check(bareHair.CanQuery, "(this hat was never seen by the hitbox hook)")
+	Env.advance(1)
+	clearSent()
+	shootAt(shooter, "Rifle", Vector3.new(-60, 4.5, -30))
+	local mapped = lastMessage("HitConfirmed", shooter)
+	check(mapped ~= nil and mapped.args[3] == true, "a hit on a hat worn on the head still counts as a headshot")
+
+	local pack = addHair(bareCharacter, 1.5, Vector3.new(0, -1.3, 0))
+	pack.Parent.Name = "Backpack"
+	pack:FindFirstChild("AccessoryWeld").Part0 = bareCharacter.UpperTorso
+	Env.advance(1)
+	clearSent()
+	shootAt(shooter, "Rifle", Vector3.new(-60, 3.5, -30))
+	local body = lastMessage("HitConfirmed", shooter)
+	check(body ~= nil and body.args[3] == false, "and a hit on something worn on the torso counts as a body shot")
+end
+
+--------------------------------------------------------------------------------
+-- Where a shot comes from
+--
+-- The character belongs to its client, so its position is only as honest as the
+-- client. A shot resolved from wherever the character claims to be lets a
+-- modified client jump across the map and fire in the same frame.
+--------------------------------------------------------------------------------
+
+heading("Movement limits")
+
+do
+	clearField()
+	Env.raycastHandler = castRay
+
+	local shooter = newPlayer("Runner", "Dust", "A")
+	join(shooter)
+	local body = spawnPlayer(shooter, Vector3.new(0, 3, 0))
+	-- The server places a character and stamps its spawn protection straight after.
+	Env.setAttribute(shooter, "SpawnProtectedUntil", Env.virtualTime + 3)
+	Env.advance(5)
+	frames(0.5)
+
+	local function magOf(): number
+		return WeaponState.get(shooter, "Rifle").mag
+	end
+	-- Fires as an honest client does: from where its own character is.
+	local function fireFromWhereIStand(): boolean
+		local before = magOf()
+		table.clear(rays)
+		shoot(shooter, "Rifle")
+		return magOf() < before
+	end
+	local function leftFrom(place_: any): boolean
+		return rays[1] ~= nil and (rays[1].origin - place_).Magnitude < 0.5
+	end
+
+	-- Running flat out for three seconds, firing every 0.3 s: every shot counts,
+	-- and every shot starts where the player really is.
+	local x = 0
+	local fired, fromWrongPlace = 0, 0
+	for _ = 1, 10 do
+		frames(0.3, function()
+			x += 18 / 60
+			moveTo(body, Vector3.new(x, 3, 0))
+		end)
+		if fireFromWhereIStand() then
+			fired += 1
+			if not leftFrom(eyeOf(shooter)) then
+				fromWrongPlace += 1
+			end
+		end
+	end
+	check(fired == 10, `a player running at full speed is never refused ({fired}/10 shots)`)
+	check(fromWrongPlace == 0, `and every shot leaves from where they are ({fromWrongPlace} did not)`)
+
+	-- A connection that stalls for a second and a half, then delivers all of it.
+	Env.advance(3)
+	frames(1.5)
+	x += 27
+	moveTo(body, Vector3.new(x, 3, 0))
+	frames(1 / 60)
+	check(fireFromWhereIStand(), "a phone that freezes for a second and a half and then catches up is not refused")
+	check(leftFrom(eyeOf(shooter)), "and its shot leaves from where it caught up to")
+
+	-- Now a jump across the map, and a shot in the same instant.
+	Env.advance(3)
+	frames(1)
+	moveTo(body, Vector3.new(x + 150, 3, 0))
+	frames(1 / 60)
+	check(not fireFromWhereIStand(), "a shot fired in the same frame as a 150-stud jump is refused")
+
+	-- The server's picture of the player walks after them at a legal speed and
+	-- gets there; from then on they are exactly as before.
+	frames(2)
+	check(not fireFromWhereIStand(), "two seconds later it has still not covered that distance")
+	frames(2)
+	check(fireFromWhereIStand(), "and once it has, shots resume")
+	check(leftFrom(eyeOf(shooter)), "from the new position")
+end
+
+do
+	-- A new life: LoadCharacter puts the character at the default spawn, PivotTo
+	-- then moves it to the team's room, and the server stamps spawn protection
+	-- straight after -- which is when that place becomes the reference point.
+	clearField()
+	Env.raycastHandler = castRay
+
+	local shooter = newPlayer("Newcomer", "Dust", "A")
+	join(shooter)
+	local body = spawnPlayer(shooter, Vector3.new(0, 3, 0))
+	Env.advance(5)
+	frames(0.5)
+
+	moveTo(body, Vector3.new(400, 3, 0))
+	Env.setAttribute(shooter, "SpawnProtectedUntil", Env.virtualTime + 3)
+	frames(2 / 60)
+
+	table.clear(rays)
+	shoot(shooter, "Rifle")
+	check(
+		WeaponState.get(shooter, "Rifle").mag == WeaponConfig.Weapons.Rifle.magSize - 1,
+		"a player placed at their spawn can fire from it at once"
+	)
+	check(
+		rays[1] ~= nil and (rays[1].origin - eyeOf(shooter)).Magnitude < 0.5,
+		"and the shot leaves from the spawn, not from wherever the character was created"
+	)
+
+	-- Until the server has said it placed a character, there is nothing to hold
+	-- it to, and it is taken as it stands: never worse than not having the rule.
+	local drifter = newPlayer("Unplaced", "Dust", "A")
+	join(drifter)
+	local drifterBody = spawnPlayer(drifter, Vector3.new(0, 3, 50))
+	Env.advance(5)
+	frames(0.5)
+	moveTo(drifterBody, Vector3.new(-400, 3, 50))
+	frames(2 / 60)
+	shoot(drifter, "Rifle")
+	check(
+		WeaponState.get(drifter, "Rifle").mag == WeaponConfig.Weapons.Rifle.magSize - 1,
+		"a character the server has not placed is shot from where it stands"
+	)
 end
 
 --------------------------------------------------------------------------------

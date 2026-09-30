@@ -23,6 +23,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
 assert(Shared, "ReplicatedStorage.Shared is missing — check default.project.json")
 
+local CharacterTracker = require(script.Parent.CharacterTracker)
 local Validators = require(script.Parent.Parent.Net.Validators)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
 local WeaponState = require(script.Parent.WeaponState)
@@ -130,9 +131,13 @@ end
 	player's eyes are. This is the check that stops origin spoofing — shooting
 	from behind a wall, or from across the map — and the tolerance is what buys
 	an honest player room for latency.
+
+	"Where the server believes" is CharacterTracker's shadow of the player, not
+	the character's live position: the client owns that, so a client that had
+	teleported would otherwise be checked against its own claim.
 ]]
 function ShootValidation.checkOrigin(player: Player, origin: Vector3): (boolean, string?)
-	local eye = Validators.getHeadPosition(player)
+	local eye = CharacterTracker.eyePosition(player)
 	if not eye then
 		return false, "no-server-known-eye-position"
 	end
