@@ -21,6 +21,13 @@ local SCENARIOS = {
 	{ name = "mobile", what = "a phone can aim, shoot, reload and switch view" },
 	{ name = "match", what = "the match runtime's own rules: sides, late joins, results" },
 	{ name = "vfx", what = "beams, viewmodel, sparks, hitmarker, crosshair, death view" },
+	{ name = "sides", what = "the side question answers a refusal or a dropped request with a rest and a reason" },
+	{ name = "notice", what = "the notice banner sits above the menus, centred, clear of the controls" },
+	{ name = "deaths", what = "a reset or a fall after being shot is credited to the shooter and recorded" },
+	{ name = "reset", what = "the escape menu's reset button is off in a match and on in the hub" },
+	{ name = "queue", what = "the portal sign reads a match in its last minute as ending, not going" },
+	{ name = "results", what = "the results screen says whether the player won, lost or drew, and why" },
+	{ name = "net", what = "the remote pipeline: who is kicked, and what a client can make the log say" },
 }
 
 local failed = {}

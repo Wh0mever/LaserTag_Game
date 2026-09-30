@@ -14,9 +14,14 @@
 	Effect kinds, in the order the runtime must apply them:
 	  broadcast    {phase, data}                     -> MatchStateChanged
 	  startMatch   {queued}                          -> pick teams and spawn
-	  endMatch     {winnerTeam, scores, aborted}     -> pay rewards, show Results
+	  endMatch     {winnerTeam, scores, aborted, reason, elapsed}
+	                                                 -> pay rewards, show Results
+	               reason is "forfeit" when a side left and the other was given
+	               the win, nil for a match played to a score or the clock
 	  returnToHub  {}                                -> send the roster back
 	  resetQueue   {}                                -> drop the pad queue
+	  graceStarted {emptyTeam, seconds}              -> tell the roster a side is empty
+	  graceCancelled {}                              -> tell the roster the match goes on
 
 	Effect ORDER carries meaning and is not incidental: `startMatch` precedes the
 	InProgress broadcast because the roster has to exist before it can be
@@ -178,11 +183,26 @@ local function enterInProgress(state: State, effects: { Effect })
 end
 
 --[[
+	Seconds the match has been running, 0 when it is not. Payouts are scaled by
+	this, and by the time the runtime sees the end of a match the clock has been
+	reset for the Results screen, so it is read here and carried on the effect.
+]]
+function MatchStateMachine.elapsed(state: State): number
+	if state.phase ~= States.InProgress then
+		return 0
+	end
+	return math.clamp(state.config.matchDuration - state.timeLeft, 0, state.config.matchDuration)
+end
+
+--[[
 	Finish a played-out match. The Results broadcast is deliberately NOT emitted
 	here: its payload carries the per-player coin rewards, which only the runtime
 	knows once it has actually paid them.
 ]]
-local function enterResults(state: State, effects: { Effect }, winnerTeam: string?)
+local function enterResults(state: State, effects: { Effect }, winnerTeam: string?, reason: string?)
+	-- Before the clock is reused for the Results screen.
+	local elapsed = MatchStateMachine.elapsed(state)
+
 	state.phase = States.Results
 	state.timeLeft = state.config.resultsDuration
 	state.emptyTeamTimeLeft = nil
@@ -193,6 +213,8 @@ local function enterResults(state: State, effects: { Effect }, winnerTeam: strin
 		winnerTeam = winnerTeam,
 		scores = copyScores(state),
 		aborted = false,
+		reason = reason,
+		elapsed = elapsed,
 	})
 end
 
@@ -287,7 +309,7 @@ local function applyTick(state: State, dt: number, effects: { Effect })
 				-- Grace expired with a side still empty: whoever is left standing
 				-- takes the win regardless of the scoreline.
 				local survivor = if state.remaining.A > 0 then "A" elseif state.remaining.B > 0 then "B" else nil
-				enterResults(state, effects, survivor)
+				enterResults(state, effects, survivor, "forfeit")
 				return
 			end
 		end
@@ -366,8 +388,19 @@ local function applyRoster(state: State, remainingA: number, remainingB: number,
 		-- keeps losing its last player would never actually run out of time.
 		if not state.emptyTeamTimeLeft then
 			state.emptyTeamTimeLeft = state.config.emptyTeamGrace
+			-- The players still here would otherwise stand in an empty arena for
+			-- the whole grace with no sign of why the match has not ended, and
+			-- then be told they won 3-9.
+			emit(effects, {
+				type = "graceStarted",
+				emptyTeam = if state.remaining.A <= 0 then "A" else "B",
+				seconds = state.emptyTeamTimeLeft,
+			})
 		end
 	else
+		if state.emptyTeamTimeLeft then
+			emit(effects, { type = "graceCancelled" })
+		end
 		state.emptyTeamTimeLeft = nil
 	end
 end

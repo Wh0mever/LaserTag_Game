@@ -48,6 +48,9 @@ Env.boundActions = {}
 -- what UserInputService:GetLastInputType reports. Both default to "nothing".
 Env.raycast = nil
 Env.lastInputType = nil
+-- Every warn() the game issued, in order, so a scenario can assert on what was
+-- logged and not only that something was.
+Env.warnings = {}
 -- Seconds the game has asked task.wait for. Nothing real elapses; this is how a
 -- check tells a loop that waited from one that did not.
 Env.virtualTime = 0
@@ -470,6 +473,21 @@ end
 
 function Handle:FindFirstChild(name: string)
 	return rawget(self, name) or Env.handleFor(self.__dir .. "/" .. name)
+end
+
+--[[
+	Modules ask what a sibling is before requiring it (`module:IsA("ModuleScript")`),
+	which is how a lazy require avoids a load-time cycle. A file is a ModuleScript,
+	a directory a Folder.
+]]
+function Handle:IsA(className: string)
+	if className == "Instance" then
+		return true
+	end
+	if self.__file then
+		return className == "ModuleScript" or className == "LuaSourceContainer"
+	end
+	return className == "Folder"
 end
 
 function Handle:GetChildren()
@@ -1111,7 +1129,9 @@ local function buildEnvironment(scriptHandle: any)
 			for _, v in { ... } do
 				table.insert(parts, tostring(v))
 			end
-			print("[warn] " .. table.concat(parts, " "))
+			local line = table.concat(parts, " ")
+			table.insert(Env.warnings, line)
+			print("[warn] " .. line)
 		end,
 
 		print = print,
@@ -1543,6 +1563,7 @@ function Env.reset()
 	-- the new client's state.
 	table.clear(parked)
 	table.clear(Env.spawnErrors)
+	table.clear(Env.warnings)
 	Env.virtualTime = 0
 	Env.raycast = nil
 	Env.lastInputType = nil

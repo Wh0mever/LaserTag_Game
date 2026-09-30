@@ -32,6 +32,8 @@ local NoticeScreen = {}
 NoticeScreen.Priority = 38
 
 local SHOW_SECONDS = 5
+-- Widest the banner gets, on a screen with room for more.
+local MAX_WIDTH = 440
 local FADE = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 -- Severity -> accent. An unknown severity falls back to the neutral one rather
@@ -95,7 +97,7 @@ end
 function NoticeScreen.init()
 	ClientState.init()
 
-	local gui = UIController.getScreenGui("Notice", Constants.DISPLAY_ORDER.Toast)
+	local gui = UIController.getScreenGui("Notice", Constants.DISPLAY_ORDER.Notice)
 	if not gui then
 		return
 	end
@@ -103,8 +105,12 @@ function NoticeScreen.init()
 	local root = Instance.new("Frame")
 	root.Name = "Banner"
 	root.AnchorPoint = Vector2.new(0.5, 0)
-	root.Position = UDim2.new(0.5, 0, 0, 96)
-	root.Size = UDim2.fromOffset(440, 40)
+	root.Position = UDim2.new(0.5, 0, 0, 104)
+	-- A share of the width rather than a fixed strip, so a narrow phone still
+	-- has room either side of it for the controls, and a second line of text
+	-- grows the banner instead of spilling out of it.
+	root.Size = UDim2.new(0.6, 0, 0, 0)
+	root.AutomaticSize = Enum.AutomaticSize.Y
 	root.BackgroundColor3 = UITheme.Colors.PanelDark
 	root.BackgroundTransparency = 1
 	root.BorderSizePixel = 0
@@ -114,6 +120,10 @@ function NoticeScreen.init()
 	trove:Add(root)
 
 	UITheme.corner(UITheme.Radius.Medium).Parent = root
+	UITheme.padding(12, 6).Parent = root
+	local limit = Instance.new("UISizeConstraint")
+	limit.MaxSize = Vector2.new(MAX_WIDTH, math.huge)
+	limit.Parent = root
 	local edge = UITheme.stroke(UITheme.Colors.Accent, 1.5)
 	edge.Transparency = 1
 	edge.Parent = root
@@ -121,9 +131,13 @@ function NoticeScreen.init()
 
 	local text = UITheme.label("", UITheme.TextSizes.Small, UITheme.Colors.Accent, UITheme.Fonts.Bold)
 	text.Name = "Message"
-	text.Size = UDim2.fromScale(1, 1)
+	text.Size = UDim2.new(1, 0, 0, 0)
+	text.AutomaticSize = Enum.AutomaticSize.Y
+	text.TextXAlignment = Enum.TextXAlignment.Center
 	text.TextTransparency = 1
 	text.TextWrapped = true
+	-- The label grows to fit its text, so there is nothing to cut short.
+	text.TextTruncate = Enum.TextTruncate.None
 	text.ZIndex = 61
 	text.Parent = root
 	label = text

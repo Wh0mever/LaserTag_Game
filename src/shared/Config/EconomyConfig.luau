@@ -25,6 +25,27 @@ EconomyConfig.REWARDS = {
 	MATCH_DRAW = 200,
 }
 
+--[[
+	Seconds a player has to have been in a match for its win or draw bonus to be
+	theirs. The award used to depend on the scoreline alone, so a player seated
+	five seconds before the clock ran out was paid the same 400 as someone who
+	played the ten minutes, and two accounts could take turns being the one who
+	joined late. Kept small on purpose: joining a game that is already running
+	should still be worth doing. GameConfig.LATE_JOIN_CUTOFF_SECONDS stops seating
+	anyone who could not reach it.
+]]
+EconomyConfig.MATCH_BONUS_MIN_SECONDS = 60
+
+--[[
+	Kills of one particular victim by one particular killer that are paid in a
+	single match; the rest still score for the team but earn nothing. A real
+	match spreads kills over the enemy team, so this is only ever reached by a
+	pair trading kills in a 1v1, which is the shape of alt-account farming.
+	Deliberately above what an honest duel produces (an average player takes 15
+	kills in a full match, most of them in bigger games).
+]]
+EconomyConfig.MAX_PAID_KILLS_PER_PAIR = 12
+
 -- Hard sanity cap on any single coin award; anything larger is a bug or an
 -- exploit attempt and is rejected with a warning rather than granted.
 EconomyConfig.MAX_SINGLE_AWARD = 10000

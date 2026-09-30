@@ -98,6 +98,8 @@ local SPECS = {
 	"DamageCalc",
 	"Balance",
 	"MatchStateMachine",
+	"Payout",
+	"PairLimiter",
 	"SideAssignment",
 	"IdleTracker",
 	"Pacing",

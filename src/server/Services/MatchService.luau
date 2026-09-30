@@ -196,33 +196,63 @@ end
 	Called by CombatService once a kill is final. Routing is by the victim, then
 	the killer: the victim is always in the match the kill happened in, whereas a
 	killer could in principle have already left it.
+
+	Returns false when the kill scored but must not pay (the killer has already
+	been paid for the maximum number of kills of this victim this match), true
+	when it pays, and nil when no match claimed it. The caller pays only when the
+	answer is not false.
 ]]
 function MatchService.registerKill(victim: Player, killer: Player?, weaponId: string?, isHeadshot: boolean)
 	local runtime = runtimeForPlayer(victim) or runtimeForPlayer(killer)
 	if not runtime then
-		return
+		return nil
 	end
-	runtime:registerKill(victim, killer, weaponId, isHeadshot == true)
+	return runtime:registerKill(victim, killer, weaponId, isHeadshot == true)
+end
+
+--[[
+	Called by PlayerService as a respawn timer fires, before the player's team is
+	read for the spawn. If their side is two or more ahead they are moved to the
+	other (see MatchRuntime:rebalanceOnRespawn).
+]]
+function MatchService.rebalanceOnRespawn(player: Player): string?
+	local runtime = runtimeForPlayer(player)
+	if runtime then
+		return runtime:rebalanceOnRespawn(player)
+	end
+	return nil
 end
 
 --[[
 	Note that `player` did something only a present player does, so the idle
 	tracker does not mistake them for absent. Called by CombatService on an
-	accepted shot.
+	accepted shot; pass the shot's details ({ damaged, sprayIndex, direction }) so
+	that only a shot showing somebody is aiming counts, see
+	MatchRuntime:markActivity.
 
 	Silently does nothing for a player who is not in a match, which is the common
 	case for anything that fires from a shared code path.
 ]]
-function MatchService.markActivity(player: Player)
+function MatchService.markActivity(player: Player, shot: { [string]: any }?)
 	local runtime = runtimeForPlayer(player)
 	if runtime then
-		runtime:markActivity(player)
+		runtime:markActivity(player, shot)
 	end
 end
 
 function MatchService.getPhase(mapId: string): string
 	local runtime = runtimes[mapId]
 	return if runtime then runtime:getPhase() else MatchStateMachine.States.Idle
+end
+
+--[[
+	Whether someone standing on `mapId`'s pad right now would be seated: a match
+	in progress with more than the late-join cutoff left. QueueService reads this
+	to tell a sign that says "going" from one that says "ending".
+]]
+function MatchService.acceptsJoiners(mapId: string): boolean
+	local runtime = runtimes[mapId]
+	return runtime ~= nil and runtime:acceptsJoiners()
 end
 
 function MatchService.isInProgress(mapId: string): boolean

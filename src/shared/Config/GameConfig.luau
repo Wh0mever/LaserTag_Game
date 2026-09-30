@@ -14,6 +14,12 @@ GameConfig.RESULTS_DURATION = 10
 GameConfig.MIN_PLAYERS = 2
 GameConfig.MAX_PLAYERS_PER_MATCH = 16
 
+-- A match with less than this left on the clock takes no more joiners. Anyone
+-- seated later could not have played long enough to share in the result (see
+-- EconomyConfig.MATCH_BONUS_MIN_SECONDS), and would only be dropped into the
+-- last few seconds of somebody else's game.
+GameConfig.LATE_JOIN_CUTOFF_SECONDS = 60
+
 -- If one team is emptied by disconnects, the other side wins after this grace
 -- period rather than the match dragging on against nobody.
 GameConfig.EMPTY_TEAM_GRACE = 30
@@ -61,9 +67,11 @@ GameConfig.TICK_INTERVAL = 1
 	they take the end-of-match payout for standing still — which breaks the
 	economy's assumption that coins come from playing.
 
-	The thresholds are generous on purpose. Firing counts as activity, so a
-	marksman holding a lane with the Arc Lance is not caught; being caught needs
-	both hands off for over a minute of a ten-minute match.
+	The thresholds are generous on purpose. Aiming counts as activity (a shot that
+	hurts an enemy, or a burst aimed somewhere new), so a marksman turning to
+	each target with the Arc Lance is not caught; a held trigger firing at one
+	spot is not aiming. Being caught needs both hands off for over a minute of a
+	ten-minute match.
 ]]
 GameConfig.IDLE_WARN_SECONDS = 45
 GameConfig.IDLE_REMOVE_SECONDS = 75

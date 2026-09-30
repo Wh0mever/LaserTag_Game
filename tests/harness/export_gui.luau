@@ -13,7 +13,7 @@
 
 	Run:  lune run tests/harness/export_gui <device> <scenario> [menu] > gui.json
 	      device:   phone | tablet | desktop
-	      scenario: hub | queue | match | dead | results
+	      scenario: hub | queue | match | dead | results | resultsloss | resultsforfeit | notice
 	      menu:     optional menu name to open (Shop, Equip, Spin, Friends,
 	                Settings, Welcome, Side)
 ]]
@@ -159,6 +159,8 @@ if scenario == "queue" then
 	ClientState.QueueChanged:Fire("Dust", 1, 2, nil)
 end
 
+local isResults = scenario == "results" or scenario == "resultsloss" or scenario == "resultsforfeit"
+
 if scenario ~= "hub" and scenario ~= "queue" then
 	player:SetAttribute("TeamId", "A")
 	player:SetAttribute("CurrentWeapon", "Rifle")
@@ -166,15 +168,20 @@ if scenario ~= "hub" and scenario ~= "queue" then
 	player:SetAttribute("InMatch", "Dust")
 
 	ClientState.match.mapId = "Dust"
-	ClientState.match.phase = if scenario == "results" then "Results" else "InProgress"
+	ClientState.match.phase = if isResults then "Results" else "InProgress"
 	ClientState.match.timeLeft = 437
-	ClientState.match.scores = { A = 23, B = 19 }
+	ClientState.match.scores = if scenario == "resultsforfeit" then { A = 3, B = 9 } else { A = 23, B = 19 }
 	ClientState.match.data = {
 		timeLeft = 437,
-		scores = { A = 23, B = 19 },
+		scores = ClientState.match.scores,
 		-- Field names as MatchRuntime broadcasts them for Results.
-		winnerTeam = if scenario == "results" then "A" else nil,
-		rewards = if scenario == "results" then { [tostring(player.UserId)] = 325 } else nil,
+		-- resultsloss: the other team won. resultsforfeit: this team won because
+		-- the other one left, with a scoreline that says otherwise.
+		winnerTeam = if scenario == "resultsloss" then "B" elseif isResults then "A" else nil,
+		reason = if scenario == "resultsforfeit" then "forfeit" else nil,
+		rewards = if isResults
+			then { [tostring(player.UserId)] = if scenario == "resultsloss" then 100 else 325 }
+			else nil,
 	}
 	ClientState.MatchChanged:Fire(ClientState.match)
 
@@ -206,6 +213,15 @@ if scenario ~= "hub" and scenario ~= "queue" then
 			at = index,
 		})
 	end
+end
+
+-- The longest line the server sends today: the idle warning, which is what a
+-- phone player has to read while their thumbs are off the screen.
+if scenario == "notice" then
+	Env.load("src/client/UI/Screens/NoticeScreen").show(
+		"Двигайтесь или ведите бой — иначе через 30 с вернём в хаб",
+		"warning"
+	)
 end
 
 if scenario == "dead" then

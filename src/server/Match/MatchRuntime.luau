@@ -35,6 +35,8 @@ local GameConfig = require(Shared.Config.GameConfig)
 local IdleTracker = require(script.Parent.IdleTracker)
 local LeaderboardService = require(script.Parent.Parent.Services.LeaderboardService)
 local MatchStateMachine = require(script.Parent.MatchStateMachine)
+local PairLimiter = require(script.Parent.PairLimiter)
+local Payout = require(script.Parent.Payout)
 local PlayerService = require(script.Parent.Parent.Services.PlayerService)
 local RemoteNames = require(Shared.RemoteNames)
 local Remotes = require(script.Parent.Parent.Net.Remotes)
@@ -70,6 +72,12 @@ function MatchRuntime.new(mapId: string)
 		-- Until when each player may still change sides (os.clock()). Set on
 		-- placement, cleared by the one switch a player is allowed.
 		sideDeadline = {} :: { [Player]: number },
+		-- Seconds of the match that had passed when each player was seated: 0 for
+		-- everyone dealt in at the start. The end-of-match payout is scaled by
+		-- how long they were actually there.
+		placedAt = {} :: { [Player]: number },
+		-- Kills per killer and victim, for the ones that stop paying.
+		killPairs = PairLimiter.new(EconomyConfig.MAX_PAID_KILLS_PER_PAIR),
 		pending = {} :: { { [string]: any } }, -- events raised while one is dispatching
 		dispatching = false,
 		idle = IdleTracker.new({
@@ -97,6 +105,16 @@ end
 
 function MatchRuntime:isPlaying(player: Player): boolean
 	return self.roster[player] ~= nil
+end
+
+--[[
+	Whether a player standing on the pad would be seated right now. False in the
+	last minute of a match (see GameConfig.LATE_JOIN_CUTOFF_SECONDS), which is
+	also what lets the portal sign say the match is closing instead of that it is
+	still going.
+]]
+function MatchRuntime:acceptsJoiners(): boolean
+	return self:isInProgress() and self.state.timeLeft >= GameConfig.LATE_JOIN_CUTOFF_SECONDS
 end
 
 function MatchRuntime:getQueueCount(): number
@@ -162,6 +180,16 @@ function MatchRuntime:_audience(): { Player }
 	return list
 end
 
+-- A banner for everyone playing right now. The players on the pad are not told:
+-- what happens inside the match is not their business until they are in it.
+function MatchRuntime:_notifyRoster(message: string, severity: string)
+	for player in self.roster do
+		if isPresent(player) then
+			Remotes.fireClient(RemoteNames.Notice, player, message, severity)
+		end
+	end
+end
+
 function MatchRuntime:_broadcast(phase: string, data: { [string]: any })
 	for _, player in self:_audience() do
 		Remotes.fireClient(RemoteNames.MatchStateChanged, player, self.mapId, phase, data)
@@ -221,6 +249,16 @@ function MatchRuntime:_apply(effect: { [string]: any })
 		self:_returnToHub()
 	elseif kind == "resetQueue" then
 		table.clear(self.queued)
+	elseif kind == "graceStarted" then
+		self:_notifyRoster(
+			`Команда соперника пуста — победа через {effect.seconds} с, если никто не зайдёт`,
+			"warning"
+		)
+	elseif kind == "graceCancelled" then
+		self:_notifyRoster(
+			"В матч зашли новые игроки — игра продолжается",
+			"info"
+		)
 	else
 		warn(`[MatchRuntime] {self.mapId}: unknown effect "{tostring(kind)}"`)
 	end
@@ -239,6 +277,7 @@ function MatchRuntime:_place(player: Player, teamId: string)
 	-- joined, beside a team total that said 0.
 	player:SetAttribute("MatchKills", 0)
 	TeamService.assignToTeam(player, teamId)
+	self.placedAt[player] = MatchStateMachine.elapsed(self.state)
 	AnalyticsService.matchStarted(player, self.mapId)
 	-- Where they stood before this match says nothing about whether they are
 	-- playing it, and the idle clock starts now rather than at some earlier
@@ -319,6 +358,58 @@ function MatchRuntime:switchSide(player: Player, teamId: string): (boolean, stri
 	return true, reason
 end
 
+--[[
+	Even out the teams as a player comes back from a death.
+
+	Players who leave are never replaced on their own side, and the side picker
+	only exists at join, so a match that lost three players from one team stayed
+	lopsided until the last second. A death is the one moment a player can change
+	side without it being a teleport in the middle of a fight, so it is the moment
+	this asks: the player about to respawn is moved to the smaller side when their
+	own is two or more ahead.
+
+	Called by PlayerService when a respawn timer fires, so it covers every kind of
+	death, and BEFORE the team is read for the spawn. Not at the moment of the
+	kill: the kill feed is written just after the kill is registered, and would
+	show the victim in their new colours.
+
+	Never fills a side that is empty. That is a forfeit running its grace, and
+	dragging a teammate across would turn the win into a fight nobody asked for.
+
+	Returns the new team id if the player was moved.
+]]
+function MatchRuntime:rebalanceOnRespawn(player: Player): string?
+	local from = self.roster[player]
+	if not from or not self:isInProgress() then
+		return nil
+	end
+
+	local a, b = self:_countTeams()
+	local counts = { A = a, B = b }
+
+	local to = nil
+	for _, teamId in Constants.TEAM_IDS do
+		if teamId ~= from then
+			to = teamId
+		end
+	end
+	if not to or counts[to] < 1 or counts[from] - counts[to] < 2 then
+		return nil
+	end
+
+	self.roster[player] = to
+	TeamService.assignToTeam(player, to)
+	Remotes.fireClient(
+		RemoteNames.Notice,
+		player,
+		`Вы переведены в команду {Constants.TEAMS[to].name} для баланса`,
+		"info"
+	)
+
+	self:_syncRoster()
+	return to
+end
+
 function MatchRuntime:_startMatch()
 	local entrants = {}
 	for _, player in self.queued do
@@ -331,6 +422,8 @@ function MatchRuntime:_startMatch()
 	table.clear(self.roster)
 	table.clear(self.kills)
 	table.clear(self.sideDeadline)
+	table.clear(self.placedAt)
+	PairLimiter.reset(self.killPairs)
 
 	for player, teamId in TeamService.balanceAssign(entrants) do
 		self.roster[player] = teamId
@@ -359,18 +452,25 @@ function MatchRuntime:_endMatch(effect: { [string]: any })
 
 	local rewards = {}
 	local winnerTeam = effect.winnerTeam
+	local elapsed = effect.elapsed or 0
 
 	for player, teamId in self.roster do
 		if isPresent(player) then
-			local won = winnerTeam ~= nil and teamId == winnerTeam
-			local amount = if winnerTeam == nil
-				then EconomyConfig.REWARDS.MATCH_DRAW
-				elseif won then EconomyConfig.REWARDS.MATCH_WIN
-				else EconomyConfig.REWARDS.MATCH_PARTICIPATION
-			local reason = if winnerTeam == nil
-				then REWARD_REASONS.draw
-				elseif won then REWARD_REASONS.win
-				else REWARD_REASONS.played
+			-- What the scoreline says is not all that decides the award: a player
+			-- has to have been there for the result (see Payout).
+			local result = Payout.compute({
+				winnerTeam = winnerTeam,
+				teamId = teamId,
+				reason = effect.reason,
+				playedSeconds = elapsed - (self.placedAt[player] or 0),
+				matchSeconds = elapsed,
+				matchDuration = FSM_CONFIG.matchDuration,
+				rewards = EconomyConfig.REWARDS,
+				minSeconds = EconomyConfig.MATCH_BONUS_MIN_SECONDS,
+			})
+			local won = result.won
+			local amount = result.amount
+			local reason = REWARD_REASONS[result.outcome]
 
 			DataService.recordMatchResult(player, won, self.kills[player] or 0)
 			-- Keyed by the UserId as a STRING. A table keyed by large numbers is
@@ -397,6 +497,10 @@ function MatchRuntime:_endMatch(effect: { [string]: any })
 		scores = { A = effect.scores.A, B = effect.scores.B },
 		winnerTeam = winnerTeam,
 		rewards = rewards,
+		-- Why the match ended when the scoreline does not say: "forfeit" is a
+		-- win handed to the side that stayed, and the Results screen has to
+		-- explain it or it reads as a bug.
+		reason = effect.reason,
 	})
 end
 
@@ -409,6 +513,7 @@ function MatchRuntime:_returnToHub()
 	table.clear(self.roster)
 	table.clear(self.kills)
 	table.clear(self.sideDeadline)
+	table.clear(self.placedAt)
 
 	for _, player in leaving do
 		if isPresent(player) then
@@ -475,6 +580,13 @@ end
 	players from one team repairs itself instead of staying lopsided.
 ]]
 function MatchRuntime:_joinMidMatch(candidates: { Player })
+	-- Not in the last minute: someone seated then could not play long enough to
+	-- share in the result, and is only dropped into the end of somebody else's
+	-- game. They stay on the pad and are dealt into the next match.
+	if not self:acceptsJoiners() then
+		return
+	end
+
 	local a, b = self:_countTeams()
 	local size = a + b
 	local joined = false
@@ -513,18 +625,24 @@ end
 	Only cross-team kills score. A self-kill (the void, a fall) and a team kill
 	both leave the scoreline alone, so neither can be farmed for a win.
 
+	Returns whether the kill should PAY: false for a kill that does not score
+	(a self-kill, a team kill) and for one of a victim the killer has already
+	killed the paid number of times this match. The caller that pays coins
+	(CombatService, through DataService.recordKill) skips the payout on false.
+
 	The kill feed is NOT published here — CombatService owns KillFeedEvent, and
 	firing it from both sides would double every entry. The weapon and headshot
 	flag are still accepted (and ignored) so the four-argument signature
 	CombatService already calls against does not have to change when a scoring
 	rule eventually needs them.
 ]]
-function MatchRuntime:registerKill(victim: Player, killer: Player?, _weaponId: string?, _isHeadshot: boolean)
+function MatchRuntime:registerKill(victim: Player, killer: Player?, _weaponId: string?, _isHeadshot: boolean): boolean
 	if not victim then
-		return
+		return false
 	end
 
 	local victimTeam = self.roster[victim] or TeamService.getTeamId(victim)
+	local paid = false
 
 	if killer and killer ~= victim then
 		local killerTeam = self.roster[killer] or TeamService.getTeamId(killer)
@@ -534,6 +652,9 @@ function MatchRuntime:registerKill(victim: Player, killer: Player?, _weaponId: s
 			-- Counted, not sent: analytics is rate-limited and this fires
 			-- hundreds of times an hour. It is reported once at match end.
 			AnalyticsService.killScored(killer)
+			-- The kill scores whatever this says; it only decides whether the
+			-- killer is paid for it. See PairLimiter.
+			paid = PairLimiter.record(self.killPairs, killer, victim)
 			self:_dispatch({ type = "kill", teamId = killerTeam })
 		end
 	end
@@ -541,6 +662,8 @@ function MatchRuntime:registerKill(victim: Player, killer: Player?, _weaponId: s
 	if self.roster[victim] then
 		PlayerService.scheduleRespawn(victim, self.mapId, victimTeam, if killer then killer.UserId else nil)
 	end
+
+	return paid
 end
 
 --[[
@@ -597,7 +720,7 @@ function MatchRuntime:_stepIdle()
 			Remotes.fireClient(
 				RemoteNames.Notice,
 				player,
-				`Двигайтесь или стреляйте — иначе через {seconds} с вернём в хаб`,
+				`Двигайтесь или ведите бой — иначе через {seconds} с вернём в хаб`,
 				"warning"
 			)
 		elseif action.action == IdleTracker.Actions.Remove then
@@ -618,6 +741,7 @@ function MatchRuntime:_removeIdle(player: Player)
 	self.roster[player] = nil
 	self.kills[player] = nil
 	self.sideDeadline[player] = nil
+	self.placedAt[player] = nil
 	IdleTracker.forget(self.idle, player)
 
 	if isPresent(player) then
@@ -650,6 +774,7 @@ function MatchRuntime:onPlayerRemoving(player: Player)
 		self.roster[player] = nil
 		self.kills[player] = nil
 		self.sideDeadline[player] = nil
+		self.placedAt[player] = nil
 		self:_syncRoster()
 	end
 end
@@ -661,11 +786,40 @@ end
 	to be played by holding a lane without moving, and position sampling alone
 	would remove the player for playing the weapon the way it was built to be
 	played.
+
+	But a shot is proof of presence only when somebody is aiming it. Holding the
+	trigger with a weighted mouse button (or an autoclicker) fires at one fixed
+	direction forever, and used to keep an absent player in the match for good. So
+	a caller that has the details passes them:
+
+	  shot = { damaged = boolean, sprayIndex = number, direction = Vector3 }
+
+	and IdleTracker.markShot counts only a shot that hurt an enemy or a new burst
+	aimed somewhere new. A call with no shot is counted outright, as before.
 ]]
-function MatchRuntime:markActivity(player: Player)
-	if self.roster[player] then
-		IdleTracker.markActive(self.idle, player, workspace:GetServerTimeNow())
+function MatchRuntime:markActivity(player: Player, shot: { [string]: any }?)
+	if not self.roster[player] then
+		return
 	end
+
+	local now = workspace:GetServerTimeNow()
+	if shot == nil then
+		IdleTracker.markActive(self.idle, player, now)
+		return
+	end
+
+	-- A Vector3 answers to .X, a plain {x, y, z} table to .x.
+	local aim = shot.direction
+	local direction = nil
+	if type(aim) == "table" or typeof(aim) == "Vector3" then
+		direction = { x = aim.X or aim.x, y = aim.Y or aim.y, z = aim.Z or aim.z }
+	end
+
+	IdleTracker.markShot(self.idle, player, now, {
+		damaged = shot.damaged == true,
+		sprayIndex = shot.sprayIndex,
+		direction = direction,
+	})
 end
 
 --[[

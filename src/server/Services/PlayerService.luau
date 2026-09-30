@@ -52,6 +52,11 @@ local GRIP_NAME = "WeaponGrip"
 local characterTroves: { [Player]: any } = {}
 local weapons: { [Player]: { [string]: Model } } = {}
 local respawning: { [Player]: boolean } = {}
+-- Who last hurt each player, for a death that no shot finished.
+local lastDamager: { [Player]: { shooter: Player, weaponId: string?, at: number } } = {}
+
+-- A hit this recent is what a death is blamed on when nothing else claimed it.
+local DAMAGE_CREDIT_SECONDS = 5
 local serviceTrove = Trove.new()
 local killPlaneAccumulator = 0
 
@@ -290,6 +295,73 @@ local function configureCharacter(player: Player, character: Model, teamId: stri
 end
 
 --[[
+	Remember that `shooter` hurt `victim`, so that a death combat does not finish
+	can still be credited to them.
+
+	Roblox puts a Reset Character option in every player's escape menu, and it
+	sets the character's health to zero. Combat never sees that death, so a player
+	losing a fight could reset out of it: no kill for the other player, no point
+	for their team, no coins, and full health three seconds later. The same is
+	true of stepping off the map in the second after being shot.
+
+	CombatService calls this for every hit that lands. `at` is only for callers
+	that need to say when (tests); it defaults to now.
+]]
+function PlayerService.noteDamage(victim: Player, shooter: Player, weaponId: string?, at: number?)
+	if not victim or not shooter or victim == shooter then
+		return
+	end
+	lastDamager[victim] = { shooter = shooter, weaponId = weaponId, at = at or os.clock() }
+end
+
+--[[
+	Who to blame `victim`'s death on: the last player to hurt them, if it was
+	within DAMAGE_CREDIT_SECONDS and they are still in the same match. Consumed
+	either way, so one hit is only ever blamed for one death.
+]]
+local function takeDamageCredit(victim: Player, mapId: string): (Player?, string?)
+	local entry = lastDamager[victim]
+	lastDamager[victim] = nil
+	if not entry or os.clock() - entry.at > DAMAGE_CREDIT_SECONDS then
+		return nil, nil
+	end
+
+	local shooter = entry.shooter
+	if not shooter:IsDescendantOf(Players) or shooter:GetAttribute("InMatch") ~= mapId then
+		return nil, nil
+	end
+	return shooter, entry.weaponId
+end
+
+--[[
+	A character died. If a shot killed it, CombatService has already registered
+	the kill (and so the respawn) by the time this runs; what is left is a death
+	nobody claimed: the Reset Character button, a fall, the void.
+
+	It still goes through the match's own kill path, with the last player to hurt
+	the victim as the killer if there is one, so the scoreline, the respawn
+	message and the coins all work the way they do for any other death. And it is
+	written to the victim's record either way, which a reset used to skip.
+]]
+local function settleUnclaimedDeath(player: Player, mapId: string)
+	if respawning[player] or mapId == "" then
+		return
+	end
+
+	local killer, weaponId = takeDamageCredit(player, mapId)
+
+	local matchService = getMatchService()
+	local pays = nil
+	if matchService and type(matchService.registerKill) == "function" then
+		pays = matchService.registerKill(player, killer, weaponId, false)
+	end
+	if killer and pays == true then
+		DataService.recordKill(killer, false)
+	end
+	DataService.recordDeath(player)
+end
+
+--[[
 	Watch one character: its death, and the weapon it is holding.
 
 	The death hook is deferred by a resumption so an attributed scheduleRespawn
@@ -309,7 +381,10 @@ local function trackCharacter(player: Player, character: Model, mapId: string, t
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		trove:Connect(humanoid.Died, function()
-			task.defer(PlayerService.scheduleRespawn, player, mapId, teamId, nil)
+			task.defer(function()
+				settleUnclaimedDeath(player, mapId)
+				PlayerService.scheduleRespawn(player, mapId, teamId, nil)
+			end)
 		end)
 	end
 
@@ -327,6 +402,8 @@ local function spawnAt(player: Player, mapId: string, teamId: string, pivot: CFr
 	end
 
 	player:SetAttribute("InMatch", mapId)
+	-- A new life owes nothing to the last one's shooter.
+	lastDamager[player] = nil
 
 	local ok, err = pcall(function()
 		player:LoadCharacter()
@@ -402,6 +479,15 @@ function PlayerService.scheduleRespawn(player: Player, mapId: string, teamId: st
 				and player:GetAttribute("InMatch") == mapId
 
 			if stillPlaying then
+				-- The match gets a say first: a side two players ahead sends
+				-- one of them across as they come back.
+				if type(matchService.rebalanceOnRespawn) == "function" then
+					local ok, err = pcall(matchService.rebalanceOnRespawn, player)
+					if not ok then
+						warn(`[PlayerService] rebalancing {player.Name} failed: {err}`)
+					end
+				end
+
 				-- The side on record NOW, not the one captured at death: the
 				-- team can change in between, and respawning on the old one put
 				-- the character on one side while the match scored it for the
@@ -525,6 +611,7 @@ function PlayerService.onPlayerRemoving(player: Player)
 	end
 
 	respawning[player] = nil
+	lastDamager[player] = nil
 	PlayerService.clearWeapons(player)
 
 	local trove = characterTroves[player]

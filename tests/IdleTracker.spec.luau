@@ -229,4 +229,139 @@ return function(t)
 	t.equal(#IdleTracker.step(hostile, 0 / 0), 0, "a NaN clock produces no actions")
 
 	t.equal(IdleTracker.idleSeconds(hostile, "j", 0 / 0), 0, "a NaN clock reports no idle time")
+
+	-- Shots that show intent -----------------------------------------------------
+	-- Firing is proof of presence only if a person is aiming. Holding the trigger
+	-- with a weighted mouse button, or an autoclicker, fires forever at one fixed
+	-- direction and used to keep an absent player in the match for good.
+
+	local function dir(x: number, y: number, z: number)
+		return { x = x, y = y, z = z }
+	end
+
+	-- Degrees to a direction in the horizontal plane, for readable cases.
+	local function turned(degrees: number)
+		local radians = math.rad(degrees)
+		return dir(math.sin(radians), 0, -math.cos(radians))
+	end
+
+	t.expect(type(IdleTracker.markShot) == "function", "there is a way to report a shot with what it showed")
+	t.expect(
+		IdleTracker.DEFAULTS.burstTurnDegrees ~= nil and IdleTracker.DEFAULTS.burstTurnDegrees > 0,
+		"and a threshold for how far a new burst must turn"
+	)
+
+	if type(IdleTracker.markShot) == "function" then
+		local afk = newTracker()
+		IdleTracker.observe(afk, "k", at(0), 0)
+
+		-- The first burst is a person starting to shoot.
+		t.expect(
+			IdleTracker.markShot(afk, "k", 1, { sprayIndex = 1, direction = turned(0) }),
+			"the first burst counts as somebody being there"
+		)
+
+		-- The autoclicker: the same direction, burst after burst, forever.
+		local credited = 0
+		for second = 2, REMOVE * 2 do
+			if IdleTracker.markShot(afk, "k", second, { sprayIndex = 1, direction = turned(0) }) then
+				credited += 1
+			end
+			IdleTracker.observe(afk, "k", at(0), second)
+		end
+		t.equal(credited, 0, "the same aim repeated is not activity")
+		t.equal(
+			actionFor(IdleTracker.step(afk, REMOVE * 2), "k"),
+			IdleTracker.Actions.Remove,
+			"so an absent player firing at a wall is removed"
+		)
+
+		-- Holding the trigger inside one burst is not a new decision either.
+		local burst = newTracker()
+		IdleTracker.observe(burst, "m", at(0), 0)
+		IdleTracker.markShot(burst, "m", 1, { sprayIndex = 1, direction = turned(0) })
+		t.expect(
+			not IdleTracker.markShot(burst, "m", 2, { sprayIndex = 2, direction = turned(20) }),
+			"the later shots of a held burst do not count, even if the aim moved"
+		)
+
+		-- A person turning to a new target starts a new burst somewhere else.
+		local aimer = newTracker()
+		IdleTracker.observe(aimer, "n", at(0), 0)
+		IdleTracker.markShot(aimer, "n", 1, { sprayIndex = 1, direction = turned(0) })
+		t.expect(
+			not IdleTracker.markShot(aimer, "n", 2, { sprayIndex = 1, direction = turned(2) }),
+			"a nudge of two degrees is the same aim"
+		)
+		t.expect(
+			IdleTracker.markShot(aimer, "n", 3, { sprayIndex = 1, direction = turned(5) }),
+			"five degrees is somebody aiming"
+		)
+		t.expect(
+			not IdleTracker.markShot(aimer, "n", 4, { sprayIndex = 1, direction = turned(6) }),
+			"and it is measured from the last aim that counted, not from a drifting average"
+		)
+		t.expect(
+			IdleTracker.markShot(aimer, "n", 5, { sprayIndex = 1, direction = turned(-40) }),
+			"a turn the other way counts as well"
+		)
+
+		-- A hit is proof on its own, whatever the aim was.
+		local hitter = newTracker()
+		IdleTracker.observe(hitter, "p", at(0), 0)
+		IdleTracker.markShot(hitter, "p", 1, { sprayIndex = 1, direction = turned(0) })
+		t.expect(
+			IdleTracker.markShot(hitter, "p", 2, { damaged = true, sprayIndex = 4, direction = turned(0) }),
+			"a shot that hurt an enemy counts wherever it was in a burst"
+		)
+		t.equal(IdleTracker.idleSeconds(hitter, "p", 2), 0, "and restarts the idle clock")
+
+		-- A marksman holding a lane still counts as present when they hit something.
+		local lane = newTracker()
+		IdleTracker.observe(lane, "q", at(0), 0)
+		for second = 1, REMOVE * 2 do
+			IdleTracker.observe(lane, "q", at(0), second)
+			if second % 8 == 0 then
+				IdleTracker.markShot(lane, "q", second, { damaged = true, sprayIndex = 1, direction = turned(0) })
+			end
+			t.equal(
+				actionFor(IdleTracker.step(lane, second), "q"),
+				nil,
+				`a lane holder who hits is left alone at {second}s`
+			)
+		end
+
+		-- Missing or unusable direction cannot show intent.
+		local vague = newTracker()
+		IdleTracker.observe(vague, "r", at(0), 0)
+		t.expect(
+			not IdleTracker.markShot(vague, "r", 1, { sprayIndex = 1 }),
+			"a burst with no direction is not counted"
+		)
+		t.expect(
+			not IdleTracker.markShot(vague, "r", 1, { sprayIndex = 1, direction = dir(0, 0, 0) }),
+			"nor is one with a zero direction"
+		)
+		t.expect(
+			not IdleTracker.markShot(vague, "r", 1, { sprayIndex = 1, direction = dir(0 / 0, 0, 1) }),
+			"nor one with a NaN in it"
+		)
+		t.expect(not IdleTracker.markShot(vague, "r", 1, nil), "nor no shot at all")
+		t.expect(not IdleTracker.markShot(vague, nil, 1, { damaged = true }), "nor a shot by nobody")
+		t.expect(not IdleTracker.markShot(vague, "r", 0 / 0, { damaged = true }), "nor one at no time")
+
+		-- The threshold is configurable and validated like the others.
+		local wide = IdleTracker.new({ warnAfter = WARN, removeAfter = REMOVE, burstTurnDegrees = 30 })
+		IdleTracker.markShot(wide, "s", 0, { sprayIndex = 1, direction = turned(0) })
+		t.expect(
+			not IdleTracker.markShot(wide, "s", 1, { sprayIndex = 1, direction = turned(20) }),
+			"a wider threshold ignores a smaller turn"
+		)
+		local badTurn = IdleTracker.new({ burstTurnDegrees = -3 })
+		t.equal(
+			badTurn.config.burstTurnDegrees,
+			IdleTracker.DEFAULTS.burstTurnDegrees,
+			"a negative threshold falls back"
+		)
+	end
 end

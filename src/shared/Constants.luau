@@ -101,6 +101,10 @@ Constants.DISPLAY_ORDER = {
 	Toast = 50,
 	Menu = 80,
 	Results = 90,
+	-- The server's own words to a player ("you are about to be sent to the hub").
+	-- Above every menu and the results screen, or a phone player with a panel
+	-- open never sees it; still below a modal, which has to be answered first.
+	Notice = 95,
 	Modal = 100,
 }
 
@@ -126,7 +130,7 @@ Constants.REMOTE_DEFAULTS = {
 	windowSeconds = 5,
 	cooldownSeconds = 2,
 	kickAfterViolations = 5,
-	kickMessage = "Too many requests. Please rejoin.",
+	kickMessage = "Слишком много запросов. Зайдите в игру ещё раз.",
 }
 
 -- Kill feed / damage display tuning.
