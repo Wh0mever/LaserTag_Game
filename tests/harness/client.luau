@@ -1446,6 +1446,25 @@ if queueChip then
 	ClientStateModule.QueueChanged:Fire("Dust", 1, 2, nil)
 	check(queueChip.Visible, "stepping on a pad shows the chip")
 
+	-- The same update through the client's own remote handler, the way it
+	-- arrives from the server: the fifth argument says the match is closing.
+	-- (The suites above set ClientState.queue directly, which is how a handler
+	-- that dropped the flag went unnoticed.)
+	local queueRemote = ClientStateModule.getRemote("QueueUpdate")
+	check(queueRemote ~= nil, "the queue remote is there to deliver to")
+	if queueRemote then
+		queueRemote.OnClientEvent:Fire("Dust", 1, 2, nil, true)
+		check(ClientStateModule.queue.closing == true, "a closing update reaches ClientState")
+		check(
+			QueueScreenModule.textFor("Dust", 1, 2, nil, ClientStateModule.queue.closing) ~= nil,
+			"and the chip has text for it"
+		)
+		queueRemote.OnClientEvent:Fire("Dust", 1, 2, nil, nil)
+		check(ClientStateModule.queue.closing == false, "an update without the flag clears it, as from an older server")
+		queueRemote.OnClientEvent:Fire("Dust", 1, 2, nil, false)
+		check(ClientStateModule.queue.closing == false, "and so does an explicit false")
+	end
+
 	-- What QueueService now sends the player who steps off.
 	ClientStateModule.queue = { mapId = "", count = 0, needed = 2 }
 	ClientStateModule.QueueChanged:Fire("", 0, 2, nil)

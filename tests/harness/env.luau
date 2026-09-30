@@ -1387,8 +1387,6 @@ end
 local clientMethodsInstalled = false
 
 function Env.enableClientRuntime()
-	local signal = inertSignal
-
 	-- A real Camera, not a stand-in: client code parents things to it and hands
 	-- it to functions that demand an Instance. ViewportSize only exists while a
 	-- game runs, so it has no stored default — writing one makes it readable.
@@ -1449,7 +1447,9 @@ function Env.enableClientRuntime()
 		remote = {
 			Name = name,
 			ClassName = "RemoteEvent",
-			OnClientEvent = signal(),
+			-- Live, so a suite can deliver a server event through the client's own
+			-- handler instead of writing the state the handler would have written.
+			OnClientEvent = liveSignal(),
 			FireServer = function()
 				record("remote:FireServer")
 			end,
