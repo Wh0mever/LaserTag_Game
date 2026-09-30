@@ -23,3 +23,10 @@ Thumbs.db
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+
+# Python bytecode from tools/*.py (the screenshot renderer)
+__pycache__/
+*.pyc
+
+# Agent worktrees
+/.claude/worktrees/
