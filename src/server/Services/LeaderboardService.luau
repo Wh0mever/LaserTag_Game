@@ -134,10 +134,12 @@ end
 ]]
 local function onProfileReleasing(player: Player, kills: number)
 	local userId = player.UserId
+	-- The high-water mark stays after the leave-time write. Clearing it would
+	-- blind the re-check inside writeScore's retry: an older write still backing
+	-- off would wake to find nothing recorded and put its lower score over this
+	-- one. Kills only grow, so a returning player is never held back by it, and
+	-- the table costs one number per player who visited.
 	writeScore(userId, kills, RETRY_ATTEMPTS)
-	-- Forgotten either way: the entry is the store's now, and a player who
-	-- returns starts from a fresh comparison rather than an ever-growing table.
-	written[userId] = nil
 end
 
 -- Connected here, not in start(): start() runs the board loop and may yield,

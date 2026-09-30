@@ -605,6 +605,22 @@ do
 	check(#Env.spawnErrors == 0, "a write that never succeeds ends quietly, not with a dead thread")
 end
 
+-- A periodic write of 5 is throttled and backing off; the player makes more
+-- kills and leaves, and the leave-time write stores 9. When the old retry wakes
+-- it must not put 5 over it.
+do
+	local player = loadedPlayer("stale", 5)
+	orderedStore.failWrites = 1
+	Env.spawn(LeaderboardService.flush, player)
+	check(scoreOf(player) == nil, "the periodic write is throttled and backing off")
+	DataService.getData(player).Stats.Kills = 9
+	leave(player)
+	DataService.releasePlayer(player)
+	check(scoreOf(player) == 9, `the leave-time write stores the higher score (got {tostring(scoreOf(player))})`)
+	Env.advance(10)
+	check(scoreOf(player) == 9, `and the stale retry does not lower it (got {tostring(scoreOf(player))})`)
+end
+
 -- Shutdown: BindToClose flushes everyone still online, then releases them. The
 -- release must not write the same scores a second time.
 do
