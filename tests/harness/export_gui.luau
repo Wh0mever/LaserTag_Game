@@ -12,10 +12,11 @@
 	real modules construct, at the viewport the real device reports.
 
 	Run:  lune run tests/harness/export_gui <device> <scenario> [menu] > gui.json
-	      device:   phone | tablet | desktop
+	      device:   phone | widephone | tablet | widetablet | desktop
 	      scenario: hub | queue | match | dead | results | resultsloss | resultsforfeit | notice
 	      menu:     optional menu name to open (Shop, Equip, Spin, Friends,
-	                Settings, Welcome, Side)
+	                Settings, Welcome, Side), or SideMenu (the side buttons
+	                folded open) or Scoreboard (held open, 8v8)
 ]]
 
 local Env = require("./env")
@@ -32,7 +33,13 @@ local menu = process.args[3]
 local VIEWPORTS = {
 	-- What a landscape phone's Roblox viewport reports, NOT its pixel count.
 	phone = { 640, 294 },
+	-- A current phone on its side (852x393 is an iPhone Pro Max): tall enough
+	-- and wide enough that no UIScale applies, which is exactly the size the
+	-- phone layouts were never drawn at.
+	widephone = { 852, 393 },
 	tablet = { 1024, 768 },
+	-- A large tablet, or a touchscreen with room to spare.
+	widetablet = { 1280, 800 },
 	desktop = { 1920, 1080 },
 }
 local viewport = VIEWPORTS[device] or VIEWPORTS.phone
@@ -233,6 +240,37 @@ end
 -- what a phone player sees after tapping the ☰ toggle.
 if menu == "SideMenu" then
 	Env.load("src/client/UI/Screens/SideButtonsScreen").setExpanded(true)
+elseif menu == "Scoreboard" then
+	-- Not a panel either: the board is held open with Tab (or a tap on a
+	-- phone). A full 8v8 lobby, which is what fills it past the room a phone
+	-- gives it; the local player is on team A.
+	local function fakePlayer(name: string, team: string, kills: number)
+		return {
+			DisplayName = name,
+			GetAttribute = function(_self, key: string)
+				if key == "InMatch" then
+					return "Dust"
+				elseif key == "TeamId" then
+					return team
+				elseif key == "MatchKills" then
+					return kills
+				end
+				return nil
+			end,
+		}
+	end
+	player:SetAttribute("MatchKills", 6)
+	local roster = { player }
+	for index = 1, 7 do
+		table.insert(roster, fakePlayer(`Alpha_{index}`, "A", 12 - index))
+	end
+	for index = 1, 8 do
+		table.insert(roster, fakePlayer(`Bravo_{index}`, "B", 13 - index))
+	end
+	Env.service("Players").GetPlayers = function()
+		return roster
+	end
+	Env.load("src/client/Controllers/InputController").ScoreboardHeld:Fire(true)
 elseif menu and menu ~= "" then
 	UIController.openMenu(menu)
 end

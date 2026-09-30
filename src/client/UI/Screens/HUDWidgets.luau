@@ -63,8 +63,13 @@ local HOTBAR_HEIGHT = 44
 	the ~780x358 canvas a phone gets after UIScale.
 ]]
 local TOUCH_SLOT_WIDTH = 78
-local TOUCH_SLOT_HEIGHT = 32
+local TOUCH_SLOT_HEIGHT = 40
 local TOUCH_SLOT_GAP = 6
+-- What answers a touch beyond the drawn slot, on each side: 54 units tall is
+-- 44 px at the phone's scale of 0.82 where the drawn 40 is 33, and half a gap
+-- either way so neighbouring slots' areas meet without overlapping. The 7 below
+-- stays inside TOUCH_BOTTOM, so the area does not run off the screen.
+local TOUCH_SLOT_HIT = Rect.new(TOUCH_SLOT_GAP / 2, 7, TOUCH_SLOT_GAP / 2, 7)
 local TOUCH_STATUS_HEIGHT = 24
 local TOUCH_BOTTOM = 8
 local TOUCH_BLOCK_WIDTH = TOUCH_SLOT_WIDTH * 3 + TOUCH_SLOT_GAP * 2
@@ -359,6 +364,7 @@ local function buildHotbar(parent: Instance, onSlot: (slot: number) -> (), trove
 			name = `Slot{slot}`,
 			text = weapon and (weapon.shortName or weapon.displayName) or weaponId,
 			keyHint = if touch then nil else tostring(slot),
+			hitPadding = if touch then TOUCH_SLOT_HIT else nil,
 			size = UDim2.fromOffset(slotWidth, slotHeight),
 			layoutOrder = slot,
 			parent = holder,

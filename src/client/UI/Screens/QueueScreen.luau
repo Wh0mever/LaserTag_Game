@@ -16,7 +16,6 @@
 	steps off), and the chip is never shown during a match.
 ]]
 
-local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared", 10)
@@ -33,6 +32,7 @@ local QueueScreen = {}
 QueueScreen.Priority = 38
 
 local CHIP_HEIGHT = 30
+local BELOW_BAR = 8
 
 local trove = Trove.new()
 local chip: Frame? = nil
@@ -90,12 +90,10 @@ function QueueScreen.init()
 		return
 	end
 
-	local inset = GuiService:GetGuiInset()
-
 	local frame = Instance.new("Frame")
 	frame.Name = "QueueChip"
 	frame.AnchorPoint = Vector2.new(0.5, 0)
-	frame.Position = UDim2.new(0.5, 0, 0, inset.Y + 8)
+	frame.Position = UDim2.new(0.5, 0, 0, UIController.getTopBarOffset() + BELOW_BAR)
 	frame.Size = UDim2.fromOffset(0, CHIP_HEIGHT)
 	frame.AutomaticSize = Enum.AutomaticSize.X
 	frame.BackgroundColor3 = UITheme.Colors.PanelDark
@@ -116,6 +114,14 @@ function QueueScreen.init()
 	text.TextTruncate = Enum.TextTruncate.None
 	text.Parent = frame
 	label = text
+
+	-- The bar is in real pixels and the scale moves with the viewport, so the
+	-- chip is placed again when either does; see UIController.getTopBarOffset.
+	local function place()
+		frame.Position = UDim2.new(0.5, 0, 0, UIController.getTopBarOffset() + BELOW_BAR)
+	end
+	trove:Add(UIController.ScaleChanged:Connect(place))
+	trove:Add(UIController.ViewportChanged:Connect(place))
 
 	trove:Add(ClientState.QueueChanged:Connect(refresh))
 	trove:Add(ClientState.AttributeChanged:Connect(function(name: string)

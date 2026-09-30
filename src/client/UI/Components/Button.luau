@@ -14,6 +14,10 @@
 		textColor: Color3?,            -- default UITheme.Colors.Text
 		icon: string?,                 -- leading glyph/emoji (no asset ids exist in this project)
 		keyHint: string?,              -- e.g. "E" — drawn as a badge in the top-right corner
+		hitPadding: Rect?,             -- extra area that answers a touch, in this button's
+		                               -- units: Rect.new(left, top, right, bottom); invisible.
+		                               -- For a control that must look small but be easy to
+		                               -- hit: see HIT AREAS below.
 		layoutOrder: number?,
 		name: string?,                 -- Instance name; defaults to the text
 		onActivated: (() -> ())?,      -- fired by .Activated (mouse, touch and gamepad)
@@ -21,6 +25,7 @@
 
 	Returns an object:
 		.instance      TextButton (the root)
+		.hit           TextButton (the invisible hit area; nil without hitPadding)
 		.label         TextLabel  (nil when text is "" and no icon is used)
 		:setText(text)
 		:setIcon(glyph)
@@ -43,6 +48,15 @@ local UITheme = require(script.Parent.Parent.UITheme)
 local Button = {}
 Button.__index = Button
 
+--[[
+	HIT AREAS. A thumb needs about 44 px, and on a phone the UI is scaled down to
+	0.82, so a 32-unit close button is 26 px of glass. Drawing every control 54
+	units tall would make the panels clumsy, so a button that has to stay small
+	on screen can be given `hitPadding`: a transparent button laid over it and
+	beyond it, which takes the touch and does everything a touch on the button
+	does. It covers the whole button, so it takes over from it entirely; hover is
+	not lost because a touch has none.
+]]
 local DEFAULT_SIZE = UDim2.new(0, 180, 0, 44)
 local HOVER_LIGHTEN = 0.08
 local PRESS_SCALE = 0.95
@@ -167,7 +181,7 @@ function Button.create(props: { [string]: any })
 		padding.PaddingRight = UDim.new(0, KEY_HINT_RESERVE)
 	end
 
-	trove:Connect(root.MouseEnter, function()
+	local function onEnter()
 		if not self._enabled then
 			return
 		end
@@ -175,30 +189,30 @@ function Button.create(props: { [string]: any })
 			BackgroundColor3 = lighten(self._baseColor, HOVER_LIGHTEN),
 		}):Play()
 		TweenService:Create(stroke, UITheme.Tween.Fast, { Color = UITheme.Colors.Accent }):Play()
-	end)
+	end
 
-	trove:Connect(root.MouseLeave, function()
+	local function onLeave()
 		-- The resting colour, not the base colour: a disabled button that lost
 		-- the pointer used to tween back to its enabled colour and stay that
 		-- way, so an unaffordable КУПИТЬ looked pressable and did nothing.
 		TweenService:Create(root, UITheme.Tween.Fast, { BackgroundColor3 = self:_restColor() }):Play()
 		TweenService:Create(stroke, UITheme.Tween.Fast, { Color = UITheme.Colors.Stroke }):Play()
 		TweenService:Create(scale, UITheme.Tween.Fast, { Scale = 1 }):Play()
-	end)
+	end
 
-	trove:Connect(root.MouseButton1Down, function()
+	local function onDown()
 		if not self._enabled then
 			return
 		end
 		TweenService:Create(scale, UITheme.Tween.Fast, { Scale = PRESS_SCALE }):Play()
-	end)
+	end
 
-	trove:Connect(root.MouseButton1Up, function()
+	local function onUp()
 		TweenService:Create(scale, UITheme.Tween.Pop, { Scale = 1 }):Play()
-	end)
+	end
 
 	-- Activated (not MouseButton1Click) so touch taps and gamepad A both work.
-	trove:Connect(root.Activated, function()
+	local function onActivated()
 		if not self._enabled then
 			return
 		end
@@ -206,7 +220,35 @@ function Button.create(props: { [string]: any })
 		if self._onActivated then
 			self._onActivated()
 		end
-	end)
+	end
+
+	-- The hit area and the button itself listen to the same handlers. Whichever
+	-- receives a touch, the press, the release and the activation are the same.
+	local targets = { root }
+	if props.hitPadding then
+		local pad = props.hitPadding
+		local hit = Instance.new("TextButton")
+		hit.Name = "Hit"
+		hit.Text = ""
+		hit.AutoButtonColor = false
+		hit.BackgroundTransparency = 1
+		hit.BorderSizePixel = 0
+		hit.Position = UDim2.fromOffset(-pad.Min.X, -pad.Min.Y)
+		hit.Size = UDim2.new(1, pad.Min.X + pad.Max.X, 1, pad.Min.Y + pad.Max.Y)
+		-- Above the content and the key badge, which are also inside the button.
+		hit.ZIndex = 6
+		hit.Parent = root
+		self.hit = hit
+		table.insert(targets, hit)
+	end
+
+	for _, target in targets do
+		trove:Connect(target.MouseEnter, onEnter)
+		trove:Connect(target.MouseLeave, onLeave)
+		trove:Connect(target.MouseButton1Down, onDown)
+		trove:Connect(target.MouseButton1Up, onUp)
+		trove:Connect(target.Activated, onActivated)
+	end
 
 	trove:Add(root)
 	root.Parent = props.parent
@@ -255,6 +297,9 @@ function Button:setEnabled(enabled: boolean)
 	enabled = enabled ~= false
 	self._enabled = enabled
 	self.instance.Active = enabled
+	if self.hit then
+		self.hit.Active = enabled
+	end
 	self.instance.AutoButtonColor = false
 	self.instance.BackgroundColor3 = enabled and self._baseColor or UITheme.Colors.Disabled
 	self.label.TextTransparency = enabled and 0 or 0.4

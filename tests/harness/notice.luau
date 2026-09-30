@@ -66,10 +66,12 @@ if type(order.Notice) == "number" then
 end
 check(order.Toast == 50, "the toast layer itself is unchanged")
 
-local gui = UIController.getScreen("Notice")
-check(gui ~= nil, "the notice screen exists")
-if gui then
-	check(gui.DisplayOrder == order.Notice, `and sits on the notice layer (order {gui.DisplayOrder})`)
+-- The layer belongs to the ScreenGui; the banner hangs from the scale host in it.
+local screenGui = UIController.getScreen("Notice")
+local gui = UIController.getScreenRoot("Notice")
+check(screenGui ~= nil and gui ~= nil, "the notice screen exists")
+if screenGui then
+	check(screenGui.DisplayOrder == order.Notice, `and sits on the notice layer (order {screenGui.DisplayOrder})`)
 end
 
 --------------------------------------------------------------------------------

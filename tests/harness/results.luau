@@ -47,7 +47,7 @@ ClientState.init()
 UIController.init()
 ResultsScreen.init()
 
-local gui = UIController.getScreen("Results")
+local gui = UIController.getScreenRoot("Results")
 local root = gui and gui:FindFirstChild("Root")
 local card = root and root:FindFirstChild("Card")
 local headline = card and card:FindFirstChild("Headline")

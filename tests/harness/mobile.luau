@@ -655,7 +655,9 @@ check(boardOk, `the scoreboard initialises on a phone: {tostring(boardErr)}`)
 player:SetAttribute("InMatch", "Dust")
 UIController.closeMenu("Side")
 
-local boardGui = UIController.getScreen("Scoreboard")
+-- The screen's content parent, not the ScreenGui: on a scaled screen the two
+-- differ, and the widgets are in the first.
+local boardGui = UIController.getScreenRoot("Scoreboard")
 local scoreTap = boardGui and boardGui:FindFirstChild("ScoreTap")
 local board = boardGui and boardGui:FindFirstChild("Board")
 check(scoreTap ~= nil and scoreTap.Visible, "in a match the score at the top can be tapped")
@@ -672,6 +674,189 @@ if scoreTap and board then
 	player:SetAttribute("InMatch", "")
 	check(not scoreTap.Visible, "in the hub there is nothing to tap: the board is for a match")
 end
+
+--------------------------------------------------------------------------------
+-- The scoreboard with a full lobby
+--
+-- Rows were a plain Frame with no clipping and no cap. On a 640x294 phone the
+-- board has room for four of them, so a 10v10 match drew the rest below the
+-- panel, over the HUD and off the bottom of the screen, and the players at the
+-- bottom of a list are the ones who most want to see where they stand.
+--------------------------------------------------------------------------------
+
+heading("Scoreboard with a full lobby")
+
+do
+	local PlayersService = Env.service("Players")
+	local realGetPlayers = PlayersService.GetPlayers
+
+	local function fakePlayer(name: string, team: string, kills: number)
+		return {
+			DisplayName = name,
+			GetAttribute = function(_self, key: string)
+				if key == "InMatch" then
+					return "Dust"
+				elseif key == "TeamId" then
+					return team
+				elseif key == "MatchKills" then
+					return kills
+				end
+				return nil
+			end,
+		}
+	end
+
+	local function lobby(localKills: number)
+		player:SetAttribute("InMatch", "Dust")
+		-- Entering a match asks which side to take; the board waits for menus.
+		UIController.closeMenu("Side")
+		player:SetAttribute("TeamId", "A")
+		player:SetAttribute("MatchKills", localKills)
+		local roster = { player }
+		for index = 1, 9 do
+			table.insert(roster, fakePlayer(`Alpha{index}`, "A", index))
+		end
+		for index = 1, 10 do
+			table.insert(roster, fakePlayer(`Bravo{index}`, "B", index))
+		end
+		PlayersService.GetPlayers = function()
+			return roster
+		end
+	end
+
+	local function rowsOf(teamId: string): any
+		return board and board:FindFirstChild(teamId) and board[teamId]:FindFirstChild("Rows")
+	end
+
+	local function visibleRows(list: any): number
+		local count = 0
+		for _, row in list:GetChildren() do
+			if row.Name == "Row" and row.Visible then
+				count += 1
+			end
+		end
+		return count
+	end
+
+	local function canvasTop(list: any): number
+		local ok, position = pcall(function()
+			return list.CanvasPosition.Y
+		end)
+		return if ok then position else -1
+	end
+
+	local step = 30 + 4 -- a row and the gap under it
+
+	if board and scoreTap then
+		-- The last place on the team: nine others out-kill the local player.
+		lobby(0)
+		player:SetAttribute("InMatch", "Dust")
+		scoreTap.Activated:Fire()
+		check(board.Visible, "the board opens for a full lobby")
+
+		local listA, listB = rowsOf("A"), rowsOf("B")
+		check(listA ~= nil and listB ~= nil, "both teams have a list of rows")
+		if listA and listB then
+			for name, list in { A = listA, B = listB } do
+				check(list.ClassName == "ScrollingFrame", `team {name}'s rows scroll (they are a {list.ClassName})`)
+				check(
+					list.ClassName == "ScrollingFrame" and list.ScrollingDirection == roblox.Enum.ScrollingDirection.Y,
+					`team {name}'s rows scroll vertically only`
+				)
+				check(
+					list.ClassName == "ScrollingFrame" and list.AutomaticCanvasSize == roblox.Enum.AutomaticSize.Y,
+					`team {name}'s canvas grows with its rows`
+				)
+			end
+			check(board.ClipsDescendants, "nothing the board holds can be drawn outside it")
+
+			check(visibleRows(listA) == 10, `all ten of team A are listed (got {visibleRows(listA)})`)
+			check(visibleRows(listB) == 10, `all ten of team B are listed (got {visibleRows(listB)})`)
+
+			-- The local player is 10th of 10; opening the board scrolls to them
+			-- rather than leaving them below the fold.
+			local expected = 9 * step * UIController.scale
+			check(
+				math.abs(canvasTop(listA) - expected) < 1,
+				`the board scrolls to the local player's row (canvas at {canvasTop(listA)}, wanted {expected})`
+			)
+			check(canvasTop(listB) == 0, "and leaves the other team's list at the top")
+		end
+
+		scoreTap.Activated:Fire()
+		check(not board.Visible, "tapping again closes it")
+
+		-- First place: nothing to scroll to.
+		lobby(50)
+		scoreTap.Activated:Fire()
+		local listA2 = rowsOf("A")
+		check(listA2 ~= nil and canvasTop(listA2) == 0, "a player at the top of their team sees the top of the list")
+		scoreTap.Activated:Fire()
+
+		-- Far enough down to scroll, near enough that the row is on the first page.
+		lobby(8)
+		scoreTap.Activated:Fire()
+		local listA3 = rowsOf("A")
+		check(
+			listA3 ~= nil and canvasTop(listA3) == 0,
+			"a player who is on the first page of the list is not scrolled away from the top"
+		)
+		scoreTap.Activated:Fire()
+	end
+
+	PlayersService.GetPlayers = realGetPlayers
+	player:SetAttribute("InMatch", "")
+	player:SetAttribute("MatchKills", nil)
+end
+
+--------------------------------------------------------------------------------
+-- The scoreboard does not sit on top of a menu
+--
+-- It draws above the menus (its ScreenGui outranks them), so a Tab held with the
+-- shop open put the roster over the shop, and on a phone the tap zone over the
+-- timer stayed live over every panel and opened it from the panel's title bar.
+--------------------------------------------------------------------------------
+
+heading("Scoreboard and menus")
+
+if board and scoreTap then
+	player:SetAttribute("InMatch", "Dust")
+	UIController.closeMenu("Side")
+	InputController.ScoreboardHeld:Fire(false)
+	check(scoreTap.Visible, "in a match with nothing open the score can be tapped")
+
+	UIController.openMenu("Shop")
+	check(UIController.isAnyMenuOpen(), "the shop is open")
+	check(not scoreTap.Visible, "with a menu open the tap zone is out of the way")
+
+	scoreTap.Activated:Fire()
+	check(not board.Visible, "a tap that arrives anyway does not draw the board on an open menu")
+	InputController.ScoreboardHeld:Fire(true)
+	check(not board.Visible, "and neither does Tab held over it")
+	InputController.ScoreboardHeld:Fire(false)
+
+	UIController.closeMenu("Shop")
+	check(scoreTap.Visible, "closing the menu gives the score back its tap")
+	InputController.ScoreboardHeld:Fire(true)
+	check(board.Visible, "and Tab works again")
+	InputController.ScoreboardHeld:Fire(false)
+	check(not board.Visible, "letting go closes it")
+
+	-- The other order was already right, and stays right.
+	InputController.ScoreboardHeld:Fire(true)
+	UIController.openMenu("Shop")
+	check(not board.Visible, "a menu opening takes the board away")
+	UIController.closeMenu("Shop")
+	InputController.ScoreboardHeld:Fire(false)
+
+	-- A panel that closes itself (its own X) says so through notifyClosed, not
+	-- closeMenu; the tap zone has to come back for that path too.
+	UIController.openMenu("Shop")
+	shopOpen = false
+	UIController.notifyClosed("Shop")
+	check(scoreTap.Visible, "a menu that closed itself also gives the tap back")
+end
+player:SetAttribute("InMatch", "")
 
 --------------------------------------------------------------------------------
 -- A touchscreen laptop is not a phone
@@ -701,6 +886,55 @@ local laptopOk, laptopErr = pcall(function()
 
 	check(State.isTouch, "a touchscreen laptop still reports touch")
 	check(MouseLock.isEnabled(), "a touchscreen laptop keeps its cursor manager")
+
+	--[[
+		The same person sees the desktop chrome. ClientState.isTouch is plain
+		TouchEnabled, which is true here, and the side buttons and the welcome
+		card used to read it: no key badges, no cursor-release hint, a folded
+		hamburger and a card describing a thumbstick, to someone holding a mouse
+		and keyboard that the cursor manager above is already treating as one.
+	]]
+	check(type(State.isTouchOnly) == "function", "ClientState has one shared touch-only test")
+	check(
+		type(State.isTouchOnly) == "function" and not State.isTouchOnly(),
+		"a touchscreen laptop is not a touch-only device"
+	)
+
+	local LaptopUI = Env.load("src/client/UI/UIController")
+	LaptopUI.init()
+	local LaptopSide = Env.load("src/client/UI/Screens/SideButtonsScreen")
+	LaptopSide.init()
+	local LaptopWelcome = Env.load("src/client/UI/Screens/WelcomeScreen")
+	LaptopWelcome.init()
+
+	local sideRoot = LaptopUI.getScreenRoot("SideButtons"):FindFirstChild("Root")
+	local menu = sideRoot:FindFirstChild("Menu")
+	local list = menu:FindFirstChild("Buttons")
+	check(sideRoot:FindFirstChild("MouseHint").Visible, "the cursor-release hint is shown to a laptop")
+	check(LaptopSide.isExpanded(), "the side stack starts open on a laptop")
+	check(list.Visible, "and is on screen")
+	check(list:FindFirstChild("Shop"):FindFirstChild("KeyHint") ~= nil, "the buttons carry their key badges")
+	check(menu.AnchorPoint.Y == 0.5, "the stack is centred down the edge, not pinned to the corner")
+	check(list.Size.X.Offset == list.Shop.Size.X.Offset, "and runs down the edge, not along it")
+
+	local words = {}
+	for _, descendant in LaptopUI.getScreenRoot("WelcomeMenu"):GetDescendants() do
+		if descendant.ClassName == "TextLabel" then
+			words[descendant.Text] = true
+		end
+	end
+	check(words["W A S D  ·  Space"] == true, "the welcome card explains WASD to a laptop")
+	check(words["Левый стик"] == nil, "and does not describe a thumbstick")
+
+	-- Asked when used: a keyboard plugged into a tablet after boot changes the
+	-- answer, and nothing cached the old one.
+	local Input = Env.service("UserInputService")
+	Input.TouchEnabled, Input.MouseEnabled, Input.KeyboardEnabled = true, false, false
+	check(State.isTouchOnly(), "touch and nothing else is touch-only")
+	Input.KeyboardEnabled = true
+	check(not State.isTouchOnly(), "a keyboard makes it not touch-only, as soon as it is there")
+	Input.KeyboardEnabled, Input.MouseEnabled = false, true
+	check(not State.isTouchOnly(), "and so does a mouse")
 end)
 check(laptopOk, `the touchscreen laptop boots: {tostring(laptopErr)}`)
 

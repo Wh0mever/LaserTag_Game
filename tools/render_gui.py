@@ -16,7 +16,9 @@ chrome (top bar, thumbstick, jump button) drawn on top as guides — so a layout
 can be looked at before it ships instead of after.
 
 WHAT IT IMPLEMENTS of Roblox's layout: UDim2 position/size against the parent's
-content box, AnchorPoint, UIPadding, UIScale (on a ScreenGui and on objects),
+content box, AnchorPoint, UIPadding, UIScale (on objects, where it scales the
+object itself, Scale part included, and its descendants' offsets; directly
+under a ScreenGui it is drawn the pessimistic way, see Renderer.render),
 UIListLayout, UIGridLayout, UISizeConstraint, UIAspectRatioConstraint,
 AutomaticSize, ScrollingFrame canvases, ClipsDescendants, Rotation (whole
 subtree, about the centre), ZIndexBehavior.Sibling draw order, DisplayOrder
@@ -730,6 +732,17 @@ class Renderer:
             uiscale = mod(sc, "UIScale")
             s = uiscale["scale"] if uiscale and uiscale.get("scale") else 1.0
             pw, ph = self.vw, self.vh - top
+            # A UIScale directly under a ScreenGui is drawn the PESSIMISTIC way:
+            # it scales the Scale part of the ScreenGui's children as well as
+            # their pixel offsets, so a fromScale(1, 1) root covers only `s` of
+            # the screen. Whether the engine really does that is not known (the
+            # Lune sandbox has no layout engine), and drawing the kind answer is
+            # how a wrong tree used to come out looking clean. UIController
+            # therefore never puts a UIScale there - it hangs it on a host Frame
+            # sized 1/scale, which measure() below handles exactly - so this only
+            # shows up if someone puts one back, and then it shows up as a
+            # screen that stops short of the edge.
+            pw, ph = pw * s, ph * s
             for c in sc.get("children") or []:
                 measure(c, pw, ph, s)
                 pos = c.get("position") or [0, 0, 0, 0]
